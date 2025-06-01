@@ -1,0 +1,1 @@
+resources/meteo_api/weather_data_3hour.json filter=lfs diff=lfs merge=lfs -text

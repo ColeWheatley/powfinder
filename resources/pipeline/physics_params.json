@@ -1,0 +1,12 @@
+{
+  "lapse_rate_degC_per_km": -6.5,
+  "humidity_lapse_pct_per_km": 10.0,
+  "radiation_clear_fraction": 0.95,
+  "snowfall_orographic_factor": 0.3,
+  "wind_exposure_factor": 1.2,
+  "pressure_scale_height": 8400,
+  "freezing_level_gradient": 6.5,
+  "snow_accumulation_factor": 0.9,
+  "cloud_orographic_enhancement": 1.1,
+  "terrain_roughness_factor": 1.0
+}
