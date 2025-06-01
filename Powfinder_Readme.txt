@@ -5,7 +5,7 @@ Powfinder
 ## Repository Structure:
 * **Frontend**: `index.html`, `style.css`, `frontend.js` - Interactive web interface
 * **Core Services**: `gridService.js` - Data management and grid handling  
-* **Meteorological API**: `resources/meteo_api/` - Weather data API and peak locations
+* **Meteorological API**: `resources/meteo_api/` - Weather data API and peak locations (GeoJSON format from OpenStreetMap)
 * **Hillshade Processing**: `resources/hillshade/render_hillshade.py` - Solar illumination modeling
 * **Shadow Processing**: `resources/shadows/render_shadow_map.py` - Binary terrain obstruction mapping
 * **Terrain Data**: `resources/terrains/` - Multi-resolution DEM files (excluded from Git)
