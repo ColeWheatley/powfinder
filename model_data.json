@@ -1,0 +1,822 @@
+[
+  [
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.183780898188433,
+      "elevation": 3205,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.185101143035448,
+      "elevation": 3215,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.186421387882461,
+      "elevation": 3214,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.187741632729477,
+      "elevation": 3231,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.189061877576492,
+      "elevation": 3239,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.190382122423507,
+      "elevation": 3254,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.191702367270521,
+      "elevation": 3277,
+      "temperature_2m": -3.1,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.193022612117536,
+      "elevation": 3271,
+      "temperature_2m": -3.1,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.194342856964552,
+      "elevation": 3170,
+      "temperature_2m": -2.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96650194594595,
+      "lon": 11.195663101811565,
+      "elevation": 3109,
+      "temperature_2m": -2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.183780898188433,
+      "elevation": 3165,
+      "temperature_2m": -2.4,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.185101143035448,
+      "elevation": 3238,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.186421387882461,
+      "elevation": 3233,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.187741632729477,
+      "elevation": 3241,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.189061877576492,
+      "elevation": 3246,
+      "temperature_2m": -2.9,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.190382122423507,
+      "elevation": 3265,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.191702367270521,
+      "elevation": 3300,
+      "temperature_2m": -3.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.193022612117536,
+      "elevation": 3330,
+      "temperature_2m": -3.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.194342856964552,
+      "elevation": 3260,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.96740284684685,
+      "lon": 11.195663101811565,
+      "elevation": 3176,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.183780898188433,
+      "elevation": 3141,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.185101143035448,
+      "elevation": 3226,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.186421387882461,
+      "elevation": 3255,
+      "temperature_2m": -3,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.187741632729477,
+      "elevation": 3251,
+      "temperature_2m": -3,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.189061877576492,
+      "elevation": 3254,
+      "temperature_2m": -3,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.190382122423507,
+      "elevation": 3285,
+      "temperature_2m": -3.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.191702367270521,
+      "elevation": 3330,
+      "temperature_2m": -3.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.193022612117536,
+      "elevation": 3367,
+      "temperature_2m": -3.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.194342856964552,
+      "elevation": 3317,
+      "temperature_2m": -3.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.968303747747754,
+      "lon": 11.195663101811565,
+      "elevation": 3245,
+      "temperature_2m": -2.9,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.183780898188433,
+      "elevation": 3128,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.185101143035448,
+      "elevation": 3194,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.186421387882461,
+      "elevation": 3240,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.187741632729477,
+      "elevation": 3322,
+      "temperature_2m": -3.4,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.189061877576492,
+      "elevation": 3353,
+      "temperature_2m": -3.6,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.190382122423507,
+      "elevation": 3365,
+      "temperature_2m": -3.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.191702367270521,
+      "elevation": 3357,
+      "temperature_2m": -3.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.193022612117536,
+      "elevation": 3340,
+      "temperature_2m": -3.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.194342856964552,
+      "elevation": 3323,
+      "temperature_2m": -3.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.969204648648656,
+      "lon": 11.195663101811565,
+      "elevation": 3320,
+      "temperature_2m": -3.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.183780898188433,
+      "elevation": 3144,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.185101143035448,
+      "elevation": 3168,
+      "temperature_2m": -2.4,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.186421387882461,
+      "elevation": 3182,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.187741632729477,
+      "elevation": 3259,
+      "temperature_2m": -3,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.189061877576492,
+      "elevation": 3301,
+      "temperature_2m": -3.2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.190382122423507,
+      "elevation": 3369,
+      "temperature_2m": -3.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.191702367270521,
+      "elevation": 3320,
+      "temperature_2m": -3.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.193022612117536,
+      "elevation": 3306,
+      "temperature_2m": -3.3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.194342856964552,
+      "elevation": 3303,
+      "temperature_2m": -3.3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97010554954955,
+      "lon": 11.195663101811565,
+      "elevation": 3307,
+      "temperature_2m": -3.3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.183780898188433,
+      "elevation": 3103,
+      "temperature_2m": -2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.185101143035448,
+      "elevation": 3094,
+      "temperature_2m": -1.9,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.186421387882461,
+      "elevation": 3104,
+      "temperature_2m": -2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.187741632729477,
+      "elevation": 3172,
+      "temperature_2m": -2.4,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.189061877576492,
+      "elevation": 3205,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.190382122423507,
+      "elevation": 3270,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.191702367270521,
+      "elevation": 3287,
+      "temperature_2m": -3.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.193022612117536,
+      "elevation": 3272,
+      "temperature_2m": -3.1,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.194342856964552,
+      "elevation": 3271,
+      "temperature_2m": -3.1,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97100645045045,
+      "lon": 11.195663101811565,
+      "elevation": 3259,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.183780898188433,
+      "elevation": 3057,
+      "temperature_2m": -1.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.185101143035448,
+      "elevation": 3059,
+      "temperature_2m": -1.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.186421387882461,
+      "elevation": 3064,
+      "temperature_2m": -1.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.187741632729477,
+      "elevation": 3097,
+      "temperature_2m": -2,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.189061877576492,
+      "elevation": 3119,
+      "temperature_2m": -2.1,
+      "windspeed_2m": 11,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.190382122423507,
+      "elevation": 3204,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.191702367270521,
+      "elevation": 3248,
+      "temperature_2m": -3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.193022612117536,
+      "elevation": 3231,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.194342856964552,
+      "elevation": 3229,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.971907351351355,
+      "lon": 11.195663101811565,
+      "elevation": 3221,
+      "temperature_2m": -2.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.183780898188433,
+      "elevation": 3038,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.185101143035448,
+      "elevation": 3035,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.186421387882461,
+      "elevation": 3039,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.187741632729477,
+      "elevation": 3060,
+      "temperature_2m": -1.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.189061877576492,
+      "elevation": 3080,
+      "temperature_2m": -1.9,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.190382122423507,
+      "elevation": 3153,
+      "temperature_2m": -2.3,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.191702367270521,
+      "elevation": 3203,
+      "temperature_2m": -2.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.193022612117536,
+      "elevation": 3181,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.194342856964552,
+      "elevation": 3183,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97280825225226,
+      "lon": 11.195663101811565,
+      "elevation": 3175,
+      "temperature_2m": -2.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.183780898188433,
+      "elevation": 3028,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.185101143035448,
+      "elevation": 3022,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.186421387882461,
+      "elevation": 3022,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.187741632729477,
+      "elevation": 3035,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.189061877576492,
+      "elevation": 3049,
+      "temperature_2m": -1.6,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.190382122423507,
+      "elevation": 3105,
+      "temperature_2m": -2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.191702367270521,
+      "elevation": 3137,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.193022612117536,
+      "elevation": 3126,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.194342856964552,
+      "elevation": 3134,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97370915315316,
+      "lon": 11.195663101811565,
+      "elevation": 3129,
+      "temperature_2m": -2.2,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ],
+  [
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.183780898188433,
+      "elevation": 3022,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.185101143035448,
+      "elevation": 3011,
+      "temperature_2m": -1.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.186421387882461,
+      "elevation": 3008,
+      "temperature_2m": -1.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.187741632729477,
+      "elevation": 3015,
+      "temperature_2m": -1.4,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.189061877576492,
+      "elevation": 3026,
+      "temperature_2m": -1.5,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.190382122423507,
+      "elevation": 3066,
+      "temperature_2m": -1.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.191702367270521,
+      "elevation": 3058,
+      "temperature_2m": -1.7,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.193022612117536,
+      "elevation": 3068,
+      "temperature_2m": -1.8,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.194342856964552,
+      "elevation": 3089,
+      "temperature_2m": -1.9,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    },
+    {
+      "lat": 46.97461005405406,
+      "lon": 11.195663101811565,
+      "elevation": 3079,
+      "temperature_2m": -1.9,
+      "windspeed_2m": 9.8,
+      "timestamp": "2025-05-27T16:15"
+    }
+  ]
+]
