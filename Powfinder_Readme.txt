@@ -38,24 +38,58 @@ Data Layers and Sources
 
 1. Terrain (DEM) Data
 * Source: Original 5-meter resolution Digital Elevation Model (DEM) of Tirol (DGM Tirol, EPSG:31254).
-* Processed Resolutions: 5m, 20m, 100m  reprojected into web-friendly WGS84 projection.
+* Processed Resolutions: 5m, 25m, 100m  reprojected into web-friendly WGS84 projection.
 * Processed Terrain Layers:
 o Elevation: Raw elevation data at multiple resolutions.
 o Slope: Computed slope angle (in degrees) from elevation at all resolutions.
 o Aspect: Computed compass direction slope faces (North, South, etc.) at all resolutions.
 o Hillshade: Computed solar illumination (dot product of sun vector and surface normal) at multiple resolutions - models direct sunlight.
 o Shadow Maps: Binary terrain obstruction shadows using GRASS GIS r.sun beam radiation - identifies areas blocked by terrain features at specific times.
-o Wind Vulnerability: (Next step) Computed via terrain analysis or ray-casting for dominant wind directions (planned at coarser resolution).
 
 2. Weather Data
 * Source: Open-Meteo API (forecast and historical weather).
-* Variables: Temperature (2m and altitude-adjusted), snowfall, snow depth, wind speed, wind direction, shortwave radiation, relative humidity, dew point, among others.
-* Time Resolution: Forecast data at 3-hour intervals, historical data at hourly or 3-hour intervals.
-* Spatial Resolution: Forecasts acquired primarily at peak points (high-altitude locations) and selectively extrapolated to surrounding terrain.
+* Variables: temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snow_depth, snowfall, wind_speed_10m, weather_code, freezing_level_height, surface_pressure
+* Time Resolution: Hourly API data averaged over 3-hour periods to match shadow time periods (07:30, 10:30, 13:30, 16:30)
+* Spatial Resolution: Forecasts acquired at peak points (high-altitude locations) and random terrain sampling, then extrapolated to surrounding terrain.
+* Date Range: May 14-28, 2025 (5 days forward from May 23rd for realistic forecast duration, then 14 days back due to API historical limits)
+
+## Weather API Strategy and Implementation:
+### Comprehensive Sampling System:
+* **Peak-Based Sampling**: 3,000 highest peaks from OpenStreetMap `tirol_peaks.geojson` provide natural ski-touring locations
+* **Random Terrain Sampling**: 2,000 scientifically generated random coordinates covering Tirol's DEM boundaries
+* **Combined Coverage**: Total of 5,000 strategic sampling points for comprehensive weather monitoring
+* **API Allocation**: 5,000 calls/hour limit allows strategic sampling of most relevant locations
+
+### Random Coordinate Generation:
+* **Elevation Filtering**: All 2,000 random points above 2,300m elevation (ski-relevant terrain)
+* **Proximity Control**: Minimum 250m separation between points to avoid redundancy
+* **Grid Alignment**: Coordinates snapped to 5m DEM grid for precise terrain matching
+* **Boundary Validation**: All points guaranteed within Tirol DEM boundaries
+* **Quality Metrics**: Average elevation 2,634m, range 2,300-3,522m, 9.7% generation success rate
+
+### API Implementation Status:
+* ✅ **Weather API Operational**: Successfully tested and debugged Open-Meteo integration with robust resumable collection system
+* ✅ **Data Collection Infrastructure**: Comprehensive weather collection script with retry logic and internet interruption handling
+* ✅ **Peak Data Enhanced**: Using 3,000 highest peaks from comprehensive OpenStreetMap dataset
+* ✅ **Random Coordinates Generated**: 2,000 scientific sampling points with elevation/proximity controls and reproducible seeding
+* ✅ **Coordinate Validation**: All 5,000 coordinates validated and ready for weather data collection
+* ✅ **API Rate Management**: Confirmed 5,000 calls/hour allocation with optimized rate limiting (0.5s delays)
+* 🔄 **Weather Data Collection**: Robust resumable collection system ready for full 5,000-coordinate dataset
+* 🔄 **Physics Extrapolation Pipeline**: Weather extrapolation system development for comprehensive coverage
+* 🔄 **Server API Development**: REST endpoints for efficient weather data serving
+
+### Technical Details:
+* **File Locations**: 
+  - Peak data: `resources/meteo_api/tirol_peaks.geojson` (3,000 highest peaks)
+  - Random coordinates: `resources/meteo_api/random_coordinates.json` (2,000 points)
+  - Weather collection: `resources/meteo_api/collect_weather_data.py` (resumable collection system)
+* **Coordinate Generation**: Python script with GDAL/OSR coordinate transformation, DEM validation, and reproducible seeding (RANDOM_SEED = 42069)
+* **Weather Parameters**: temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snow_depth, snowfall, wind_speed_10m, weather_code, freezing_level_height, surface_pressure
+* **Time Coverage**: May 14-28, 2025 (5 days forward + 14 days back from May 23rd analysis date due to API forecast/historical limits)
 
 3. Derived Metrics (SQH and Skiability)
-* Snow Quality Heuristic (SQH): Integrates snowfall, temperature, settling, wind scouring, and solar radiation to approximate snowpack quality and depth.
-* Skiability Index: Further integrates day-of conditions (wind, visibility, sunshine) to give a single, intuitive metric for skiing suitability.
+* Snow Quality Heuristic (SQH): Integrates snowfall, temperature, settling, wind scouring, and solar radiation to approximate snowpack quality and depth. (Implementation after raw weather data displays successfully)
+* Skiability Index: Further integrates day-of conditions (wind, visibility, sunshine) to give a single, intuitive metric for skiing suitability. (Implementation after raw weather data displays successfully)
 
 Current State of Project (serverside-refactor branch)
 
@@ -67,6 +101,8 @@ Current State of Project (serverside-refactor branch)
 * ✅ **Terrain processing pipeline**: Complete DEM processing at 5m, 25m, 100m resolutions with slope/aspect calculations
 * ✅ **Data management**: Large terrain/shadow files (~32GB) properly excluded from Git repository
 * ✅ **File organization**: Weather API and peak data moved to `resources/meteo_api/`, separate directories for hillshade and shadow processing
+* ✅ **Weather API system**: Operational Open-Meteo integration with robust resumable collection system (3,000 highest peaks + 2,000 random coordinates)
+* ✅ **Random coordinate generation**: 2,000 scientifically generated sampling points above 2,300m with proximity controls, DEM validation, and reproducible seeding
 * 🔄 **Shadow map production**: Optimized shadow processing currently running with horizon pre-computation for dramatic performance improvement
 * 🔄 **Frontend streamlined**: Interactive web map with OpenLayers maintained but simplified for preprocessed data consumption
 * 📅 **Demo date set**: Using May 23rd, 2025 for retroactive skiing condition analysis (skiing confirmation: May 24th)
@@ -78,11 +114,6 @@ Current State of Project (serverside-refactor branch)
 * **Data preprocessing pipeline**: Automate weather fetching, extrapolation, and snow quality calculations for MacBook demo
 * **Frontend integration**: Update client to consume server-processed data instead of doing calculations in browser
 
-## Longer-Term Goals:
-* **MacBook demo optimization**: Performance tuning for local classroom demonstration
-* **Advanced terrain analysis**: Wind vulnerability and exposure calculations
-* **Enhanced visualization**: Improved map rendering and user interaction features
-* **Data validation**: Cross-reference with actual skiing conditions from May 24th field test
 
 Tiling Strategy and Resolution Management
 
@@ -90,24 +121,22 @@ Rationale:
 
 Due to significant differences in required spatial resolution for various terrain features and weather variables, a multi-resolution approach was adopted:
 * 5m Resolution: Reserved for high-altitude, steep, skiing-relevant terrain.
-* 20m Resolution: Medium-detail data�likely the core spatial resolution for weather and derived products (slope/aspect/shadow).
+* 25m Resolution: Medium-detail data�likely the core spatial resolution for weather and derived products (slope/aspect/shadow).
 * 100m Resolution: Low-detail context data�useful for zoomed-out views or flat, non-ski-relevant terrain areas.
 
 Elevation-Based Tile Flagging Strategy:
-
-Tiles at higher resolutions (5m, 50m) are selectively generated only where the lowest elevation within a tile is greater than a chosen threshold (~2300m). This strategy ensures we never serve unnecessary high-resolution data for irrelevant terrain. Tiles flagged as relevant are stored and indexed for fast retrieval.
+Tiles at higher resolutions (5m, 25m) are selectively generated only where the lowest elevation within a tile is greater than a chosen threshold (~2300m). This strategy ensures we never serve unnecessary high-resolution data for irrelevant terrain. Tiles flagged as relevant are stored and indexed for fast retrieval.
 
 Future Considerations and Improvements
-* Data Update Frequency: Implement automatic daily or sub-daily fetching of fresh weather data from Open-Meteo API. Long term goal. Right now manual fetching.
-* Interactive Features: Provide sliders or toggles to dynamically adjust displayed variables or time-frames.
-* Advanced Extrapolation Models: Upgrade from basic physics-based extrapolation to more advanced models informed by field observations and ML algorithms.
-* Offline and Mobile Support: Consider progressive web app (PWA) features, caching strategies, and efficient data formats (such as Zarr or Cloud-optimized GeoTIFF).
+
+* Advanced Extrapolation Models: Upgrade from basic physics-based extrapolation to more advanced models informed by field observations and ML algorithms. We will eventually use the residuals and reserved validaiton points to build a machine learning model. 
+* Possibly long term integrating real past readings from weather stations to improve the accuracy of the extrapolation from the nueral network beyond that of ICON model
 
 Technical Stack and Current Architecture
 
 ## Data Processing (MacBook Local):
 * **Python Environment**: `conda activate powfinder` (Python 3.11.12)
-* **Key Dependencies**: rasterio, geopandas, pysolar, whitebox, pyproj, matplotlib, grass-session (GRASS GIS)
+* **Key Dependencies**: rasterio, geopandas, pysolar, whitebox, pyproj, matplotlib, grass-session, requests, scipy, scikit-learn
 * **Python/GDAL**: Terrain processing, hillshade generation, raster calculations
 * **GRASS GIS**: Binary shadow map generation using r.sun beam radiation analysis
 * **Storage**: Multi-resolution GeoTIFF files (5m, 25m, 100m) with optimized projections
@@ -115,41 +144,73 @@ Technical Stack and Current Architecture
 * **Hillshade System**: Solar illumination modeling using dot product calculations for direct sunlight simulation
 * **Shadow System**: Binary terrain obstruction mapping using GRASS GIS r.sun with horizon pre-computation and 2.7km distance limiting for ski-relevant terrain analysis
 * **Optimization Implementation**: Horizon calculated once with 15° azimuth steps, then reused across all 4 time periods for dramatic performance improvement
-* **Weather Integration**: Open-Meteo API with physics-based extrapolation for May 23rd conditions
+* **Weather Integration**: Open-Meteo API with resumable collection system and physics-based extrapolation for May 14-28, 2025 conditions
 
 ## Frontend (Client-Side):
 * **Mapping**: OpenLayers for interactive map visualization
 * **Grid System**: Unified grid management for efficient data handling
 * **Weather API**: Streamlined weather data consumption from `resources/meteo_api/`
-* **Caching**: Local storage optimization for map performance
 
 ## Development Status:
-* **Repository**: Clean separation of large data files (~32GB) from codebase
-* **Branching**: serverside-refactor branch ready for MacBook demo deployment
-* **Processing Scripts**: Complete terrain and hillshade generation pipeline
-* **Demo Date**: May 23rd, 2025 configured for retroactive skiing analysis
+* **Repository**: Clean separation of large data files (~32GB) from codebase by excluding TIF files in `.gitignore`
+# liberal use of branching to save progressive development states
 
 Current Action Items (Priority Order):
 
-## Phase 1 - MacBook Demo Infrastructure:
 * ✅ Complete terrain data processing pipeline
 * ✅ Implement hillshade generation system  
 * ✅ Develop binary shadow mapping system (terrain obstruction)
 * ✅ Optimize shadow processing with horizon pre-computation and distance limiting
-* 🔄 Complete shadow map production for all time periods (currently running optimized process)
+* ✅ Complete weather API debugging and parameter validation
+* ✅ Build robust resumable weather collection system
+* ✅ Generate 5,000 validated coordinates (3,000 peaks + 2,000 random points)
+* 🔄 Execute full weather data collection for all 5,000 coordinates (May 14-28, 2025) (Currently downloading - halfway done and 2000 saved to current branch) 
+* 🔄 Develop physics-based weather extrapolation system (6-script pipeline) - leave in room for shadow map. 
+* 🔄 Create progressive grid scheduler for multi-resolution weather mapping
+* 🔄 Implement weather map visualization system (gradient images for all variables)
+* 🔄 Build parameter tuning system for physics-based extrapolation
 * 🔄 Create local API for data serving
-* 🔄 Set up May 23rd weather data preprocessing
-* 🔄 Configure snow quality calculations for demo date
+* 🔄 Integrate raw weather data display before derived metrics implementation
 
-## Phase 2 - Demo Integration:
-* 🔄 Update client to consume preprocessed data
-* 🔄 Optimize map rendering for MacBook performance
-* 🔄 Validate against May 24th skiing field conditions
-* 🔄 Prepare classroom demonstration interface
+Instructions for upcoming 6 script pipeline: 
+## Weather–Extrapolation Processing Pipeline  (6 fully-interoperable scripts)
 
-## Phase 3 - Enhancement Features:
-* 🔄 Wind vulnerability analysis integration
-* 🔄 Advanced terrain obstruction modeling
-* 🔄 Enhanced visualization and interaction
-* 🔄 Performance optimization for real-time demo
+All scripts live in **`resources/pipeline/`** and communicate **only** via the
+explicitly named files below.  Every file is JSON, CSV or GeoTIFF so that any
+developer can swap scripts without breakage.
 
+| No | Script (CLI entry-point)                | Input(s)                                              | Output(s)                                                        | Purpose (2-line definition)                                                                                                                |
+|----|----------------------------------------|-------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| 1  | `progressive_grid_scheduler.py`        | • `all_points.json`  – array of `{lat,lon,elev,type,is_validation}`<br>• `grid_bounds.json` – `{minLat,maxLat,minLon,maxLon}` | `task_queue.json` – ordered list of tasks:<br>`{"lat":…,"lon":…,"task":"validate" \| "grid_1000" \| "grid_500" \| "grid_100" \| "grid_25"}` | Build a **priority queue**: all validation points first, then 1 km grid, then 500 m, 100 m, 25 m.  Guarantees deterministic order and idempotent reruns. |
+| 2  | `physics_extrapolate.py`               | • single task (lat,lon) via CLI args **or** stdin JSON<br>• `physics_params.json` (coefficients: lapse_rate, rad_scale, etc.)<br>• `raw_api_index.csv` – rows `{lat,lon,file}` linking pings to JSON<br>• DEM tiles (rasterio readable) | writes **stdout JSON**:<br>`{"lat":…,"lon":…,"variable_dict":{temp_2m:…, …}}` | Find ≤2 nearest non validation API points, apply parameterised physics (elevation lapse, humidity lapse, radiation mask) to predict the ten target variables at the target coordinate. |
+| 3  | `process_task_queue.py`                | • `task_queue.json`<br>• directory `raw_api/` containing original API JSONs (names from `raw_api_index.csv`) | • `predictions.csv` – every processed task, cols `{lat,lon,time,var1…var10}`<br>• `residuals.csv` – rows for `task=="validate"` with extra `actual_*` and `error_*` columns | Iterates queue.  For each task: calls `physics_extrapolate.py`.  If it is a validation point, loads the matching raw API JSON, calculates residuals, logs both.  Safe to resume (keeps a `.done` log). |
+| 4  | `analyze_residuals.py`                 | • `residuals.csv`                                     | • `residual_summary.json` (MAE, RMSE per variable & elevation band)<br>• `histogram_errors.png`, `scatter_error_vs_elev.png` | Compute and plot error diagnostics; writes summary JSON for dashboards and optimisation. |
+| 5  | `tune_physics_params.py`  *(optional)* | • `residuals.csv`<br>• `physics_params.json`           | • overwrites `physics_params.json` with improved coefficients   | Grid-search / optimiser that minimises RMSE on residuals, ready for a second processing pass. |
+| 6  | `interpolate_layers.py`                | • `predictions.csv`  (dense & sparse points)<br>• `high_altitude_mask.tif` (>2 300 m = 1, else 0)<br>• `tirol_boundary.geojson` | • One GeoTIFF **per variable × time slice** (e.g. `t2m_20250523T1200.tif`) at 50 m<br>• Matching colour-mapped PNGs (same name, `.png`) | IDW/RBF interpolation onto a 50 m raster, masked to >2 300 m & Tirol border, then colour-renders each raster.  These images become ready-made map layers. |
+
+**Data/parameter conventions**
+
+*   All scripts read **`physics_params.json`** (same directory) which defines tunable coefficients:  
+    ```json
+    {
+      "lapse_rate_degC_per_km": -6.5,
+      "humidity_lapse_pct_per_km": -5,
+      "radiation_clear_fraction": 1.0,
+      "snowfall_orographic_factor": 0.1
+    }
+    ```
+    Add new keys freely; every script must ignore unknown keys.
+
+*   Raw API files are one-per-coordinate:<br>
+    `raw_api/47.26890_11.40123.json` *(unchanged by pipeline)*
+
+*   DEM is consumed read-only (via rasterio) from `resources/terrains/dem_25m_wgs84.tif`.
+
+Running the full chain in order:
+
+```bash
+python progressive_grid_scheduler.py
+python process_task_queue.py        # (internally spawns physics_extrapolate)
+python analyze_residuals.py
+python tune_physics_params.py       # optional
+python interpolate_layers.py

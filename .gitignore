@@ -1,6 +1,9 @@
 # Large terrain and shadow data files (keep local only)
 # These files are too large for GitHub (some over 10GB)
 
+# Weather data collection files (large datasets)
+resources/meteo_api/weather_data_collection.json
+
 # Shadow data files
 resources/shadows/*.tif
 
