@@ -7,12 +7,19 @@ resources/meteo_api/weather_data_collection.json
 # Shadow data files
 resources/shadows/*.tif
 
-# Hillshade data files
-resources/hillshade/*.tif
+# Hillshade data files (allow 100m, exclude larger resolutions)
+resources/hillshade/*25m*.tif
+resources/hillshade/*5m*.tif
 
-# Large terrain files  
-resources/terrains/*.tif
+# Large terrain files (allow 100m, exclude larger resolutions)
+resources/terrains/*25m*.tif
+resources/terrains/*5m*.tif
+resources/terrains/DGM_Tirol_*.tif
 resources/terrains/*.tfw
+
+# Allow 100m resolution files for frontend use
+!resources/hillshade/*100m*.tif
+!resources/terrains/*100m*.tif
 
 # Node modules
 node_modules/
