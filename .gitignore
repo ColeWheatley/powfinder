@@ -6,9 +6,6 @@ resources/meteo_api/weather_data_collection.json
 # 3-hour aggregated file is too large for GitHub (165MB)
 resources/meteo_api/weather_data_3hour.json
 
-# Add original 3-hour file (over 100MB, must not be tracked)
-resources/meteo_api/weather_data_3hour_original.json
-
 # Shadow data files
 resources/shadows/*.tif
 

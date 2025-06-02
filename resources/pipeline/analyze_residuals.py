@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from pathlib import Path
 import sys
+from datetime import datetime
 
 # --- Configuration ---
 WEATHER_VARIABLES = [ # Should match process_task_queue.py for consistency
@@ -17,9 +18,15 @@ WEATHER_VARIABLES = [ # Should match process_task_queue.py for consistency
 THIS_DIR = Path(__file__).parent.resolve()
 RESIDUALS_CSV_PATH = THIS_DIR / "residuals.csv"
 ALL_POINTS_JSON_PATH = THIS_DIR.parent / "meteo_api" / "all_points.json" # ../meteo_api/all_points.json
-SUMMARY_JSON_PATH = THIS_DIR / "residual_summary.json"
-HISTOGRAM_PLOT_PATH = THIS_DIR / "histogram_errors.png"
-SCATTER_ELEV_PLOT_PATH = THIS_DIR / "scatter_error_vs_elev.png"
+
+# Create analysis directory with timestamp
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+ANALYSIS_DIR = THIS_DIR / "analysis" / f"run_{TIMESTAMP}"
+ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
+
+SUMMARY_JSON_PATH = ANALYSIS_DIR / "residual_summary.json"
+HISTOGRAM_PLOT_PATH = ANALYSIS_DIR / "histogram_errors.png"
+SCATTER_ELEV_PLOT_PATH = ANALYSIS_DIR / "scatter_error_vs_elev.png"
 
 def load_data(residuals_file_path, all_points_file_path):
     """Loads residuals and merges elevation data."""
@@ -206,6 +213,7 @@ def plot_scatter_elevation(df, output_path):
 
 def main():
     print("Starting residual analysis...")
+    print(f"Analysis results will be saved to: {ANALYSIS_DIR}")
 
     # Load data
     data_df = load_data(RESIDUALS_CSV_PATH, ALL_POINTS_JSON_PATH)
@@ -223,9 +231,18 @@ def main():
 
     # Calculate error metrics
     error_metrics = calculate_error_metrics(data_df)
+    
+    # Add metadata to the summary
+    summary_data = {
+        "timestamp": TIMESTAMP,
+        "analysis_date": datetime.now().isoformat(),
+        "total_validation_points": len(data_df),
+        "metrics": error_metrics
+    }
+    
     try:
         with open(SUMMARY_JSON_PATH, 'w') as f:
-            json.dump(error_metrics, f, indent=4)
+            json.dump(summary_data, f, indent=4)
         print(f"Saved error metrics to {SUMMARY_JSON_PATH}")
     except Exception as e:
         print(f"Error saving summary JSON to {SUMMARY_JSON_PATH}: {e}", file=sys.stderr)
@@ -234,7 +251,26 @@ def main():
     plot_histograms(data_df, HISTOGRAM_PLOT_PATH)
     plot_scatter_elevation(data_df, SCATTER_ELEV_PLOT_PATH)
 
+    # Create a latest symlink for easy access to most recent analysis
+    latest_link = THIS_DIR / "analysis" / "latest"
+    if latest_link.exists() or latest_link.is_symlink():
+        latest_link.unlink()
+    try:
+        latest_link.symlink_to(ANALYSIS_DIR.name)
+        print(f"Created symlink to latest analysis: {latest_link}")
+    except Exception as e:
+        print(f"Warning: Could not create latest symlink: {e}")
+
     print("Residual analysis finished.")
+    print(f"Results saved in: {ANALYSIS_DIR}")
+    
+    # Print summary metrics for quick reference
+    print("\n=== Quick Summary ===")
+    for var, metrics in error_metrics.items():
+        if metrics["mae"] is not None and metrics["rmse"] is not None:
+            print(f"{var:20s}: MAE={metrics['mae']:8.4f}, RMSE={metrics['rmse']:8.4f}")
+        else:
+            print(f"{var:20s}: No valid data")
 
 if __name__ == "__main__":
     # For direct execution, we might need to create dummy input files
