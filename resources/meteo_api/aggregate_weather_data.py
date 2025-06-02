@@ -22,9 +22,11 @@ Aggregation Methods:
 - Freezing Level: Average over 3-hour period
 
 Time Periods:
-The 24-hour day is divided into 8 periods of 3 hours each:
-- 00:00-03:00, 03:00-06:00, 06:00-09:00, 09:00-12:00
-- 12:00-15:00, 15:00-18:00, 18:00-21:00, 21:00-24:00
+The 24-hour day is divided into 8 periods of 3 hours each, using median times:
+- 01:30 (00:00-03:00), 04:30 (03:00-06:00), 07:30 (06:00-09:00), 10:30 (09:00-12:00)
+- 13:30 (12:00-15:00), 16:30 (15:00-18:00), 19:30 (18:00-21:00), 22:30 (21:00-24:00)
+
+Using median times provides the most representative timestamp for shadows and other calculations.
 
 EXAMPLE:
     # First collect hourly weather data
@@ -116,7 +118,7 @@ def aggregate_values(values, method):
         raise ValueError(f"Unknown aggregation method: {method}")
 
 def create_3hour_timestamps(hourly_times):
-    """Create 3-hour period timestamps from hourly timestamps."""
+    """Create 3-hour period timestamps from hourly timestamps using median times."""
     if not hourly_times:
         return []
     
@@ -130,11 +132,13 @@ def create_3hour_timestamps(hourly_times):
     # Parse last timestamp to get ending point
     end_time = parse_iso_datetime(hourly_times[-1])
     
-    # Generate 3-hour periods covering all hourly data
+    # Generate 3-hour periods using median times (start + 1.5 hours)
     periods = []
     current = period_start
     while current <= end_time:
-        periods.append(current.isoformat().replace('+00:00', 'Z'))
+        # Use median time of the 3-hour period (start + 1.5 hours)
+        median_time = current + timedelta(hours=1, minutes=30)
+        periods.append(median_time.isoformat().replace('+00:00', 'Z'))
         current += timedelta(hours=3)
     
     return periods
