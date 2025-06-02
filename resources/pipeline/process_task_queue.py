@@ -8,10 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 # --- Configuration ---
 TARGET_TIMESTAMPS = [
-    "2025-05-23T07:30:00",
-    "2025-05-23T10:30:00",
-    "2025-05-23T13:30:00",
-    "2025-05-23T16:30:00"
+    "2025-05-23T06:00:00",
+    "2025-05-23T09:00:00",
+    "2025-05-23T12:00:00",
+    "2025-05-23T15:00:00"
 ]
 WEATHER_VARIABLES = [
     "temperature_2m", "relative_humidity_2m", "shortwave_radiation",
@@ -88,7 +88,8 @@ def get_3hourly_weather_data(weather_data_for_coord, target_dt_object, weather_v
         print(f"Warning: Insufficient weather data for coord for {target_dt_object.isoformat()}.", file=sys.stderr)
         return None
 
-    target_timestamp_str = target_dt_object.isoformat()  # Plain ISO format to match weather data
+    # Convert to naive datetime string to match weather data format
+    target_timestamp_str = target_dt_object.replace(tzinfo=None).isoformat()  # Remove timezone for matching
     hourly_times_str = weather_data_for_coord['hourly']['time']
     
     # Find exact timestamp match
@@ -96,6 +97,7 @@ def get_3hourly_weather_data(weather_data_for_coord, target_dt_object, weather_v
         matching_idx = hourly_times_str.index(target_timestamp_str)
     except ValueError:
         print(f"Warning: Could not find exact timestamp {target_timestamp_str} in weather data.", file=sys.stderr)
+        print(f"         Available timestamps: {hourly_times_str[:4]}...", file=sys.stderr)
         return None
     
     # Extract values for this timestamp
@@ -199,12 +201,15 @@ def main():
 
                     # Convert target_timestamp_str to datetime object for aggregation and potential use
                     try:
-                        # Ensure target_timestamp_str is treated as UTC if naive
+                        # Parse naive datetime and treat as UTC
                         if 'Z' not in target_timestamp_str and '+' not in target_timestamp_str:
-                            target_dt = datetime.fromisoformat(target_timestamp_str + 'Z')
+                            target_dt = datetime.fromisoformat(target_timestamp_str).replace(tzinfo=timezone.utc)
                         else:
-                            target_dt = datetime.fromisoformat(target_timestamp_str)
-                        target_dt = target_dt.astimezone(timezone.utc) if target_dt.tzinfo is None else target_dt
+                            # Handle timezone-aware strings
+                            if target_timestamp_str.endswith('Z'):
+                                target_dt = datetime.fromisoformat(target_timestamp_str[:-1]).replace(tzinfo=timezone.utc)
+                            else:
+                                target_dt = datetime.fromisoformat(target_timestamp_str)
                     except ValueError as e:
                         print(f"Error parsing target_timestamp_str '{target_timestamp_str}': {e}. Skipping this timestamp.", file=sys.stderr)
                         continue
