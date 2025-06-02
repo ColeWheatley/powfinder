@@ -26,7 +26,7 @@ TASK_QUEUE_PATH = THIS_DIR / "task_queue.json"
 PREDICTIONS_CSV_PATH = THIS_DIR / "predictions.csv"
 PHYSICS_EXTRAPOLATE_SCRIPT_PATH = THIS_DIR / "physics_extrapolate.py"
 RESUME_LOG_FILE = THIS_DIR / "processed_tasks.log"
-RAW_WEATHER_DATA_FILE = THIS_DIR.parent / "meteo_api" / "weather_data_collection.json" # Adjusted path
+RAW_WEATHER_DATA_FILE = THIS_DIR.parent / "meteo_api" / "weather_data_3hour.json" # Use 3-hour aggregated data
 RESIDUALS_CSV_FILE = THIS_DIR / "residuals.csv"
 
 
@@ -36,10 +36,28 @@ def load_raw_weather_data(file_path):
     try:
         with open(file_path, 'r') as f:
             raw_data_collection = json.load(f)
-        for entry in raw_data_collection:
+        
+        # Handle different data structures
+        if isinstance(raw_data_collection, dict) and 'coordinates' in raw_data_collection:
+            # 3-hour aggregated data format
+            entries = raw_data_collection['coordinates']
+        elif isinstance(raw_data_collection, list):
+            # Direct array format
+            entries = raw_data_collection
+        else:
+            raise ValueError(f"Unexpected data structure in {file_path}")
+            
+        for entry in entries:
             # Using float for lat/lon keys for consistency, ensure they are rounded if needed
-            key = (float(entry['latitude']), float(entry['longitude']))
-            data_by_coord[key] = entry
+            if 'coordinate_info' in entry:
+                # New nested structure format
+                coord_info = entry['coordinate_info']
+                key = (float(coord_info['latitude']), float(coord_info['longitude']))
+                data_by_coord[key] = entry['weather_data_3hour']
+            else:
+                # Direct format
+                key = (float(entry['latitude']), float(entry['longitude']))
+                data_by_coord[key] = entry
         print(f"Successfully loaded raw weather data for {len(data_by_coord)} locations from {file_path}")
     except FileNotFoundError:
         print(f"Warning: Raw weather data file not found at {file_path}. Validation tasks will be skipped.", file=sys.stderr)
@@ -61,65 +79,42 @@ def load_processed_log(file_path):
         print(f"Resume log {file_path} not found. Starting fresh.")
     return processed_keys
 
-def aggregate_hourly_to_3hourly(raw_hourly_data_for_coord, target_dt_object, weather_variables_list):
+def get_3hourly_weather_data(weather_data_for_coord, target_dt_object, weather_variables_list):
     """
-    Aggregates hourly data to 3-hourly averages around the target_dt_object.
-    target_dt_object should be timezone-aware (UTC).
+    Extracts 3-hourly weather data for the target timestamp.
+    Now expects exact timestamp matches since weather data uses median times.
     """
-    aggregated_values = {}
-    if not raw_hourly_data_for_coord or 'hourly' not in raw_hourly_data_for_coord or 'time' not in raw_hourly_data_for_coord['hourly']:
-        print(f"Warning: Insufficient raw hourly data for coord to aggregate for {target_dt_object.isoformat()}.", file=sys.stderr)
+    if not weather_data_for_coord or 'hourly' not in weather_data_for_coord or 'time' not in weather_data_for_coord['hourly']:
+        print(f"Warning: Insufficient weather data for coord for {target_dt_object.isoformat()}.", file=sys.stderr)
         return None
 
-    hourly_times_str = raw_hourly_data_for_coord['hourly']['time']
-
-    # Ensure raw hourly times are parsed as UTC datetime objects
-    hourly_datetimes = []
-    for t_str in hourly_times_str:
-        try:
-            # Assume raw times are ISO format and UTC. Add 'Z' if naive.
-            if 'Z' not in t_str and '+' not in t_str:
-                 dt = datetime.fromisoformat(t_str + 'Z') # Assume UTC if naive
-            else:
-                 dt = datetime.fromisoformat(t_str)
-            hourly_datetimes.append(dt.astimezone(timezone.utc) if dt.tzinfo is None else dt)
-        except ValueError:
-            print(f"Warning: Could not parse time '{t_str}' from raw_hourly_data. Skipping this time point.", file=sys.stderr)
-            continue
-
-    timestamps_to_average = [
-        target_dt_object - timedelta(hours=1),
-        target_dt_object,
-        target_dt_object + timedelta(hours=1)
-    ]
-
+    target_timestamp_str = target_dt_object.isoformat()  # Plain ISO format to match weather data
+    hourly_times_str = weather_data_for_coord['hourly']['time']
+    
+    # Find exact timestamp match
+    try:
+        matching_idx = hourly_times_str.index(target_timestamp_str)
+    except ValueError:
+        print(f"Warning: Could not find exact timestamp {target_timestamp_str} in weather data.", file=sys.stderr)
+        return None
+    
+    # Extract values for this timestamp
+    extracted_values = {}
     for var_name in weather_variables_list:
-        if var_name not in raw_hourly_data_for_coord['hourly']:
-            aggregated_values[var_name] = None # Variable not available in raw data
-            print(f"Warning: Variable '{var_name}' not found in raw hourly data for aggregation.", file=sys.stderr)
+        if var_name not in weather_data_for_coord['hourly']:
+            extracted_values[var_name] = None
+            print(f"Warning: Variable '{var_name}' not found in weather data.", file=sys.stderr)
             continue
+            
+        raw_var_values = weather_data_for_coord['hourly'][var_name]
+        try:
+            value = raw_var_values[matching_idx]
+            extracted_values[var_name] = float(value) if value is not None else None
+        except (IndexError, TypeError, ValueError) as e:
+            print(f"Warning: Problem extracting {var_name} at index {matching_idx}: {e}", file=sys.stderr)
+            extracted_values[var_name] = None
 
-        raw_var_values = raw_hourly_data_for_coord['hourly'][var_name]
-        values_for_var = []
-
-        for required_ts in timestamps_to_average:
-            try:
-                idx = hourly_datetimes.index(required_ts)
-                if raw_var_values[idx] is not None: # Check for null/None values
-                    values_for_var.append(float(raw_var_values[idx]))
-            except ValueError: # Timestamp not found in hourly_datetimes
-                pass # This hour is missing, will average available ones
-            except (TypeError, IndexError): # Value is None or index out of bounds
-                print(f"Warning: Problem with value for {var_name} at {required_ts} in raw data.", file=sys.stderr)
-                pass
-
-
-        if values_for_var:
-            aggregated_values[var_name] = sum(values_for_var) / len(values_for_var)
-        else:
-            aggregated_values[var_name] = None # No valid data points found for this variable
-
-    return aggregated_values
+    return extracted_values
 
 
 def main():
@@ -263,7 +258,7 @@ def main():
                         continue
 
                     pred_row_values = [output_lat_pred, output_lon_pred, output_time_pred, task_type]
-                        for var_name in WEATHER_VARIABLES:
+                    for var_name in WEATHER_VARIABLES:
                         pred_row_values.append(predicted_variable_dict.get(var_name, None))
 
                     pred_csv_writer.writerow(pred_row_values)
@@ -278,7 +273,7 @@ def main():
                         if not raw_hourly_data:
                             print(f"Warning: No raw weather data found for validation task at {coord_key}, ts {target_timestamp_str}. Skipping residual calculation.", file=sys.stderr)
                         else:
-                            actual_aggregated_vars = aggregate_hourly_to_3hourly(raw_hourly_data, target_dt, WEATHER_VARIABLES)
+                            actual_aggregated_vars = get_3hourly_weather_data(raw_hourly_data, target_dt, WEATHER_VARIABLES)
 
                             if actual_aggregated_vars:
                                 residuals_row = [output_lat_pred, output_lon_pred, output_time_pred, task_type]

@@ -3,8 +3,8 @@
 
 # Weather data collection files (large datasets)
 resources/meteo_api/weather_data_collection.json
-# 3-hour aggregated file is tracked with Git LFS
-#resources/meteo_api/weather_data_3hour.json
+# 3-hour aggregated file is too large for GitHub (165MB)
+resources/meteo_api/weather_data_3hour.json
 
 # Shadow data files
 resources/shadows/*.tif
