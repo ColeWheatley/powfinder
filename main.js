@@ -23,6 +23,7 @@ map.addOverlay(overlay);
 
 let times = [], points = [], varName = 'temperature_2m';
 let variables = [];
+
 const hourOffsets = [3,4,5,6]; // 9am, noon, 3pm, 6pm
 let dayIdx = 0, hourIdx = 0;
 let currentMin = 0, currentMax = 1;
@@ -41,6 +42,7 @@ const varLabels = {
   freezing_level_height: 'Freezing Level',
   surface_pressure: 'Surface Pressure'
 };
+
 const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 
@@ -191,6 +193,7 @@ function showTimeSelector(){
   info.style.display='block';
 }
 
+
 dayBtn.onclick=()=>{showDaySelector();};
 timeBtn.onclick=()=>{showTimeSelector();};
 
@@ -236,6 +239,7 @@ map.on('singleclick', evt=>{
     popupContent.textContent='No data here';
     overlay.setPosition(evt.coordinate);
     popup.style.display='block';
+
     return;
   }
   const data = feature.get('data');
@@ -243,6 +247,7 @@ map.on('singleclick', evt=>{
     popupContent.textContent='No data here';
     overlay.setPosition(evt.coordinate);
     popup.style.display='block';
+
     return;
   }
   const {p,idx} = data;
@@ -266,6 +271,7 @@ map.on('singleclick', evt=>{
   popupContent.innerHTML=lines.join('<br>');
   overlay.setPosition(evt.coordinate);
   popup.style.display='block';
+
 });
 
 // Drawer toggle functionality
