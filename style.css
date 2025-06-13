@@ -302,3 +302,16 @@ html,body{height:100%;margin:0;}
 
 /* Info box styling is now part of #drawer-bar section above */
 /* #info-box > div styling is now part of #drawer-bar section above */
+
+/* Simple legend for collapsed info box */
+.legend {
+    display: flex;
+    align-items: center;
+    font-size: 1.3vh;
+}
+.legend-bar {
+    width: 50px;
+    height: 1vh;
+    margin: 0 0.5vw;
+    border: 1px solid rgba(255,255,255,0.5);
+}
