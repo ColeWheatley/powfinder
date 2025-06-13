@@ -15,6 +15,12 @@
 .ol-zoom-out,
 .ol-rotate-reset { display:none!important; }
 
+/* App-like behavior - no text selection, no link cursors */
+* {
+    user-select: none;
+    cursor: default !important;
+}
+
 /* Map takes full screen */
 html,body{height:100%;margin:0;}
 #map{width:100%;height:100%;}
@@ -196,6 +202,19 @@ html,body{height:100%;margin:0;}
     color: white;
 }
 
+/* Not implemented layer items */
+.layer-item.not-implemented {
+    background-color: rgba(0, 0, 0, 0.4); 
+    color: rgba(255, 255, 255, 0.4);
+    cursor: not-allowed !important;
+    opacity: 0.6;
+}
+
+.layer-item.not-implemented:hover {
+    background-color: rgba(0, 0, 0, 0.4) !important;
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
 /* Settings Grid (3 items in settings-grid-panel) */
 #settings-grid {
     display: grid;
@@ -216,11 +235,62 @@ html,body{height:100%;margin:0;}
     background-color: #e03770; /* Slightly darker pink for hover */
 }
 
-#settings-grid #clear-cache-grid-button {
-    background-color: rgba(0, 0, 0, 0.7); /* Standard dark background */
+/* Toggle Button Styling */
+.toggle-button {
+    position: relative;
+    background-color: rgba(0, 0, 0, 0.7);
+    border-radius: 0.5vh;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font-size: 1.8vh;
+    transition: all 0.3s ease;
 }
-#settings-grid #clear-cache-grid-button:hover {
-    background-color: rgba(25, 25, 25, 0.8); /* Slightly darker/more opaque */
+
+.toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 60%;
+    height: 100%;
+    background-color: var(--accent);
+    border-radius: 0.5vh;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+}
+
+.toggle-button.smooth .toggle-slider {
+    left: 40%;
+    width: 60%;
+}
+
+.toggle-label {
+    position: absolute;
+    z-index: 2;
+    color: white;
+    font-weight: bold;
+    transition: color 0.3s ease;
+    pointer-events: none;
+    width: 40%;
+    text-align: center;
+}
+
+.toggle-label.left {
+    left: 0;
+}
+
+.toggle-label.right {
+    right: 0;
+}
+
+.toggle-button.smooth .toggle-label.left {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.toggle-button.smooth .toggle-label.right {
+    color: white;
 }
 
 

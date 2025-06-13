@@ -4,6 +4,8 @@ Powfinder
 
 📊 **Weather Data:** Comprehensive weather dataset documented in `weather_data_summary.md` - 5,000 coordinates with 14 days of high-resolution meteorological data (165MB total).
 
+🗓️ **Prototype Reference Date:** For development/testing purposes, the application uses **May 25, 2025 at 12:00 PM** as the current "now" reference point. Data from May 14-24 represents historical conditions (for SQH snow quality integration), May 25 evening onwards represents forecast data, and May 26-28 are future forecasts for testing forward prediction capabilities.
+
 ## Repository Structure:
 * **Frontend**: `index.html`, `style.css`, `frontend.js` - Interactive web interface
 * **Weather Data**: `weather_data_summary.md` - Complete documentation of 5,000-coordinate weather dataset
