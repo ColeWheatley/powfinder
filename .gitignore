@@ -1,33 +1,50 @@
-# Large terrain and shadow data files (keep local only)
-# These files are too large for GitHub (some over 10GB)
+# Large files - keep simple and effective
+# All TIF files (terrain, hillshade, shadow data)
+*.tif
 
-# Weather data collection files (large datasets)
-resources/meteo_api/weather_data_collection.json
-# 3-hour aggregated file is too large for GitHub (165MB)
+# Specific large weather JSON files
 resources/meteo_api/weather_data_3hour.json
+resources/meteo_api/weather_data_3hour copy.json
 
-# Shadow data files
-resources/shadows/*.tif
-
-# Hillshade data files (allow 100m, exclude larger resolutions)
-resources/hillshade/*25m*.tif
-resources/hillshade/*5m*.tif
-
-# Large terrain files (allow 100m, exclude larger resolutions)
-resources/terrains/*25m*.tif
-resources/terrains/*5m*.tif
-resources/terrains/DGM_Tirol_*.tif
-resources/terrains/*.tfw
-
-# Allow 100m resolution files for frontend use
-!resources/hillshade/*100m*.tif
-!resources/terrains/*100m*.tif
-
-# Node modules
+# Node modules and package manager files
 node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# OS files
+# Development and temporary files
+.vscode/
+.idea/
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS and system files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Local data cache
+# Cache directories
+.cache/
 *.cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Documentation and readme backups
+README_*.md.bak
+*.md.backup
