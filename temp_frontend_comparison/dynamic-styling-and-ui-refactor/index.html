@@ -6,10 +6,29 @@
   <title>Touring Madness Map</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js"></script>
+  <style>
+    #play-pause-button {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000; /* Ensure it's above the map */
+      padding: 8px 12px;
+      background-color: #4CAF50; /* Green */
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #play-pause-button:hover {
+      background-color: #45a049;
+    }
+  </style>
 </head>
 <body>
   <!-- Map sits behind everything -->
   <div id="map"></div>
+  <button id="play-pause-button">Play</button>
 
   <!-- Drawer container: full-width, 32vh tall, only top 8vh showing by default -->
   <div id="drawer-container">
