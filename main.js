@@ -2,10 +2,14 @@ import 'https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js';
 
 const map = new ol.Map({
   target: 'map',
-  layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
+  layers: [new ol.layer.Tile({ 
+    source: new ol.source.OSM({
+      cacheSize: 8192  // 4x default cache size for smooth zooming
+    })
+  })],
   view: new ol.View({
-    center: ol.proj.fromLonLat([11.3, 47.2]),
-    zoom: 8
+    center: ol.proj.fromLonLat([11.3558, 47.0108]), // Zuckerhütl coordinates
+    zoom: 12 // Closer zoom to see mountain detail
   })
 });
 
@@ -31,7 +35,18 @@ fetch('resources/meteo_api/weather_data_3hour.json').then(r => r.json()).then(d 
   draw();
 }).catch(e => console.error('Weather data load failed', e));
 
-function color(val, min, max){
+function color(val, min, max, varName){
+  // Special handling for weather_code (WMO codes)
+  if(varName === 'weather_code') {
+    // WMO weather codes: 0=clear, 1-3=partly cloudy, 45-48=fog, 51-67=rain, 71-77=snow, 80-99=storms
+    if(val <= 3) return '#FFD700'; // Clear/partly cloudy - yellow/gold
+    if(val <= 48) return '#808080'; // Fog - gray
+    if(val <= 67) return '#4169E1'; // Rain - blue
+    if(val <= 77) return '#FFFFFF'; // Snow - white
+    return '#FF4500'; // Storms - red-orange
+  }
+  
+  // Normal gradient for other variables
   const t = Math.max(0, Math.min(1, (val - min)/(max-min)));
   const r = Math.round(255*t);
   const b = Math.round(255*(1-t));
@@ -56,7 +71,7 @@ function draw(){
   feats.forEach(f=>{
     const v=f.get('v');
     if(typeof v!=='number') return;
-    f.setStyle(new ol.style.Style({image:new ol.style.Circle({radius:3,fill:new ol.style.Fill({color:color(v,min,max)})})}));
+    f.setStyle(new ol.style.Style({image:new ol.style.Circle({radius:6,fill:new ol.style.Fill({color:color(v,min,max,varName)})})}));
     src.addFeature(f);
   });
 }
@@ -72,11 +87,34 @@ function updateButtons(){
 dayBtn.onclick=()=>{dayIdx=(dayIdx+1)%Math.min(5,Math.floor(times.length/8));updateButtons();draw();};
 timeBtn.onclick=()=>{hourIdx=(hourIdx+1)%8;updateButtons();draw();};
 
+// Toggle button functionality
+let isPointMode = true; // Start in point mode
+const toggleBtn = document.getElementById('mode-toggle');
+
+toggleBtn.onclick = () => {
+  isPointMode = !isPointMode;
+  if (isPointMode) {
+    toggleBtn.classList.remove('smooth');
+  } else {
+    toggleBtn.classList.add('smooth');
+  }
+  // TODO: Implement smooth/interpolated visualization mode
+  console.log('Mode:', isPointMode ? 'Point' : 'Smooth');
+};
+
 document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(btn=>{
   if(btn.dataset.layerName===varName) btn.classList.add('active');
   btn.onclick=()=>{
+    // Ignore clicks on not-implemented items
+    if(btn.classList.contains('not-implemented')) return;
+    
     document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     varName=btn.dataset.layerName;draw();
   };
 });
+
+// Drawer toggle functionality
+window.toggleDrawer = function() {
+  document.getElementById('drawer-container').classList.toggle('open');
+};
