@@ -7,7 +7,7 @@ Powfinder
 🗓️ **Prototype Reference Date:** For development/testing purposes, the application uses **May 25, 2025 at 12:00 PM** as the current "now" reference point. Data from May 14-24 represents historical conditions (for SQH snow quality integration), May 25 evening onwards represents forecast data, and May 26-28 are future forecasts for testing forward prediction capabilities.
 
 ## Repository Structure:
-* **Frontend**: `index.html`, `style.css`, `frontend.js` - Interactive web interface
+* **Frontend**: `index.html`, `style.css`, `main.js` - Interactive web interface with weather point visualization
 * **Weather Data**: `weather_data_summary.md` - Complete documentation of 5,000-coordinate weather dataset
 * **Meteorological API**: `resources/meteo_api/` - Weather data collection & aggregation scripts  
 * **Weather Pipeline**: `resources/pipeline/` - Physics-based extrapolation and analysis tools
