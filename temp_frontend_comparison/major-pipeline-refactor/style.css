@@ -100,6 +100,44 @@ html,body{height:100%;margin:0;}
     width: 100%; /* Ensure it takes full width */
 }
 
+/* New styles for ul/li selectors within info-box */
+#info-box ul#info-list.info-list-selecting {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    text-align: center; /* To center the inline-block/inline-flex li items */
+    width: 100%; 
+    display: block; /* Explicitly block, though default for ul */
+}
+
+#info-box ul#info-list.info-list-selecting li.list-item {
+    display: inline-flex; /* Using inline-flex for better internal alignment */
+    align-items: center;
+    justify-content: center;
+    text-align: center; /* Fallback for single line text */
+    cursor: pointer;
+    
+    font-size: 1.3vh;       
+    padding: 0.5vh 0.7vw;   
+    margin: 0 0.3vw;        
+    
+    color: white; 
+    background-color: rgba(0, 0, 0, 0.7); 
+    backdrop-filter: blur(10px); 
+    border-radius: 0.5vh; 
+    
+    transition: background-color 0.2s, color 0.2s; 
+}
+
+#info-box ul#info-list.info-list-selecting li.list-item.active {
+    background-color: var(--accent); 
+    color: white; 
+}
+
+#info-box ul#info-list.info-list-selecting li.list-item:hover {
+    background-color: rgba(255, 255, 255, 0.2); 
+}
+
 
 #info-box-close-button {
     cursor: pointer;
@@ -226,7 +264,7 @@ html,body{height:100%;margin:0;}
 
 .brand.flash-error,
 #drawer-caret.flash-error {
-  color: #ff0033 !important;
+  color: #DC143C !important;
   transition: color 0.5s cubic-bezier(.66,.09,1,.42);
 }
 

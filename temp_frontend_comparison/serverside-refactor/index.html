@@ -6,10 +6,84 @@
   <title>Touring Madness Map</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js"></script>
+  <style>
+    .control-buttons {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    
+    .control-button {
+      padding: 6px 10px;
+      background-color: #f0f0f0;
+      color: #333;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    
+    .control-button:hover {
+      background-color: #e0e0e0;
+    }
+    
+    .control-button.active {
+      background-color: #4CAF50;
+      color: white;
+      border-color: #45a049;
+    }
+    
+    .control-button.active:hover {
+      background-color: #45a049;
+    }
+    
+    .control-icon {
+      font-size: 16px;
+    }
+    
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+  </style>
 </head>
 <body>
   <!-- Map sits behind everything -->
   <div id="map"></div>
+  
+  <!-- Triple control buttons -->
+  <div class="control-buttons">
+    <button id="api-control" class="control-button" title="Toggle API requests">
+      <span class="control-icon">🌐</span>
+      <span>API</span>
+    </button>
+    <button id="compute-control" class="control-button" title="Toggle computations">
+      <span class="control-icon">🧮</span>
+      <span>Compute</span>
+    </button>
+    <button id="shadow-control" class="control-button" title="Toggle shadow calculations">
+      <span class="control-icon">🌑</span>
+      <span>Shadows</span>
+    </button>
+  </div>
 
   <!-- Drawer container: full-width, 32vh tall, only top 8vh showing by default -->
   <div id="drawer-container">
@@ -53,7 +127,6 @@
     </div>
   </div>
 
-  <script type="module" src="main.js"></script>
-  <script type="module" src="terrain_evaluator.js"></script>
+  <script type="module" src="frontend.js"></script>
 </body>
 </html>

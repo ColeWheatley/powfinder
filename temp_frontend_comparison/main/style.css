@@ -1,0 +1,144 @@
+/* ===== Font (paintbrush style) ===== */
+@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
+
+:root{
+    --brand-font:'Permanent Marker', cursive;
+    --bar-bg:rgba(0,0,0,0.60); /* Match sheet-bg for consistent opacity */
+    --bar-bg-hover:#ff4081;
+    --sep:rgba(255,255,255,0.20);
+    --accent:#ff4081;
+}
+
+/* Hide selected OpenLayers controls */
+.ol-attribution,
+.ol-zoom-in,
+.ol-zoom-out,
+.ol-rotate-reset { display:none!important; }
+
+/* Map takes full screen */
+html,body{height:100%;margin:0;}
+#map{width:100%;height:100%;}
+
+/* Drawer container */
+#drawer-container{
+    position:fixed;left:0;bottom:-24vh;
+    width:100%;height:32vh;
+    z-index:1000;
+    transition:bottom .35s ease;
+    font-family:var(--brand-font);
+    background:var(--bar-bg);backdrop-filter:blur(10px);
+}
+#drawer-container.open{ bottom:0; }
+
+/* Bar (top 8vh) */
+#drawer-bar{
+    height:8vh;width:100%;
+    display:flex;justify-content:space-between;align-items:center;
+    padding:0 2rem;box-sizing:border-box;
+    cursor:pointer;transition:background .25s;
+}
+#drawer-bar .brand{font-size:2.3rem;color:#fff;margin:0;}
+#drawer-caret{font-size:2rem;color:#fff;transition:transform .3s;}
+#drawer-container.open #drawer-caret{transform:rotate(180deg);}
+
+/* Hover: hot pink background for bar, brand, and caret */
+#drawer-bar:hover {
+    background:var(--bar-bg-hover);
+}
+#drawer-bar:hover .brand,
+#drawer-bar:hover #drawer-caret {
+    color:#fff;
+}
+
+/* Content (hidden portion) */
+#drawer-content{
+    height:24vh;width:100%;
+    display:flex; /* Enables flexbox for its children */
+    color:#fff; /* Default text color for drawer content */
+}
+
+/* Panels within drawer-content */
+#layer-selector-panel {
+    width: 75%;
+    float: left; /* Not strictly necessary with flex on parent, but kept for structure */
+    box-sizing: border-box;
+    padding: 1rem;
+    border-right: 1px solid var(--sep);
+    overflow-y: auto; /* Allow scrolling if content overflows */
+}
+
+#settings-panel {
+    width: 25%;
+    float: left; /* Not strictly necessary with flex on parent */
+    box-sizing: border-box;
+    padding: 1rem;
+    overflow-y: auto; /* Allow scrolling if content overflows */
+}
+
+#layer-selector-panel h2,
+#settings-panel h2 {
+    margin:.2rem 0 .8rem 0;font-size:1.2rem;
+}
+#settings-panel label {
+    display: block; /* Make labels take full width for better spacing */
+    margin-bottom: 0.5rem;
+}
+
+
+/* Layer Grid */
+#layer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px; /* Spacing between grid items */
+}
+
+/* Layer Items */
+.layer-item {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--sep);
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    font-size: 0.9rem;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.layer-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.layer-item.active {
+    background-color: #FF69B4; /* Hot Pink */
+    color: white;
+    border-color: #FF69B4;
+}
+
+
+/* inputs (general styling, some might be specific to settings-panel now) */
+input[type=range]{width:100%;accent-color:var(--accent);}
+input[type=time]{width:auto;padding:.25rem;border-radius:4px;border:none; margin-left: 5px;} /* Adjusted width */
+input[type=checkbox]{margin-right:.4rem;} /* Kept for radio buttons if needed */
+
+button#clear-cache{
+    margin-top:.7rem;padding:.45rem 1rem;border:none;border-radius:6px;
+    background:var(--accent);color:#fff;cursor:pointer;
+}
+button#clear-cache:hover{background:#e91e63;}
+
+.brand.flash-error,
+#drawer-caret.flash-error {
+  color: #ff0033 !important;
+  transition: color 0.5s cubic-bezier(.66,.09,1,.42);
+}
+
+/* Info box for clicked grid point */
+#info-box {
+  flex: 1;
+  margin: 0 1rem;
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 64, 129, 0.8);
+  color: white;
+  border-radius: 4px;
+  font-family: var(--brand-font);
+  text-align: center;
+}
