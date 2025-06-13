@@ -43,6 +43,19 @@ const varLabels = {
   surface_pressure: 'Surface Pressure'
 };
 
+const varUnits = {
+  temperature_2m: '°C',
+  relative_humidity_2m: '%',
+  shortwave_radiation: 'W/m²',
+  cloud_cover: '%',
+  snow_depth: 'm',
+  snowfall: 'mm',
+  wind_speed_10m: 'm/s',
+  weather_code: '',
+  freezing_level_height: 'm',
+  surface_pressure: 'hPa'
+};
+
 const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 
@@ -149,9 +162,13 @@ function showLayerInfoBox(){
   info.classList.remove('info-box-selecting');
   const barStyle = `background:linear-gradient(to right,rgb(0,0,255),rgb(255,0,0))`;
   const label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
-  info.innerHTML = `<div class="info-label">${label}</div>`+
-    `<div class="legend"><div class="legend-bar" style="${barStyle}"></div>`+
-    `<span>${currentMin.toFixed(1)} - ${currentMax.toFixed(1)}</span></div>`;
+  const unit = varUnits[varName] ?? '';
+  info.innerHTML =
+    `<div class="info-label">${label}</div>`+
+    `<div class="legend"><span>${currentMin.toFixed(1)}${unit}</span>`+
+    `<div class="legend-bar" style="${barStyle}"></div>`+
+    `<span>${currentMax.toFixed(1)}${unit}</span></div>`;
+
   info.style.display = 'block';
 }
 
@@ -192,7 +209,6 @@ function showTimeSelector(){
   }
   info.style.display='block';
 }
-
 
 dayBtn.onclick=()=>{showDaySelector();};
 timeBtn.onclick=()=>{showTimeSelector();};

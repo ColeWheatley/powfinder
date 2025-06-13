@@ -314,8 +314,8 @@ html,body{height:100%;margin:0;}
     margin-left: auto;
 }
 .legend-bar {
-    width: 15vw;
-    height: 1.5vh;
+    width: 30vw;
+    height: 3vh;
     margin: 0 0.5vw;
     border: 1px solid rgba(255,255,255,0.5);
 }
@@ -333,4 +333,3 @@ html,body{height:100%;margin:0;}
     font-size: 1.5vh;
     max-width: 40vw;
 }
-
