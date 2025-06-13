@@ -23,6 +23,7 @@ map.addOverlay(overlay);
 
 let times = [], points = [], varName = 'temperature_2m';
 let variables = [];
+
 const hourOffsets = [3,4,5,6]; // 9am, noon, 3pm, 6pm
 let dayIdx = 0, hourIdx = 0;
 let currentMin = 0, currentMax = 1;
@@ -54,6 +55,7 @@ const varUnits = {
   freezing_level_height: 'm',
   surface_pressure: 'hPa'
 };
+
 const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 
@@ -166,6 +168,7 @@ function showLayerInfoBox(){
     `<div class="legend"><span>${currentMin.toFixed(1)}${unit}</span>`+
     `<div class="legend-bar" style="${barStyle}"></div>`+
     `<span>${currentMax.toFixed(1)}${unit}</span></div>`;
+
   info.style.display = 'block';
 }
 
@@ -252,6 +255,7 @@ map.on('singleclick', evt=>{
     popupContent.textContent='No data here';
     overlay.setPosition(evt.coordinate);
     popup.style.display='block';
+
     return;
   }
   const data = feature.get('data');
@@ -259,6 +263,7 @@ map.on('singleclick', evt=>{
     popupContent.textContent='No data here';
     overlay.setPosition(evt.coordinate);
     popup.style.display='block';
+
     return;
   }
   const {p,idx} = data;
@@ -282,6 +287,7 @@ map.on('singleclick', evt=>{
   popupContent.innerHTML=lines.join('<br>');
   overlay.setPosition(evt.coordinate);
   popup.style.display='block';
+
 });
 
 // Drawer toggle functionality
