@@ -136,8 +136,8 @@ def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade):
     lapse = -9.8 + (humid / 100.0) * 5.8
     adj = temp + lapse * ((target_elev - source_elev) / 1000.0)
 
-    # Hillshade ranges 0-255 -> normalize to 0..1 then shift around 0.5
-    insolation = hillshade / 255.0
+    # Hillshade ranges 0-32767 (int16) -> normalize to 0..1 then shift around 0.5
+    insolation = hillshade / 32767.0
     adj += (insolation - 0.5) * 2.0  # +/-1°C based on illumination
 
     adj = np.where(snow > 0.1, adj - 1.5, adj)
@@ -154,12 +154,13 @@ def main():
     time_index = get_time_indices(times)
 
     # Load color scale configuration for reference range
+    color_scale = None
     if os.path.exists(COLOR_SCALE_JSON):
         with open(COLOR_SCALE_JSON, "r", encoding="utf-8") as fp:
             scales = json.load(fp)
-        tscale = scales.get("temperature_2m", {})
+        color_scale = scales.get("temperature_2m", {})
         print(
-            f"Temperature scale range: {tscale.get('min')} to {tscale.get('max')} °C"
+            f"Temperature scale range: {color_scale.get('min')} to {color_scale.get('max')} °C"
         )
 
     with rasterio.open(ELEVATION_TIF) as elev_src:
@@ -181,7 +182,8 @@ def main():
 
     grid_elev_flat = grid_elev.filled(NODATA).ravel()
 
-    profile.update(dtype=rasterio.float32, nodata=NODATA, compress="lzw")
+    # profile.update(dtype=rasterio.float32, nodata=NODATA, compress="lzw")
+    profile.update(compress="lzw")
 
     os.makedirs(OUTPUT_BASE, exist_ok=True)
 
@@ -216,49 +218,44 @@ def main():
         out = out_flat.reshape(grid_elev.shape).astype(np.float32)
         print(f"{ts}: min {out.min():.1f} max {out.max():.1f}")
 
+        # Map floating point temperature to 0-255 byte range using color scale
+        if color_scale and "min" in color_scale and "max" in color_scale:
+            tmin = color_scale["min"]
+            tmax = color_scale["max"]
+        else:
+            # fallback to min/max from data
+            tmin = float(np.nanmin(out[out != NODATA]))
+            tmax = float(np.nanmax(out[out != NODATA]))
+
+        # Clip and scale
+        clipped = np.clip(out, tmin, tmax)
+        scaled = (clipped - tmin) / (tmax - tmin)
+        out_byte = (scaled * 255).astype(np.uint8)
+        out_byte[out == NODATA] = 0  # set nodata to 0 for byte
+
+        profile.update(dtype="uint8", nodata=0)
+
         out_dir = os.path.join(OUTPUT_BASE, ts)
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, "t2m.tif")
 
+        # Remove existing file if it exists to ensure clean overwrite
+        if os.path.exists(out_path):
+            os.remove(out_path)
+            print(f"Removed existing {out_path}")
+
         with rasterio.open(out_path, "w", **profile) as dst:
-            dst.write(out, 1)
+            dst.write(out_byte, 1)
             dst.update_tags(units="celsius", processing_time=datetime.utcnow().isoformat(),
                             source_points_count=len(coords))
 
+        # Original float output code commented out
+        # with rasterio.open(out_path, "w", **profile) as dst:
+        #     dst.write(out, 1)
+        #     dst.update_tags(units="celsius", processing_time=datetime.utcnow().isoformat(),
+        #                     source_points_count=len(coords))
+
         print(f"Wrote {out_path}")
-
-        # --- Save PNG with color palette using matplotlib ---
-        # Convert float32 temperature to 0-255 byte using color scale
-        if os.path.exists(COLOR_SCALE_JSON):
-            with open(COLOR_SCALE_JSON, "r", encoding="utf-8") as fp:
-                color_scales = json.load(fp)
-            color_scale = color_scales.get("temperature_2m", {})
-            tmin = color_scale.get("min", np.nanmin(out))
-            tmax = color_scale.get("max", np.nanmax(out))
-            palette = color_scale.get("palette", [])
-            if palette and isinstance(palette[0], str):
-                # Convert hex colors to RGB tuples
-                import matplotlib
-                import matplotlib.pyplot as plt
-                from matplotlib.colors import ListedColormap
-                rgb_palette = [matplotlib.colors.to_rgb(c) for c in palette]
-                cmap = ListedColormap(rgb_palette)
-            else:
-                cmap = None
-        else:
-            tmin = np.nanmin(out)
-            tmax = np.nanmax(out)
-            cmap = "viridis"
-
-        # Mask nodata for PNG
-        out_masked = np.ma.masked_where(out == NODATA, out)
-        # Normalize to 0-255
-        out_byte = np.clip((out_masked - tmin) / (tmax - tmin) * 255, 0, 255).astype(np.uint8)
-        # Save PNG using matplotlib
-        png_path = os.path.join(out_dir, "t2m.png")
-        import matplotlib.pyplot as plt
-        plt.imsave(png_path, out_byte, cmap=cmap, vmin=0, vmax=255)
-        print(f"Wrote {png_path}")
 
 if __name__ == "__main__":
     main()
