@@ -203,7 +203,12 @@ def main():
         out_flat = np.sum(lapse_adj * w, axis=1)
         out_flat = np.where(grid_elev_flat == NODATA, NODATA, out_flat)
         out = out_flat.reshape(grid_elev.shape).astype(np.float32)
-        print(f"{ts}: min {out.min():.1f} max {out.max():.1f}")
+        
+        # Find actual min/max excluding NODATA
+        valid_data = out[out != NODATA]
+        actual_min = float(np.nanmin(valid_data)) if len(valid_data) > 0 else NODATA
+        actual_max = float(np.nanmax(valid_data)) if len(valid_data) > 0 else NODATA
+        print(f"{ts}: actual_min {actual_min:.1f} actual_max {actual_max:.1f} (excluding NODATA)")
 
         # Map floating point dewpoint to 0-255 byte range using color scale
         if color_scale and "min" in color_scale and "max" in color_scale:

@@ -17,7 +17,7 @@ import rasterio
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
 
-BASE = pathlib.Path("TIFS/100m_resolution")
+BASE = pathlib.Path("../../TIFS/100m_resolution")
 # Get color_scales.json from the same directory as this script
 SCRIPT_DIR = pathlib.Path(__file__).parent
 CS = json.load(open(SCRIPT_DIR / "color_scales.json"))
@@ -26,10 +26,7 @@ def build_cmap(palette_hex):
     return LinearSegmentedColormap.from_list("pal", palette_hex, N=256)
 
 def tif_to_png(tif_path: pathlib.Path):
-    # Handle double extension case: "temperature_2m.tif.tif" -> "temperature_2m"
-    var = tif_path.stem
-    if var.endswith('.tif'):
-        var = var[:-4]  # Remove the extra .tif
+    var = tif_path.stem  # Just use the stem directly
     
     spec = CS.get(var)
     if not spec:        # skip un-known variable names
@@ -49,7 +46,7 @@ def tif_to_png(tif_path: pathlib.Path):
     rgba = cmap(norm)
     rgba[..., 3] = (~mask).astype(float)  # 1.0 where data, 0.0 where nodata
     
-    # Ensure PNG has correct name: temperature_2m.png (not temperature_2m.tif.png)
+    # PNG name will be: temperature_2m.png
     png_name = var + ".png"
     out_png = tif_path.parent / png_name
     plt.imsave(out_png, rgba)             # matplotlib writes RGBA PNG

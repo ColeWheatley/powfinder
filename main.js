@@ -25,7 +25,7 @@ const tileGrid = new ol.tilegrid.TileGrid({
   resolutions: [100],
   tileSize: 256
 });
-const tileLayer = new ol.layer.Tile({visible:false});
+const tileLayer = new ol.layer.Tile({visible:false}); // Back to hidden by default
 map.addLayer(tileLayer);
 const popup = document.getElementById('popup');
 const popupContent = document.getElementById('popup-content');
@@ -37,8 +37,17 @@ let times = [], points = [], varName = 'temperature_2m';
 let variables = [];
 let colorScales = {};
 
-const hourOffsets = [3,4,5,6]; // 9am, noon, 3pm, 6pm
-let dayIdx = 10, hourIdx = 0; // Start at day 10 (May 24th) as "Today"
+// Available tile timestamps - these match the actual tile directory names
+const availableTimestamps = [
+  "2025-05-24T09:00:00", "2025-05-24T12:00:00", "2025-05-24T15:00:00", "2025-05-24T18:00:00",
+  "2025-05-25T09:00:00", "2025-05-25T12:00:00", "2025-05-25T15:00:00", "2025-05-25T18:00:00",
+  "2025-05-26T09:00:00", "2025-05-26T12:00:00", "2025-05-26T15:00:00", "2025-05-26T18:00:00",
+  "2025-05-27T09:00:00", "2025-05-27T12:00:00", "2025-05-27T15:00:00", "2025-05-27T18:00:00",
+  "2025-05-28T09:00:00", "2025-05-28T12:00:00", "2025-05-28T15:00:00", "2025-05-28T18:00:00"
+];
+
+const hourOffsets = [0,1,2,3]; // Index into the 4 daily timestamps (9am, 12pm, 3pm, 6pm)
+let dayIdx = 0, hourIdx = 0; // Start at day 0 (May 24th) as "Today"
 let currentMin = 0, currentMax = 1;
 let peaks = [];
 let drawerOpen = false;
@@ -167,23 +176,32 @@ function color(val, varName){
 }
 
 function draw(){
-  const idx = dayIdx*8 + hourOffsets[hourIdx];
-  if(!times[idx]) return;
+  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
+  if(timestampIdx >= availableTimestamps.length) return;
   const spec = colorScales[varName] || {};
   currentMin = spec.min ?? 0;
   currentMax = spec.max ?? 1;
+  
   if(!isPointMode){
+    // Smooth mode: hide points, show image layer
     src.clear();
+    layer.setVisible(false);
     updateTileLayer();
     showLayerInfoBox();
     return;
   }
 
+  // Point mode: show points, hide image layer
+  if (tileLayer.imageLayer) {
+    tileLayer.imageLayer.setVisible(false);
+  }
+  layer.setVisible(true);
+
   const feats = points.map(p=>{
-    const v = p.w[varName]?.[idx];
+    const v = p.w[varName]?.[timestampIdx];
     const f = new ol.Feature(new ol.geom.Point(ol.proj.fromLonLat([p.lon,p.lat])));
     f.set('v', v);
-    f.set('data', {p, idx});
+    f.set('data', {p, timestampIdx});
     return f;
   });
   src.clear();
@@ -197,17 +215,18 @@ function draw(){
 }
 
 function updateButtons(){
-  const idx = dayIdx*8 + hourOffsets[hourIdx];
-  const t = times[idx];
-  if(!t) return;
+  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
+  if(timestampIdx >= availableTimestamps.length) return;
+  const t = new Date(availableTimestamps[timestampIdx]);
   dayBtn.textContent = formatDay(t);
   timeBtn.textContent = formatTime(t);
 }
 
 function showLayerInfoBox(){
   const info = document.getElementById('info-box');
-  const idx = dayIdx*8 + hourOffsets[hourIdx];
-  const t = times[idx];
+  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
+  if(timestampIdx >= availableTimestamps.length) return;
+  const t = new Date(availableTimestamps[timestampIdx]);
   if(!info || !t) return;
   info.classList.remove('info-box-selecting');
   const spec = colorScales[varName] || {palette:['#0000ff','#ff0000']};
@@ -228,19 +247,33 @@ function showLayerInfoBox(){
   info.style.display = 'block';
 }
 function updateTileLayer(){
-  const idx = dayIdx*8 + hourOffsets[hourIdx];
-  if(!times[idx]) return;
-  const ts = times[idx].toISOString();
-  const src = new ol.source.TileImage({
-    tileGrid: tileGrid,
-    tileUrlFunction: (tileCoord) => {
-      if(tileCoord[0] !== 0) return "";
-      const x = tileCoord[1];
-      const y = -tileCoord[2]-1;
-      return `tiles/${ts}/${varName}/${x}_${y}.png`;
-    }
+  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
+  if(timestampIdx >= availableTimestamps.length) return;
+  const ts = availableTimestamps[timestampIdx];
+  
+  // Remove any existing image layer
+  if (tileLayer.imageLayer) {
+    map.removeLayer(tileLayer.imageLayer);
+  }
+  
+  // For now, use a simple image layer instead of tiles
+  // This will display the full PNG image for the selected variable and time
+  const imageUrl = `TIFS/100m_resolution/${ts}/${varName}.png`;
+  
+  const src = new ol.source.ImageStatic({
+    url: imageUrl,
+    imageExtent: TILE_EXTENT, // Use the same extent as before
+    projection: 'EPSG:3857' // Web Mercator
   });
-  tileLayer.setSource(src);
+  
+  const imageLayer = new ol.layer.Image({
+    source: src,
+    opacity: 0.7 // Make it semi-transparent so we can see the base map
+  });
+  
+  // Store reference and add to map
+  tileLayer.imageLayer = imageLayer;
+  map.addLayer(imageLayer);
 }
 
 
@@ -252,15 +285,15 @@ function showDaySelector(){
   dayRow.className = 'date-selector-row';
   info.appendChild(dayRow);
 
-  for(let i=0; i < 4; i++){
-    const actualDayIndex = i + 10; // Offset to start from May 24th
-    const d = times[actualDayIndex*8];
-    if (!d) continue;
+  for(let i=0; i < 5; i++){ // 5 days available
+    const timestampIdx = i * 4; // First timestamp of each day
+    if(timestampIdx >= availableTimestamps.length) continue;
+    const d = new Date(availableTimestamps[timestampIdx]);
     const div = document.createElement('div');
     div.className = 'layer-item';
     div.textContent = formatDay(d);
-    if (actualDayIndex === dayIdx) div.classList.add('active');
-    div.onclick = () => { dayIdx = actualDayIndex; updateButtons(); draw(); };
+    if (i === dayIdx) div.classList.add('active');
+    div.onclick = () => { dayIdx = i; updateButtons(); draw(); };
     dayRow.appendChild(div);
   }
   info.style.display='block';
@@ -274,13 +307,14 @@ function showTimeSelector(){
   timeRow.className = 'time-selector-row';
   info.appendChild(timeRow);
 
-  for(let i=0; i < 4; i++){
-    const d = times[dayIdx*8 + hourOffsets[i]];
-    if (!d) continue;
+  for(let i=0; i<4; i++){
+    const tsStr = availableTimestamps[dayIdx*4 + i];
+    if(!tsStr) continue;
+    const d = new Date(tsStr);
     const div = document.createElement('div');
     div.className = 'layer-item';
     div.textContent = formatTime(d);
-    if (i === hourIdx) div.classList.add('active');
+    if(i === hourIdx) div.classList.add('active');
     div.onclick = () => { hourIdx = i; updateButtons(); draw(); };
     timeRow.appendChild(div);
   }
@@ -291,19 +325,25 @@ dayBtn.onclick=()=>{showDaySelector();};
 timeBtn.onclick=()=>{showTimeSelector();};
 
 // Toggle button functionality
-let isPointMode = true; // Start in point mode
+let isPointMode = true; // Back to starting in point mode
 const toggleBtn = document.getElementById('mode-toggle');
 
 toggleBtn.onclick = () => {
   isPointMode = !isPointMode;
   if (isPointMode) {
     toggleBtn.classList.remove('smooth');
+    // Hide any existing image layer
+    if (tileLayer.imageLayer) {
+      tileLayer.imageLayer.setVisible(false);
+    }
     tileLayer.setVisible(false);
-    draw();
+    draw(); // This will show the points
   } else {
     toggleBtn.classList.add('smooth');
-    tileLayer.setVisible(true);
-    draw();
+    // Hide the vector points
+    layer.setVisible(false);
+    // Show/update the image layer
+    draw(); // This will update the image layer
   }
   console.log('Mode:', isPointMode ? 'Point' : 'Smooth');
 };
@@ -335,20 +375,20 @@ map.on('singleclick', evt=>{
   const handleNoData = () => {
     const clickedCoord = ol.proj.toLonLat(evt.coordinate);
     const [lon, lat] = clickedCoord;
-    
+
     // Get current selected timestamp
-    const idx = dayIdx * 8 + hourOffsets[hourIdx];
-    if (!times || !times[idx]) {
+    const tsStr = availableTimestamps[dayIdx*4 + hourIdx];
+    if(!tsStr){
         popupContent.textContent = 'Time data unavailable for API request.';
         overlay.setPosition(evt.coordinate);
         popup.style.display = 'block';
         return;
     }
-    
+
     // Get the selected date and time from the frontend interface
-    const selectedDate = new Date(times[idx]);
+    const selectedDate = new Date(tsStr);
     const dateStr = selectedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-    
+
     // Build Open-Meteo API URL with same parameters as collection script
     // Use the date range that covers our selected time
     const apiParams = new URLSearchParams({
@@ -364,9 +404,9 @@ map.on('singleclick', evt=>{
         end_date: dateStr,
         timezone: 'Europe/Vienna'
     });
-    
+
     const apiUrl = `https://api.open-meteo.com/v1/forecast?${apiParams}`;
-    
+
     popupContent.textContent = 'Loading weather data...';
     overlay.setPosition(evt.coordinate);
     popup.style.display = 'block';
@@ -382,13 +422,13 @@ map.on('singleclick', evt=>{
         if (!apiData.hourly || !apiData.hourly.time) {
           throw new Error('Invalid API response structure');
         }
-        
+
         // Find the closest time index to our selected time
         const targetTime = selectedDate.toISOString();
         const apiTimes = apiData.hourly.time;
         let closestIndex = 0;
         let minDiff = Math.abs(new Date(apiTimes[0]).getTime() - selectedDate.getTime());
-        
+
         for (let i = 1; i < apiTimes.length; i++) {
           const diff = Math.abs(new Date(apiTimes[i]).getTime() - selectedDate.getTime());
           if (diff < minDiff) {
@@ -396,7 +436,7 @@ map.on('singleclick', evt=>{
             closestIndex = i;
           }
         }
-        
+
         // Extract weather values for the closest time
         const weatherData = {};
         Object.keys(apiData.hourly).forEach(param => {
@@ -404,18 +444,18 @@ map.on('singleclick', evt=>{
             weatherData[param] = apiData.hourly[param][closestIndex];
           }
         });
-        
+
         // Format and display
         let formattedHtml = `<div><strong>Location:</strong> ${lat.toFixed(4)}, ${lon.toFixed(4)}</div>`;
         formattedHtml += `<div><strong>Time:</strong> ${apiTimes[closestIndex]}</div><br>`;
-        
+
         Object.entries(weatherData).forEach(([key, value]) => {
           const label = varLabels[key] || key;
           const unit = varUnits[key] || '';
           const displayValue = typeof value === 'number' ? value.toFixed(1) : value;
           formattedHtml += `<div>${label}: ${displayValue}${unit}</div>`;
         });
-        
+
         popupContent.innerHTML = formattedHtml;
       })
       .catch(error => {

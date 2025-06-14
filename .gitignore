@@ -2,6 +2,9 @@
 # All TIF files (terrain, hillshade, shadow data)
 *.tif
 
+# Generated PNG files from TIF rendering
+*.png
+
 # Specific large weather JSON files
 resources/meteo_api/weather_data_3hour.json
 resources/meteo_api/weather_data_3hour_backup.json

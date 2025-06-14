@@ -1,6 +1,7 @@
 Powfinder
 
-⚠️ NOTE: Large terrain and shadow data files (~32GB+) are excluded from this Git repository due to size constraints. See resources/README_DATA_FILES.md for setup instructions.
+⚠️ NOTE: Large terrain and shadow data files (~32GB+) are excluded from t* **Weather Parameters**: temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snow_depth, snowfall, wind_speed_10m, weather_code, freezing_level_height, surface_pressure
+* **Time Coverage**: May 24-28, 2025 (5 days, 20 timestamps total: 4 times per day at 09:00, 12:00, 15:00, 18:00)s Git repository due to size constraints. See resources/README_DATA_FILES.md for setup instructions.
 
 ## Repository Structure:
 * **Frontend**: `index.html`, `style.css`, `main.js` - Interactive web interface with OpenLayers
@@ -51,7 +52,7 @@ o Hillshade: Computed solar illumination (dot product of sun vector and surface 
 * Variables: temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snow_depth, snowfall, wind_speed_10m, weather_code, freezing_level_height, surface_pressure
 * Time Resolution: Hourly API data averaged over 3-hour periods to match shadow time periods (07:30, 10:30, 13:30, 16:30)
 * Spatial Resolution: Forecasts acquired at peak points (high-altitude locations) and random terrain sampling, then extrapolated to surrounding terrain.
-* Date Range: May 14-28, 2025 (5 days forward from May 23rd for realistic forecast duration, then 14 days back due to API historical limits)
+* Date Range: May 24-28, 2025 (5 days, 20 timestamps total: 4 times per day at 09:00, 12:00, 15:00, 18:00)
 
 ## Weather API Strategy and Implementation:
 ### Comprehensive Sampling System:
@@ -94,18 +95,13 @@ o Hillshade: Computed solar illumination (dot product of sun vector and surface 
 Current State of Project (prototyping branch)
 
 ## TIF Generation and Visualization Pipeline:
-* ✅ **Comprehensive TIF Generation**: Complete suite of generation scripts for all weather variables (temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snowfall, freezing_level_height, surface_pressure, weather_code, dewpoint_2m)
-* ✅ **Consistent Variable Naming**: All TIF output files and scripts renamed to match color_scales.json variable names for frontend compatibility
-* ✅ **Physics-Based Processing**: Temperature TIFs include sophisticated physics (hillshade normalization, lapse rate calculations, snow effects) - other variables use simplified interpolation
-* ⚠️ **Physics Model Status**: Temperature TIF generation uses validated physics model; other weather variables use basic interpolation (physics models may need refinement)
-* ⚠️ **Physics Refinements**: Partial implementation of refined physics models (lapse rate caps, valley effects, cloud attenuation, orographic enhancement) - somewhat tuned for visual plausibility
-* ✅ **Color Scale Management**: Consistent visualization ranges across all weather variables including estimated dewpoint range (-20°C to 20°C)
+* ✅ **Temperature TIF Generation**: Physics-based interpolation system with corrected hillshade normalization and lapse rate calculations
+* ✅ **Color Scale Management**: Consistent temperature visualization (-17.5°C to 25.62°C) across all TIFs and frontend display
 * ✅ **Frontend Integration**: Point-based weather visualization with OpenLayers, synchronized to May 24th, 2025 reference date
-* ⚠️ **Tiling Integration**: First attempt at integrating TIF tiling into frontend was attempted but not yet working
 * ✅ **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with proper parameter handling
 * ✅ **Physics Debugging**: Fixed major hillshade normalization bug (corrected from 0-255 to int16 0-32767 range)
 * ✅ **Validation Tools**: Peak temperature testing scripts for TIF accuracy validation (moved to `debugging/` folder)
-* ✅ **Weather Data Pipeline**: Complete 165MB weather dataset covering 5,000 coordinates (3,000 peaks + 2,000 random points)
+* ✅ **Weather Data Pipeline**: Complete 165MB weather dataset covering 5,000 coordinates (3,000 peaks + 2,000 random points) for 5 days (May 24-28, 2025), 20 timestamps total
 * ✅ **Terrain processing pipeline**: Complete DEM processing at 5m, 25m, 100m resolutions with slope/aspect calculations
 * ✅ **Hillshade modeling implemented**: Solar illumination calculations at multiple resolutions across 4 time periods
 * ✅ **Data management**: Large terrain/shadow files (~32GB) properly excluded from Git repository
@@ -113,7 +109,7 @@ Current State of Project (prototyping branch)
 * ✅ **Weather API system**: Operational Open-Meteo integration with robust resumable collection system (3,000 highest peaks + 2,000 random coordinates)
 * ✅ **Random coordinate generation**: 2,000 generated with proximity controls, DEM validation, and reproducible seeding
 * 🔄 **Frontend streamlined**: Interactive web map with OpenLayers maintained but simplified for preprocessed data consumption
-* 📅 **Demo date set**: Using May 24th, 2025 for retroactive skiing condition analysis not the currentdate or the beginning of the data
+* 📅 **Demo date set**: Using May 24th, 2025 as "Today" for retroactive skiing condition analysis, covering 5 days through May 28th (20 timestamps total)
 
 ## Immediate Next Steps:
 * **Snow Quality Metrics**: Implement SQH and skiability calculations using validated temperature TIFs
@@ -152,7 +148,7 @@ Technical Stack and Current Architecture
 * **Optimization Implementation**: Horizon calculated once with 15° azimuth steps, then reused across all 4 time periods for dramatic performance improvement
 ## Frontend (Client-Side):
 * **Mapping**: OpenLayers for interactive point-based weather visualization
-* **Date Synchronization**: Frontend aligned to May 24th, 2025 as "Today" reference date  
+* **Date Synchronization**: Frontend aligned to May 24th, 2025 as "Today" reference date, covering 5 days (May 24-28) with 20 timestamps total  
 * **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with consistent parameter handling
 * **Popup Enhancement**: Improved weather data display with proper units, labels, and formatting
 
@@ -168,7 +164,7 @@ Current Action Items (Priority Order):
 * ✅ Complete weather API debugging and parameter validation
 * ✅ Build robust resumable weather collection system
 * ✅ Generate 5,000 validated coordinates (3,000 peaks + 2,000 random points)
-* ✅ Execute full weather data collection for all 5,000 coordinates (May 14-28, 2025) - Complete with 165MB weather_data_3hour.json
+* ✅ Execute full weather data collection for all 5,000 coordinates (May 24-28, 2025) - Complete with 165MB weather_data_3hour.json covering 5 days and 20 timestamps
 * ✅ Implement TIF generation pipeline with physics-based interpolation and color scale management
 * ✅ Debug and fix physics calculations (hillshade normalization, lapse rate adjustments)
 * ✅ Integrate frontend with consistent date mapping and API calls
