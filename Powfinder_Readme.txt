@@ -2,16 +2,12 @@ Powfinder
 
 ⚠️ NOTE: Large terrain and shadow data files (~32GB+) are excluded from this Git repository due to size constraints. See resources/README_DATA_FILES.md for setup instructions.
 
-📊 **Weather Data:** Comprehensive weather dataset documented in `weather_data_summary.md` - 5,000 coordinates with 14 days of high-resolution meteorological data (165MB total).
-
-🗓️ **Prototype Reference Date:** For development/testing purposes, the application uses **May 25, 2025 at 12:00 PM** as the current "now" reference point. Data from May 14-24 represents historical conditions (for SQH snow quality integration), May 25 evening onwards represents forecast data, and May 26-28 are future forecasts for testing forward prediction capabilities.
-
 ## Repository Structure:
-* **Frontend**: `index.html`, `style.css`, `main.js` - Interactive web interface with weather point visualization
-* **Weather Data**: `weather_data_summary.md` - Complete documentation of 5,000-coordinate weather dataset
-* **Meteorological API**: `resources/meteo_api/` - Weather data collection & aggregation scripts  
-* **Weather Pipeline**: `resources/pipeline/` - Physics-based extrapolation and analysis tools
+* **Frontend**: `index.html`, `style.css`, `frontend.js` - Interactive web interface
+* **Core Services**: `gridService.js` - Data management and grid handling  
+* **Meteorological API**: `resources/meteo_api/` - Weather data API and peak locations (GeoJSON format from OpenStreetMap)
 * **Hillshade Processing**: `resources/hillshade/render_hillshade.py` - Solar illumination modeling
+* **Shadow Processing**: `resources/shadows/render_shadow_map.py` - Binary terrain obstruction mapping
 * **Terrain Data**: `resources/terrains/` - Multi-resolution DEM files (excluded from Git)
 * **Configuration**: Model configurations and processing parameters
 
@@ -48,12 +44,10 @@ o Elevation: Raw elevation data at multiple resolutions.
 o Slope: Computed slope angle (in degrees) from elevation at all resolutions.
 o Aspect: Computed compass direction slope faces (North, South, etc.) at all resolutions.
 o Hillshade: Computed solar illumination (dot product of sun vector and surface normal) at multiple resolutions - models direct sunlight.
-o Shadow Maps: Binary terrain obstruction shadows using GRASS GIS r.sun beam radiation - identifies areas blocked by terrain features at specific times.
 
 2. Weather Data
 * Source: Open-Meteo API (forecast and historical weather).
 * Variables: temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snow_depth, snowfall, wind_speed_10m, weather_code, freezing_level_height, surface_pressure
-* API Note: `cloud_cover` parameter represents total cloud coverage (sum of low/mid/high cloud layers), labeled as "Cloud Cover Total" in Open-Meteo UI
 * Time Resolution: Hourly API data averaged over 3-hour periods to match shadow time periods (07:30, 10:30, 13:30, 16:30)
 * Spatial Resolution: Forecasts acquired at peak points (high-altitude locations) and random terrain sampling, then extrapolated to surrounding terrain.
 * Date Range: May 14-28, 2025 (5 days forward from May 23rd for realistic forecast duration, then 14 days back due to API historical limits)

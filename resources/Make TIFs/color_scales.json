@@ -1,0 +1,105 @@
+{
+  "temperature_2m": {
+    "palette": [
+      "#0000ff",
+      "#ffffff",
+      "#ff0000"
+    ],
+    "interpolation": "linear",
+    "min": -17.5,
+    "api_max": 22.97,
+    "elevation_buffer": 0.65,
+    "max": 25.62
+  },
+  "relative_humidity_2m": {
+    "palette": [
+      "#ffffff",
+      "#00bfff"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.0,
+    "api_max": 100.0,
+    "max": 100.0
+  },
+  "shortwave_radiation": {
+    "palette": [
+      "#000000",
+      "#ffff00"
+    ],
+    "interpolation": "linear",
+    "min": 0.0,
+    "max": 1064.17
+  },
+  "cloud_cover": {
+    "palette": [
+      "#ffffff"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.0,
+    "max": 100.0
+  },
+  "snow_depth": {
+    "palette": [
+      "#f0f8ff",
+      "#4169e1"
+    ],
+    "interpolation": "linear",
+    "min": 0.0,
+    "api_max": 2.51,
+    "max": 2.76
+  },
+  "snowfall": {
+    "palette": [
+      "#f0f8ff",
+      "#00008b"
+    ],
+    "interpolation": "linear",
+    "min": 0.0,
+    "api_max": 8.19,
+    "max": 9.01
+  },
+  "wind_speed_10m": {
+    "palette": [
+      "#e0ffff",
+      "#008080"
+    ],
+    "interpolation": "linear",
+    "min": 0.23,
+    "max": 53.07
+  },
+  "weather_code": {
+    "palette": [
+      "#ffd700",
+      "#808080",
+      "#4169e1",
+      "#ffffff",
+      "#ff4500"
+    ],
+    "discrete": true,
+    "interpolation": "linear",
+    "min": 0,
+    "max": 96
+  },
+  "freezing_level_height": {
+    "palette": [
+      "#8b4513",
+      "#00ff7f"
+    ],
+    "interpolation": "linear",
+    "min": 1536.67,
+    "max": 3250.0
+  },
+  "surface_pressure": {
+    "palette": [
+      "#87cefa",
+      "#8b0000"
+    ],
+    "interpolation": "linear",
+    "min": 635.0,
+    "api_max": 960.53,
+    "pressure_buffer": 1.2,
+    "max": 966.73
+  }
+}
