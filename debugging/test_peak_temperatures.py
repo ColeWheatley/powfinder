@@ -22,7 +22,7 @@ from pyproj import Transformer
 import math
 
 # Configuration
-TIF_PATH = "TIFS/100m_resolution/2025-05-24T12:00:00/t2m.tif"
+TIF_PATH = "TIFS/100m_resolution/2025-05-24T12:00:00/temperature_2m.tif"
 WEATHER_JSON = "resources/meteo_api/weather_data_3hour.json"
 PEAKS_JSON = "resources/meteo_api/tirol_peaks.geojson"
 TARGET_TIME = "2025-05-24T12:00:00"

@@ -110,7 +110,7 @@ def main():
         print("   Could not read weather data range")
     
     # Check a sample TIF file range
-    sample_tif = "TIFS/100m_resolution/2025-05-23T12:00:00/t2m.tif"
+    sample_tif = "TIFS/100m_resolution/2025-05-23T12:00:00/temperature_2m.tif"
     if os.path.exists(sample_tif):
         tif_min, tif_max = get_tif_range(sample_tif)
         if tif_min is not None:
@@ -122,7 +122,7 @@ def main():
     
     # Query each location for each timestamp
     for timestamp in timestamps:
-        tif_path = f"TIFS/100m_resolution/{timestamp}/t2m.tif"
+        tif_path = f"TIFS/100m_resolution/{timestamp}/temperature_2m.tif"
         
         if not os.path.exists(tif_path):
             print(f"   {timestamp}: TIF file not found")
