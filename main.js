@@ -16,6 +16,17 @@ const map = new ol.Map({
 const src = new ol.source.Vector();
 const layer = new ol.layer.Vector({ source: src });
 map.addLayer(layer);
+// Tiled PNG layer for interpolated data
+const TILE_EXTENT = [1116554.4631222049, 5871439.8889177805,
+                     1454674.4631222049, 6072574.8889177805];
+const tileGrid = new ol.tilegrid.TileGrid({
+  extent: TILE_EXTENT,
+  origin: [TILE_EXTENT[0], TILE_EXTENT[3]],
+  resolutions: [100],
+  tileSize: 256
+});
+const tileLayer = new ol.layer.Tile({visible:false});
+map.addLayer(tileLayer);
 const popup = document.getElementById('popup');
 const popupContent = document.getElementById('popup-content');
 const popupCloseButton = document.getElementById('popup-close-button');
@@ -24,6 +35,7 @@ map.addOverlay(overlay);
 
 let times = [], points = [], varName = 'temperature_2m';
 let variables = [];
+let colorScales = {};
 
 const hourOffsets = [3,4,5,6]; // 9am, noon, 3pm, 6pm
 let dayIdx = 10, hourIdx = 0; // Start at day 10 (May 24th) as "Today"
@@ -61,7 +73,7 @@ const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 
 // load peak list for name lookups
-fetch('resources/meteo_api/tirol_peaks.geojson')
+const peaksPromise = fetch('resources/meteo_api/tirol_peaks.geojson')
   .then(r => r.json())
   .then(g => {
     peaks = g.features.map(f => ({
@@ -72,10 +84,15 @@ fetch('resources/meteo_api/tirol_peaks.geojson')
     }));
   }).catch(() => {});
 
-fetch('resources/meteo_api/weather_data_3hour.json').then(r => r.json()).then(d => {
+const colorScalePromise = fetch('resources/Make%20TIFs/color_scales.json')
+  .then(r => r.json())
+  .then(d => { colorScales = d; })
+  .catch(e => console.error('Color scale load failed', e));
+
+const weatherPromise = fetch('resources/meteo_api/weather_data_3hour.json').then(r => r.json()).then(d => {
   const sample = d.coordinates.find(c => c.weather_data_3hour);
   if (!sample) return;
-  times = sample.weather_data_3hour.hourly.time.map(t => new Date(t)); // Use full array, not slice(0,40)
+  times = sample.weather_data_3hour.hourly.time.map(t => new Date(t));
   variables = Object.keys(sample.weather_data_3hour.hourly)
     .filter(k => k !== 'time' && k !== 'time_units');
   points = d.coordinates.filter(c => c.weather_data_3hour).map(c => ({
@@ -84,9 +101,12 @@ fetch('resources/meteo_api/weather_data_3hour.json').then(r => r.json()).then(d 
     info: c.coordinate_info || {},
     w: c.weather_data_3hour.hourly
   }));
+}).catch(e => console.error('Weather data load failed', e));
+
+Promise.all([colorScalePromise, weatherPromise, peaksPromise]).then(() => {
   updateButtons();
   draw();
-}).catch(e => console.error('Weather data load failed', e));
+});
 
 function formatDay(d){
   // Use May 24th as reference "Today" 
@@ -105,45 +125,72 @@ function formatTime(d){
   return `${hour}${period}`;
 }
 
-function color(val, min, max, varName){
-  // Special handling for weather_code (WMO codes)
+function hexToRgb(hex){
+  hex = hex.replace('#','');
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex,16);
+  return [num>>16 & 255, num>>8 & 255, num & 255];
+}
+
+function interpColor(c1,c2,t){
+  return [
+    Math.round(c1[0] + (c2[0]-c1[0])*t),
+    Math.round(c1[1] + (c2[1]-c1[1])*t),
+    Math.round(c1[2] + (c2[2]-c1[2])*t)
+  ];
+}
+
+function color(val, varName){
+  const spec = colorScales[varName];
+  if(!spec) return '#ff00ff';
+
   if(varName === 'weather_code') {
-    // WMO weather codes: 0=clear, 1-3=partly cloudy, 45-48=fog, 51-67=rain, 71-77=snow, 80-99=storms
-    if(val <= 3) return '#FFD700'; // Clear/partly cloudy - yellow/gold
-    if(val <= 48) return '#808080'; // Fog - gray
-    if(val <= 67) return '#4169E1'; // Rain - blue
-    if(val <= 77) return '#FFFFFF'; // Snow - white
-    return '#FF4500'; // Storms - red-orange
+    const pal = spec.palette;
+    if(val <= 3) return pal[0];
+    if(val <= 48) return pal[1];
+    if(val <= 67) return pal[2];
+    if(val <= 77) return pal[3];
+    return pal[4];
   }
-  
-  // Normal gradient for other variables
-  const t = Math.max(0, Math.min(1, (val - min)/(max-min)));
-  const r = Math.round(255*t);
-  const b = Math.round(255*(1-t));
-  return `rgb(${r},0,${b})`;
+
+  const min = spec.min;
+  const max = spec.max;
+  const palette = spec.palette;
+  const t = Math.max(0, Math.min(1, (val - min)/(max - min)));
+  const scaled = t * (palette.length - 1);
+  const idx = Math.floor(scaled);
+  const frac = scaled - idx;
+  const c1 = hexToRgb(palette[idx]);
+  const c2 = hexToRgb(palette[Math.min(idx+1, palette.length-1)]);
+  const c = interpColor(c1,c2,frac);
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
 function draw(){
   const idx = dayIdx*8 + hourOffsets[hourIdx];
   if(!times[idx]) return;
-  const values = [];
+  const spec = colorScales[varName] || {};
+  currentMin = spec.min ?? 0;
+  currentMax = spec.max ?? 1;
+  if(!isPointMode){
+    src.clear();
+    updateTileLayer();
+    showLayerInfoBox();
+    return;
+  }
+
   const feats = points.map(p=>{
     const v = p.w[varName]?.[idx];
-    values.push(v);
     const f = new ol.Feature(new ol.geom.Point(ol.proj.fromLonLat([p.lon,p.lat])));
     f.set('v', v);
     f.set('data', {p, idx});
     return f;
   });
-  const nums = values.filter(v=>typeof v==='number');
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
-  currentMin = min; currentMax = max;
   src.clear();
   feats.forEach(f=>{
     const v=f.get('v');
     if(typeof v!=='number') return;
-    f.setStyle(new ol.style.Style({image:new ol.style.Circle({radius:6,fill:new ol.style.Fill({color:color(v,min,max,varName)})})}));
+    f.setStyle(new ol.style.Style({image:new ol.style.Circle({radius:6,fill:new ol.style.Fill({color:color(v,varName)})})}));
     src.addFeature(f);
   });
   showLayerInfoBox();
@@ -163,7 +210,8 @@ function showLayerInfoBox(){
   const t = times[idx];
   if(!info || !t) return;
   info.classList.remove('info-box-selecting');
-  const barStyle = `background:linear-gradient(to right,rgb(0,0,255),rgb(255,0,0))`;
+  const spec = colorScales[varName] || {palette:['#0000ff','#ff0000']};
+  const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
   const label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
@@ -179,6 +227,22 @@ function showLayerInfoBox(){
   `;
   info.style.display = 'block';
 }
+function updateTileLayer(){
+  const idx = dayIdx*8 + hourOffsets[hourIdx];
+  if(!times[idx]) return;
+  const ts = times[idx].toISOString();
+  const src = new ol.source.TileImage({
+    tileGrid: tileGrid,
+    tileUrlFunction: (tileCoord) => {
+      if(tileCoord[0] !== 0) return "";
+      const x = tileCoord[1];
+      const y = -tileCoord[2]-1;
+      return `tiles/${ts}/${varName}/${x}_${y}.png`;
+    }
+  });
+  tileLayer.setSource(src);
+}
+
 
 function showDaySelector(){
   const info = document.getElementById('info-box');
@@ -234,10 +298,13 @@ toggleBtn.onclick = () => {
   isPointMode = !isPointMode;
   if (isPointMode) {
     toggleBtn.classList.remove('smooth');
+    tileLayer.setVisible(false);
+    draw();
   } else {
     toggleBtn.classList.add('smooth');
+    tileLayer.setVisible(true);
+    draw();
   }
-  // TODO: Implement smooth/interpolated visualization mode
   console.log('Mode:', isPointMode ? 'Point' : 'Smooth');
 };
 
