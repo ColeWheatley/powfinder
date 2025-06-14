@@ -3,13 +3,14 @@ Powfinder
 ⚠️ NOTE: Large terrain and shadow data files (~32GB+) are excluded from this Git repository due to size constraints. See resources/README_DATA_FILES.md for setup instructions.
 
 ## Repository Structure:
-* **Frontend**: `index.html`, `style.css`, `frontend.js` - Interactive web interface
-* **Core Services**: `gridService.js` - Data management and grid handling  
+* **Frontend**: `index.html`, `style.css`, `main.js` - Interactive web interface with OpenLayers
+* **TIF Generation**: `resources/Make TIFs/` - Temperature interpolation and color scale management
 * **Meteorological API**: `resources/meteo_api/` - Weather data API and peak locations (GeoJSON format from OpenStreetMap)
 * **Hillshade Processing**: `resources/hillshade/render_hillshade.py` - Solar illumination modeling
 * **Shadow Processing**: `resources/shadows/render_shadow_map.py` - Binary terrain obstruction mapping
 * **Terrain Data**: `resources/terrains/` - Multi-resolution DEM files (excluded from Git)
-* **Configuration**: Model configurations and processing parameters
+* **Pipeline Utilities**: `resources/pipeline/` - Weather processing utilities
+* **Debugging Tools**: `debugging/` - Temperature validation and diagnostic scripts
 
 Project Overview and Rationale
 
@@ -73,7 +74,7 @@ o Hillshade: Computed solar illumination (dot product of sun vector and surface 
 * ✅ **Random Coordinates Generated**: 2,000 scientific sampling points with elevation/proximity controls and reproducible seeding
 * ✅ **Coordinate Validation**: All 5,000 coordinates validated and ready for weather data collection
 * ✅ **API Rate Management**: Confirmed 5,000 calls/hour allocation with optimized rate limiting (0.5s delays)
-* 🔄 **Weather Data Collection**: Robust resumable collection system ready for full 5,000-coordinate dataset
+* ✅ **Weather Data Collection**: Robust resumable collection system ready for full 5,000-coordinate dataset
 * 🔄 **Physics Extrapolation Pipeline**: Weather extrapolation system development for comprehensive coverage
 * 🔄 **Server API Development**: REST endpoints for efficient weather data serving
 
@@ -90,28 +91,29 @@ o Hillshade: Computed solar illumination (dot product of sun vector and surface 
 * Snow Quality Heuristic (SQH): Integrates snowfall, temperature, settling, wind scouring, and solar radiation to approximate snowpack quality and depth. (Implementation after raw weather data displays successfully)
 * Skiability Index: Further integrates day-of conditions (wind, visibility, sunshine) to give a single, intuitive metric for skiing suitability. (Implementation after raw weather data displays successfully)
 
-Current State of Project (serverside-refactor branch)
+Current State of Project (prototyping branch)
 
-## Architecture Refactor Status:
-* ✅ **Client-side processing moved to server**: Weather API calls, terrain evaluation, snow quality modeling, and weather extrapolation now handled server-side
-* ✅ **Hillshade modeling implemented**: Python scripts for solar illumination (dot product of sun and surface normal) at multiple resolutions (5m, 25m, 100m) across 4 time periods
-* ✅ **Shadow mapping system optimized**: GRASS GIS-based binary shadow casting with horizon optimization for ski-relevant terrain analysis at 4 time periods (07:30, 10:30, 13:30, 16:30)
-* ✅ **Performance optimization implemented**: Horizon pre-computation with 2.7km distance limiting based on ski-terrain analysis (max shadow distance for 1,768m elevation difference)
+## TIF Generation and Visualization Pipeline:
+* ✅ **Temperature TIF Generation**: Physics-based interpolation system with corrected hillshade normalization and lapse rate calculations
+* ✅ **Color Scale Management**: Consistent temperature visualization (-17.5°C to 25.62°C) across all TIFs and frontend display
+* ✅ **Frontend Integration**: Point-based weather visualization with OpenLayers, synchronized to May 24th, 2025 reference date
+* ✅ **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with proper parameter handling
+* ✅ **Physics Debugging**: Fixed major hillshade normalization bug (corrected from 0-255 to int16 0-32767 range)
+* ✅ **Validation Tools**: Peak temperature testing scripts for TIF accuracy validation (moved to `debugging/` folder)
+* ✅ **Weather Data Pipeline**: Complete 165MB weather dataset covering 5,000 coordinates (3,000 peaks + 2,000 random points)
 * ✅ **Terrain processing pipeline**: Complete DEM processing at 5m, 25m, 100m resolutions with slope/aspect calculations
+* ✅ **Hillshade modeling implemented**: Solar illumination calculations at multiple resolutions across 4 time periods
 * ✅ **Data management**: Large terrain/shadow files (~32GB) properly excluded from Git repository
 * ✅ **File organization**: Weather API and peak data moved to `resources/meteo_api/`, separate directories for hillshade and shadow processing
 * ✅ **Weather API system**: Operational Open-Meteo integration with robust resumable collection system (3,000 highest peaks + 2,000 random coordinates)
-* ✅ **Random coordinate generation**: 2,000 scientifically generated sampling points above 2,300m with proximity controls, DEM validation, and reproducible seeding
-* 🔄 **Shadow map production**: Optimized shadow processing currently running with horizon pre-computation for dramatic performance improvement
+* ✅ **Random coordinate generation**: 2,000 generated with proximity controls, DEM validation, and reproducible seeding
 * 🔄 **Frontend streamlined**: Interactive web map with OpenLayers maintained but simplified for preprocessed data consumption
-* 📅 **Demo date set**: Using May 23rd, 2025 for retroactive skiing condition analysis (skiing confirmation: May 24th)
+* 📅 **Demo date set**: Using May 24th, 2025 for retroactive skiing condition analysis not the currentdate or the beginning of the data
 
 ## Immediate Next Steps:
-* 🔄 **Shadow map production**: Optimized shadow processing currently running in background with horizon pre-computation and 2.7km distance limiting for 15x performance improvement
-* **Performance validation**: Measure actual speedup from horizon optimization once current shadow processing completes
-* **Server API development**: Create REST endpoints to serve preprocessed weather and terrain data
-* **Data preprocessing pipeline**: Automate weather fetching, extrapolation, and snow quality calculations for MacBook demo
-* **Frontend integration**: Update client to consume server-processed data instead of doing calculations in browser
+* **Snow Quality Metrics**: Implement SQH and skiability calculations using validated temperature TIFs
+* **Enhanced Visualization**: Optional smooth interpolation layer overlay for spatial context
+
 
 
 Tiling Strategy and Resolution Management
@@ -143,112 +145,66 @@ Technical Stack and Current Architecture
 * **Hillshade System**: Solar illumination modeling using dot product calculations for direct sunlight simulation
 * **Shadow System**: Binary terrain obstruction mapping using GRASS GIS r.sun with horizon pre-computation and 2.7km distance limiting for ski-relevant terrain analysis
 * **Optimization Implementation**: Horizon calculated once with 15° azimuth steps, then reused across all 4 time periods for dramatic performance improvement
-* **Weather Integration**: Open-Meteo API with resumable collection system and physics-based extrapolation for May 14-28, 2025 conditions
-
 ## Frontend (Client-Side):
-* **Mapping**: OpenLayers for interactive map visualization
-* **Grid System**: Unified grid management for efficient data handling
-* **Weather API**: Streamlined weather data consumption from `resources/meteo_api/`
+* **Mapping**: OpenLayers for interactive point-based weather visualization
+* **Date Synchronization**: Frontend aligned to May 24th, 2025 as "Today" reference date  
+* **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with consistent parameter handling
+* **Popup Enhancement**: Improved weather data display with proper units, labels, and formatting
 
 ## Development Status:
-* **Repository**: Clean separation of large data files (~32GB) from codebase by excluding TIF files in `.gitignore`
-# liberal use of branching to save progressive development states
+* **Repository**: Clean separation of large data files (~32GB) from codebase with proper .gitignore
+* **Code Organization**: Vestigial pipeline scripts removed, debugging tools moved to dedicated folder
+* **Branch Strategy**: Using prototyping branch for active TIF generation and visualization development
 
 Current Action Items (Priority Order):
 
 * ✅ Complete terrain data processing pipeline
-* ✅ Implement hillshade generation system  
-* ✅ Develop binary shadow mapping system (terrain obstruction)
-* ✅ Optimize shadow processing with horizon pre-computation and distance limiting
+* ✅ Implement hillshade generation system with proper int16 normalization
 * ✅ Complete weather API debugging and parameter validation
 * ✅ Build robust resumable weather collection system
 * ✅ Generate 5,000 validated coordinates (3,000 peaks + 2,000 random points)
 * ✅ Execute full weather data collection for all 5,000 coordinates (May 14-28, 2025) - Complete with 165MB weather_data_3hour.json
-* ✅ Develop physics-based weather extrapolation system (6-script pipeline) - Operational and validated
-* ✅ Create progressive grid scheduler for multi-resolution weather mapping - Complete with 1,474 task queue
-* ✅ Implement physics-based weather predictions - Generating accurate predictions with excellent validation metrics
-* ✅ Build parameter tuning system for physics-based extrapolation - Available via tune_physics_params.py
-* 🔄 Implement weather map visualization system (gradient images for all variables) - Ready for interpolate_layers.py
-* 🔄 Create local API for data serving
-* 🔄 Integrate raw weather data display before derived metrics implementation
-
-Instructions for upcoming 6 script pipeline: 
-## Weather-Extrapolation Processing Pipeline (6 fully-interoperable scripts) - ✅ OPERATIONAL
+* ✅ Implement TIF generation pipeline with physics-based interpolation and color scale management
+* ✅ Debug and fix physics calculations (hillshade normalization, lapse rate adjustments)
+* ✅ Integrate frontend with consistent date mapping and API calls
+* ✅ Create diagnostic tools for TIF validation and temperature accuracy testing
+* 🔄 Create snow quality heuristic and skiability calculations
 
 **Pipeline Status**: Fully operational and validated with excellent performance metrics. All scripts implemented and tested on May 23rd, 2025 data with physics-based weather extrapolation generating accurate predictions.
 
-**Performance Validation**: Recent pipeline run shows exceptional accuracy:
-- Temperature: 0.43°C Mean Absolute Error
-- Snow Depth: 0.01cm Mean Absolute Error  
-- Snowfall: 0.00004 Mean Absolute Error
-- All weather variables performing within expected tolerances
+## TIF Generation Pipeline
 
-All scripts live in **`resources/pipeline/`** and communicate **only** via the
-explicitly named files below. Every file is JSON, CSV or GeoTIFF so that any
-developer can swap scripts without breakage.
+**Current Implementation**: Simplified physics-based temperature interpolation system integrated into frontend workflow.
 
-| No | Script (CLI entry-point)                | Input(s)                                              | Output(s)                                                        | Purpose (2-line definition)                                                                                                                | Status |
-|----|----------------------------------------|-------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|---------|
-| 1  | `progressive_grid_scheduler.py`        | • `all_points.json`  – array of `{lat,lon,elev,type,is_validation}`<br>• `grid_bounds.json` – `{minLat,maxLat,minLon,maxLon}` | `task_queue.json` – ordered list of tasks:<br>`{"lat":…,"lon":…,"task":"validate" \| "grid_1000" \| "grid_500" \| "grid_100" \| "grid_25"}` | Build a **priority queue**: all validation points first, then 1 km grid, then 500 m, 100 m, 25 m.  Guarantees deterministic order and idempotent reruns. | ✅ Complete |
-| 2  | `physics_extrapolate.py`               | • single task (lat,lon) via CLI args **or** stdin JSON<br>• `physics_params.json` (coefficients: lapse_rate, rad_scale, etc.)<br>• `raw_api_index.csv` – rows `{lat,lon,file}` linking pings to JSON<br>• DEM tiles (rasterio readable) | writes **stdout JSON**:<br>`{"lat":…,"lon":…,"variable_dict":{temp_2m:…, …}}` | Find ≤2 nearest non validation API points, apply parameterised physics (elevation lapse, humidity lapse, radiation mask) to predict the ten target variables at the target coordinate. | ✅ Complete |
-| 3  | `process_task_queue.py`                | • `task_queue.json`<br>• directory `raw_api/` containing original API JSONs (names from `raw_api_index.csv`) | • `predictions.csv` – every processed task, cols `{lat,lon,time,var1…var10}`<br>• `residuals.csv` – rows for `task=="validate"` with extra `actual_*` and `error_*` columns | Iterates queue.  For each task: calls `physics_extrapolate.py`.  If it is a validation point, loads the matching raw API JSON, calculates residuals, logs both.  Safe to resume (keeps a `.done` log). | ✅ Complete |
-| 4  | `analyze_residuals.py`                 | • `residuals.csv`                                     | • `residual_summary.json` (MAE, RMSE per variable & elevation band)<br>• `histogram_errors.png`, `scatter_error_vs_elev.png` | Compute and plot error diagnostics; writes summary JSON for dashboards and optimisation. | ✅ Complete |
-| 5  | `tune_physics_params.py`  *(optional)* | • `residuals.csv`<br>• `physics_params.json`           | • overwrites `physics_params.json` with improved coefficients   | Grid-search / optimiser that minimises RMSE on residuals, ready for a second processing pass. | ✅ Available |
-| 6  | `interpolate_layers.py`                | • `predictions.csv`  (dense & sparse points)<br>• `high_altitude_mask.tif` (>2 300 m = 1, else 0)<br>• `tirol_boundary.geojson` | • One GeoTIFF **per variable × time slice** (e.g. `t2m_20250523T1200.tif`) at 50 m<br>• Matching colour-mapped PNGs (same name, `.png`) | IDW/RBF interpolation onto a 50 m raster, masked to >2 300 m & Tirol border, then colour-renders each raster.  These images become ready-made map layers. | 🔄 Ready |
+**Key Components**:
+- **TIF Generation**: `resources/Make TIFs/generate_t2m_tifs.py` - Creates temperature TIFs with physics-based interpolation
+- **Color Scale Management**: `resources/Make TIFs/generate_color_scales.py` and `color_scales.json` - Ensures consistent visualization
+- **Validation Tools**: `debugging/test_peak_temperatures.py` - Validates TIF accuracy against API weather data
 
-**Current Pipeline Data**:
-- **Weather Data**: 165MB aggregated weather_data_3hour.json covering 5,000 coordinates
-- **Task Queue**: 1,474 processing tasks generated and validated
-- **Target Timestamps**: 4 time periods on May 23rd, 2025 (06:00, 09:00, 12:00, 15:00)
-- **Predictions Output**: predictions.csv with physics-extrapolated weather data
-- **Validation Results**: residuals.csv with excellent model performance metrics
-
-**Data/parameter conventions**
-
-*   All scripts read **`physics_params.json`** (same directory) which defines tunable coefficients:  
-    ```json
-    {
-      "lapse_rate_degC_per_km": -6.5,
-      "humidity_lapse_pct_per_km": -5,
-      "radiation_clear_fraction": 1.0,
-      "snowfall_orographic_factor": 0.1
-    }
-    ```
-    Add new keys freely; every script must ignore unknown keys.
-
-*   Raw API files are one-per-coordinate:<br>
-    `raw_api/47.26890_11.40123.json` *(unchanged by pipeline)*
-
-*   DEM is consumed read-only (via rasterio) from `resources/terrains/dem_25m_wgs84.tif`.
-
-Running the full chain in order:
-
-```bash
-python progressive_grid_scheduler.py
-python process_task_queue.py        # (internally spawns physics_extrapolate)
-python analyze_residuals.py
-python tune_physics_params.py       # optional
-python interpolate_layers.py
-```
-
-## Pipeline Workflow and Usage
-
-### Prerequisites
+**TIF Generation Workflow**:
 ```bash
 conda activate powfinder  # Python 3.11.12 environment
-cd /Users/cole/dev/PowFinder/resources/pipeline
+cd /Users/cole/dev/PowFinder/resources/Make\ TIFs
+
+# Generate color scales (one-time setup)
+python generate_color_scales.py
+
+# Generate temperature TIFs for all timestamps
+python generate_t2m_tifs.py
 ```
 
-### 1. Check Weather Data Status
-```bash
-python check_pipeline.py
-```
-Validates that weather_data_3hour.json is available (165MB, 5,000 coordinates) and displays data summary.
+**Technical Details**:
+- **Physics Model**: Variable lapse rate (-9.8 + humidity adjustment), hillshade illumination (±1°C), snow cooling (-1.5°C)
+- **Interpolation**: Inverse distance weighting using up to 4 nearest weather points from 5,000-coordinate dataset
+- **Output Format**: uint8 TIFs (0-255) representing temperature range -17.5°C to 25.62°C
+- **Validation**: Peak temperature testing shows excellent accuracy after hillshade normalization fixes
 
-### 2. Generate Task Queue (if needed)
-```bash
-python progressive_grid_scheduler.py
-```
+**Data Flow**:
+1. Weather data: `weather_data_3hour.json` (5,000 coordinates)
+2. Terrain data: `tirol_100m_float.tif` + hillshade TIFs  
+3. Physics interpolation: Generate temperature values for each grid cell
+4. Color scaling: Convert temperatures to 0-255 range for consistent visualization
+5. Output: TIFs stored in `TIFS/100m_resolution/<timestamp>/t2m.tif`
 Creates task_queue.json with 1,474 processing tasks in priority order (validation points first, then progressive grid densification).
 
 ### 3. Execute Main Pipeline
