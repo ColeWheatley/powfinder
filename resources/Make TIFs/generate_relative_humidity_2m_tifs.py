@@ -52,15 +52,6 @@ WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
 ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
 # Colour scale configuration for relative humidity range
 COLOR_SCALE_JSON = "color_scales.json"
-# Pre-rendered hillshade for four 3-hour periods (period1=9am, ... period4=6pm)
-HILLSHADE_TIFS = {
-    1: "resources/hillshade/hillshade_100m_period1.tif",
-    2: "resources/hillshade/hillshade_100m_period2.tif",
-    3: "resources/hillshade/hillshade_100m_period3.tif",
-    4: "resources/hillshade/hillshade_100m_period4.tif",
-}
-# Map display hour to hillshade period index
-PERIOD_FROM_HOUR = {9: 1, 12: 2, 15: 3, 18: 4}
 OUTPUT_BASE = "TIFS/100m_resolution"
 NODATA = -9999.0
 
@@ -133,33 +124,20 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade):
+def apply_physics(temp, humid, target_elev, source_elev):
     """Return relative humidity adjusted for terrain effects."""
-    dz_km = (target_elev - source_elev) / 1000.0
-
-    # --- temperature adjustment (reuse from T2M) -----------------------
+    # Calculate temperature change due to lapse rate
     lapse = -9.8 + (humid / 100.0) * 5.8
-    t_adj = temp + lapse * dz_km
-    insolation = hillshade / 32767.0
-    t_adj += (insolation - 0.5) * 2.0
-    t_adj = np.where(snow > 0.1, t_adj - 1.5, t_adj)
-
-    # --- dew point assumption -----------------------------------------
-    ln_rh = np.log(np.maximum(humid, 1e-3) / 100.0)
-    alpha = (17.27 * temp) / (237.7 + temp) + ln_rh
-    dew = (237.7 * alpha) / (17.27 - alpha)
-    dew_adj = dew - 2.0 * dz_km  # weak lapse of dew point
-
-    # Compute RH from adjusted temperature and dew point
-    es_dew = 6.112 * np.exp((17.67 * dew_adj) / (dew_adj + 243.5))
-    es_temp = 6.112 * np.exp((17.67 * t_adj) / (t_adj + 243.5))
-    rh = 100.0 * es_dew / es_temp
-
-    # Sunny slopes tend to dry out; shaded pixels retain moisture
-    rh -= (insolation - 0.5) * 10.0
-    rh = np.where(snow > 0.1, rh + 5.0, rh)
-
-    return np.clip(rh, 0.0, 100.0)
+    dz_km = (target_elev - source_elev) / 1000.0
+    delta_t = lapse * dz_km
+    
+    # ADD: Temperature-coupling - RH drops when moist air warms
+    rh_adj = humid * np.exp(-0.07 * delta_t)
+    
+    # Ensure RH stays within physical bounds
+    rh_adj = np.clip(rh_adj, 0.0, 100.0)
+    
+    return rh_adj
 
 
 # --------------------------- Main Processing ---------------------------------
@@ -187,11 +165,6 @@ def main():
         grid_elev, xs, ys = build_grid(elev_src)
         profile = elev_src.profile
 
-    hillshade = {}
-    for period, path in HILLSHADE_TIFS.items():
-        with rasterio.open(path) as hs_src:
-            hillshade[period] = hs_src.read(1, masked=True)
-
     transformer = Transformer.from_crs("EPSG:4326", profile["crs"], always_xy=True)
     tree, pts_proj = precompute_kdtree(coords[:, :2], transformer)
 
@@ -211,24 +184,17 @@ def main():
         if ts not in time_index:
             raise ValueError(f"Timestamp {ts} not found in weather data")
         ti = time_index[ts]
-        hour = datetime.fromisoformat(ts).hour
-        period = PERIOD_FROM_HOUR.get(hour)
-        if period is None:
-            raise ValueError(f"No hillshade period for hour {hour}")
 
         t_vals = temps[:, ti]
         h_vals = humids[:, ti]
-        s_vals = snows[:, ti]
         elev_vals = coords[:, 2]
 
         # gather nearest station data
         t_k = t_vals[idxs]
         h_k = h_vals[idxs]
-        s_k = s_vals[idxs]
         e_k = elev_vals[idxs]
 
-        hs_flat = hillshade[period].filled(0).ravel()
-        lapse_adj = apply_physics(t_k, h_k, s_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        lapse_adj = apply_physics(t_k, h_k, grid_elev_flat[:, None], e_k)
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)
