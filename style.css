@@ -67,35 +67,65 @@ html,body{height:100%;margin:0;}
   align-items: center;
   max-height: 8vh;
   overflow: hidden;
+  /* New styles for flex layout */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-/* Default styling for items directly inside info-box (e.g., title text, map data lines) */
-#info-box > div {
-  padding: 0.2vh 0; 
-  font-size: 1.5vh; 
-  white-space: nowrap; 
+
+/* New styles for the left and right containers */
+.info-box-left {
+  width: 50%;
+  text-align: left;
+  padding-right: 1vw;
+  font-size: 2vh;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-box-right {
+  width: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* Pushes legend content to the right */
 }
 
 /* Conditional styling for #info-box when it's used for selection */
+/* Ensure the info-box in selecting mode allows its child row to fill it */
 #info-box.info-box-selecting {
-    flex-direction: row; /* Arrange items horizontally */
-    flex-wrap: nowrap;   /* Prevent wrapping to next line */
-    justify-content: space-around; /* Distribute items */
-    align-items: center; /* Vertically center items */
-    overflow-x: auto; /* Allow horizontal scrolling if items overflow */
+    display: flex; /* keeps it as a flex container */
+    flex-direction: column; /* Stack rows if multiple were ever added */
+    justify-content: center; /* Center the row vertically */
+    align-items: center; /* Center the row horizontally */
 }
 
-/* Styling for selector items within the info-box when it's in selection mode */
-/* This targets .layer-item specifically when inside #info-box.info-box-selecting */
-#info-box.info-box-selecting .layer-item {
-    font-size: 1.3vh; /* Smaller font for compact items */
-    padding: 0.5vh 0.7vw; /* Reduced padding */
-    flex-grow: 0;       /* Don't grow */
-    flex-shrink: 0;     /* Don't shrink */
-    flex-basis: auto;   /* Base size on content */
-    margin: 0 0.3vw;    /* Small margin between items */
-    /* Inherits background, border-radius, active/hover states from general .layer-item */
+.date-selector-row,
+.time-selector-row {
+    display: flex;
+    justify-content: space-around; /* Distribute buttons */
+    align-items: center;
+    width: 100%;
+    padding: 0.5vh 0; /* Add some vertical padding if needed */
 }
+
+/* Styling for selector items within the new rows */
+#info-box.info-box-selecting .layer-item {
+    font-size: 1.5vh; /* Slightly larger for better readability */
+    padding: 1vh 1vw; /* More padding like other main buttons */
+    flex-basis: 20%;  /* Target 4 items, leaving space for margins */
+    flex-grow: 0;     /* Don't grow beyond basis */
+    flex-shrink: 0;   /* Don't shrink */
+    margin: 0 1%;     /* Margins between items */
+    /* background, border-radius, active/hover states are inherited from general .layer-item */
+    /* Ensure text is centered if not by default */
+    text-align: center;
+    white-space: nowrap; /* Prevent text wrapping */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 
 /* Specific styling for the title text div, if different from other #info-box > div items */
 #info-box .info-box-title-text {
@@ -311,25 +341,55 @@ html,body{height:100%;margin:0;}
     display: flex;
     align-items: center;
     font-size: 1.3vh;
-    margin-left: auto;
 }
 .legend-bar {
-    width: 30vw;
+    flex-grow: 1;
+    min-width: 10vw; /* Ensures visibility */
     height: 3vh;
     margin: 0 0.5vw;
-    border: 1px solid rgba(255,255,255,0.5);
+    border: 1.5px solid rgba(255,255,255);
 }
 
 /* Map click popup */
 .popup {
     position: absolute;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.85); /* Updated background opacity */
     color: white;
-    padding: 0.5vh 1vw;
+    padding: 1vh 1.5vw; /* Updated padding */
     border-radius: 0.5vh;
     pointer-events: none;
     transform: translate(-50%, -100%);
     font-family: var(--brand-font);
     font-size: 1.5vh;
-    max-width: 40vw;
+    min-width: 10vw; /* Added minimum width */
+    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5); /* Added drop shadow */
+}
+
+.popup::after {
+    content: '';
+    position: absolute;
+    bottom: -10px; /* Adjust to control the arrow's position relative to the popup bottom */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent; /* Size of the arrow */
+    border-right: 10px solid transparent; /* Size of the arrow */
+    border-top: 10px solid rgba(0, 0, 0, 0.85); /* Color of the arrow, matches anticipated popup bg */
+    pointer-events: none; /* Ensure arrow doesn't interfere with clicks */
+}
+
+.popup-close-button {
+    position: absolute;
+    top: 5px; /* Adjust as needed */
+    right: 10px; /* Adjust as needed */
+    color: white;
+    font-size: 20px; /* Adjust as needed */
+    font-weight: bold;
+    cursor: pointer !important; /* Ensure cursor is pointer */
+    z-index: 10; /* Ensure it's above popup-content if content is positioned */
+    pointer-events: auto; /* Make sure it can receive click events */
+}
+.popup-close-button:hover {
+    color: #ff4081; /* Accent color on hover, or any other suitable hover effect */
 }
