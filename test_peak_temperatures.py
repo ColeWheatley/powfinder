@@ -212,13 +212,17 @@ def main():
         # Display results
         print(f"   📍 Peak location:")
         if tif_temp_peak is not None:
-            print(f"      TIF Temperature: {tif_temp_peak:.1f}°C")
+            converted_temp_peak = scale_rgb_to_temperature(tif_temp_peak)
+            print(f"      TIF (RGB): {tif_temp_peak:.0f}")
+            print(f"      TIF Temperature: {converted_temp_peak:.1f}°C")
         else:
             print(f"      TIF: No data")
         
         print(f"   📍 100m South ({lat_south:.6f}, {lon_south:.6f}):")
         if tif_temp_south is not None:
-            print(f"      TIF Temperature: {tif_temp_south:.1f}°C")
+            converted_temp_south = scale_rgb_to_temperature(tif_temp_south)
+            print(f"      TIF (RGB): {tif_temp_south:.0f}")
+            print(f"      TIF Temperature: {converted_temp_south:.1f}°C")
         else:
             print(f"      TIF: No data")
         
@@ -234,11 +238,14 @@ def main():
         # Analysis
         print(f"   📊 Analysis:")
         if tif_temp_peak is not None and api_temp is not None:
-            physics_error = tif_temp_peak - api_temp
+            converted_temp_peak = scale_rgb_to_temperature(tif_temp_peak)
+            physics_error = converted_temp_peak - api_temp
             print(f"      Physics Error: {physics_error:+.1f}°C (TIF - API)")
         
         if tif_temp_peak is not None and tif_temp_south is not None:
-            spatial_diff = tif_temp_south - tif_temp_peak
+            converted_temp_peak = scale_rgb_to_temperature(tif_temp_peak)
+            converted_temp_south = scale_rgb_to_temperature(tif_temp_south)
+            spatial_diff = converted_temp_south - converted_temp_peak
             print(f"      Spatial Gradient: {spatial_diff:+.1f}°C (South - Peak)")
         
         print("   " + "-" * 60)

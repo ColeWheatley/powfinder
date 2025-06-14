@@ -361,7 +361,7 @@ html,body{height:100%;margin:0;}
     transform: translate(-50%, -100%);
     font-family: var(--brand-font);
     font-size: 1.5vh;
-    min-width: 10vw; /* Added minimum width */
+    width: max-content; /* Dynamic width that prevents wrapping */
     box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5); /* Added drop shadow */
 }
 
