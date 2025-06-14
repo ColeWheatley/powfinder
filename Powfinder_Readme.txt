@@ -94,8 +94,11 @@ o Hillshade: Computed solar illumination (dot product of sun vector and surface 
 Current State of Project (prototyping branch)
 
 ## TIF Generation and Visualization Pipeline:
-* ✅ **Temperature TIF Generation**: Physics-based interpolation system with corrected hillshade normalization and lapse rate calculations
-* ✅ **Color Scale Management**: Consistent temperature visualization (-17.5°C to 25.62°C) across all TIFs and frontend display
+* ✅ **Comprehensive TIF Generation**: Complete suite of generation scripts for all weather variables (temperature_2m, relative_humidity_2m, shortwave_radiation, cloud_cover, snowfall, freezing_level_height, surface_pressure, weather_code, dewpoint_2m)
+* ✅ **Consistent Variable Naming**: All TIF output files and scripts renamed to match color_scales.json variable names for frontend compatibility
+* ✅ **Physics-Based Processing**: Temperature TIFs include sophisticated physics (hillshade normalization, lapse rate calculations, snow effects) - other variables use simplified interpolation
+* ⚠️ **Physics Model Status**: Temperature TIF generation uses validated physics model; other weather variables use basic interpolation (physics models may need refinement)
+* ✅ **Color Scale Management**: Consistent visualization ranges across all weather variables including estimated dewpoint range (-20°C to 20°C)
 * ✅ **Frontend Integration**: Point-based weather visualization with OpenLayers, synchronized to May 24th, 2025 reference date
 * ✅ **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with proper parameter handling
 * ✅ **Physics Debugging**: Fixed major hillshade normalization bug (corrected from 0-255 to int16 0-32767 range)
