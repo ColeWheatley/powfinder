@@ -48,7 +48,6 @@ TIMESTAMPS = [
 
 WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
 ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
-SLOPE_TIF = "resources/terrains/tirol_slope_100m_web.tif"
 # Color scale configuration for cloud cover range
 COLOR_SCALE_JSON = "color_scales.json"
 OUTPUT_BASE = "TIFS/100m_resolution"
@@ -65,6 +64,7 @@ def load_weather_points(path):
 
     coords = []
     clouds = []
+    humidity = []
     times = None
 
     entries = data.get("coordinates", data)
@@ -92,8 +92,9 @@ def load_weather_points(path):
 
         coords.append((info["latitude"], info["longitude"], elevation))
         clouds.append(np.array(hourly["cloud_cover"], dtype=np.float32))
+        humidity.append(np.array(hourly["relative_humidity_2m"], dtype=np.float32))
 
-    return (np.array(coords), np.stack(clouds), times)
+    return (np.array(coords), np.stack(clouds), np.stack(humidity), times)
 
 
 def build_grid(src_dataset):
@@ -118,14 +119,11 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(cloud, slope):
-    """Apply orographic enhancement to cloud cover - keep simple IDW interpolation."""
-    # ADD: Orographic enhancement for steep slopes
-    # Simplified version without wind direction - just enhance steep slopes
-    orographic_boost = np.where(slope > 25.0, 10.0, 0.0)
-    
-    adj = cloud + orographic_boost
-    return np.clip(adj, 0.0, 100.0)
+def apply_physics(cloud, humid, target_elev, source_elev):
+    """Apply simple orographic adjustment to cloud cover."""
+    adj = cloud + 10.0 * ((target_elev - source_elev) / 1000.0)
+    adj += (humid - 75.0) * 0.05
+    return np.clip(adj, 0, 100)
 
 
 # --------------------------- Main Processing ---------------------------------
@@ -134,7 +132,7 @@ def main():
     if not os.path.exists(WEATHER_PATH):
         raise FileNotFoundError(WEATHER_PATH)
 
-    coords, clouds, times = load_weather_points(WEATHER_PATH)
+    coords, clouds, humids, times = load_weather_points(WEATHER_PATH)
     time_index = get_time_indices(times)
 
     # Load color scale configuration for reference range
@@ -150,10 +148,6 @@ def main():
     with rasterio.open(ELEVATION_TIF) as elev_src:
         grid_elev, xs, ys = build_grid(elev_src)
         profile = elev_src.profile
-
-    # Load slope data
-    with rasterio.open(SLOPE_TIF) as slope_src:
-        grid_slope = slope_src.read(1, masked=True)
 
     transformer = Transformer.from_crs("EPSG:4326", profile["crs"], always_xy=True)
     tree, pts_proj = precompute_kdtree(coords[:, :2], transformer)
@@ -175,12 +169,15 @@ def main():
             raise ValueError(f"Timestamp {ts} not found in weather data")
         ti = time_index[ts]
         cloud_vals = clouds[:, ti]
+        h_vals = humids[:, ti]
+        elev_vals = coords[:, 2]
 
         # gather nearest station data
         c_k = cloud_vals[idxs]
+        h_k = h_vals[idxs]
+        e_k = elev_vals[idxs]
 
-        slope_flat = grid_slope.filled(0).ravel()
-        lapse_adj = apply_physics(c_k, slope_flat[:, None])
+        lapse_adj = apply_physics(c_k, h_k, grid_elev_flat[:, None], e_k)
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)

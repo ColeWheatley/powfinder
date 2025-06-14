@@ -128,10 +128,9 @@ def get_time_indices(all_times):
 
 
 def apply_pressure_adjustment(pressure, target_elev, source_elev):
-    """Adjust surface pressure using pure hypsometric formula.
-    P = P_src - 12 hPa × Δelev/100 m"""
-    elev_diff_100m = (target_elev - source_elev) / 100.0
-    return pressure - 12.0 * elev_diff_100m
+    """Adjust surface pressure for elevation difference using a simple
+    barometric approximation (≈0.12 hPa drop per meter)."""
+    return pressure + (source_elev - target_elev) * 0.12
 
 
 # --------------------------- Main Processing ---------------------------------

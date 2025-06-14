@@ -114,7 +114,7 @@ html,body{height:100%;margin:0;}
 #info-box.info-box-selecting .layer-item {
     font-size: 1.5vh; /* Slightly larger for better readability */
     padding: 1vh 1vw; /* More padding like other main buttons */
-    flex-basis: 20%;  /* Target 4 items, leaving space for margins */
+    flex-basis: 15%;  /* Target 4 items, leaving space for margins */
     flex-grow: 0;     /* Don't grow beyond basis */
     flex-shrink: 0;   /* Don't shrink */
     margin: 0 1%;     /* Margins between items */
