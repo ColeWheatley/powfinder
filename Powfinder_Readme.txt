@@ -176,8 +176,8 @@ Current Action Items (Priority Order):
 
 **Current Implementation**: Simplified physics-based temperature interpolation system integrated into frontend workflow.
 
-**Key Components**:
 - **TIF Generation**: `resources/Make TIFs/generate_t2m_tifs.py` - Creates temperature TIFs with physics-based interpolation
+- **Wind TIF Generation**: `resources/Make TIFs/generate_wind10m_tifs.py` - Produces wind speed rasters using a similar approach
 - **Color Scale Management**: `resources/Make TIFs/generate_color_scales.py` and `color_scales.json` - Ensures consistent visualization
 - **Validation Tools**: `debugging/test_peak_temperatures.py` - Validates TIF accuracy against API weather data
 
@@ -191,6 +191,8 @@ python generate_color_scales.py
 
 # Generate temperature TIFs for all timestamps
 python generate_t2m_tifs.py
+# Generate wind speed TIFs for all timestamps
+python generate_wind10m_tifs.py
 ```
 
 **Technical Details**:
@@ -204,7 +206,7 @@ python generate_t2m_tifs.py
 2. Terrain data: `tirol_100m_float.tif` + hillshade TIFs  
 3. Physics interpolation: Generate temperature values for each grid cell
 4. Color scaling: Convert temperatures to 0-255 range for consistent visualization
-5. Output: TIFs stored in `TIFS/100m_resolution/<timestamp>/t2m.tif`
+5. Output: TIFs stored in `TIFS/100m_resolution/<timestamp>/t2m.tif` and `TIFS/100m_resolution/<timestamp>/wind10m.tif`
 Creates task_queue.json with 1,474 processing tasks in priority order (validation points first, then progressive grid densification).
 
 ### 3. Execute Main Pipeline

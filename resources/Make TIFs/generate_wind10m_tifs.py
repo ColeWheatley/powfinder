@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Generate T2M GeoTIFFs by interpolating weather data to a 100m grid.
+"""Generate Wind-Speed GeoTIFFs by interpolating weather data to a 100m grid.
 
 This script reads the aggregated 3-hour weather dataset and creates
-interpolated temperature rasters for a set of predefined timestamps.
+interpolated wind-speed rasters for a set of predefined timestamps.
 The output structure is::
 
-    TIFS/100m_resolution/<timestamp>/t2m.tif
+    TIFS/100m_resolution/<timestamp>/wind10m.tif
 
 The interpolation uses up to four nearest weather points with inverse
-distance weighting and physics-based adjustments (variable lapse rate,
-hillshade illumination, snow cooling).
+distance weighting and physics-based adjustments tailored for wind
+speed.
 """
 
 import json
@@ -48,7 +48,7 @@ TIMESTAMPS = [
 
 WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
 ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
-# Color scale configuration for temperature range
+# Color scale configuration for wind speed range
 COLOR_SCALE_JSON = "color_scales.json"
 # Pre-rendered hillshade for four 3-hour periods (period1=9am, ... period4=6pm)
 HILLSHADE_TIFS = {
@@ -72,9 +72,7 @@ def load_weather_points(path):
         data = json.load(fp)
 
     coords = []
-    temps = []
-    humidity = []
-    snow_depth = []
+    wind = []
     times = None
 
     entries = data.get("coordinates", data)
@@ -101,12 +99,9 @@ def load_weather_points(path):
             times = hourly["time"]
 
         coords.append((info["latitude"], info["longitude"], elevation))
-        temps.append(np.array(hourly["temperature_2m"], dtype=np.float32))
-        humidity.append(np.array(hourly["relative_humidity_2m"], dtype=np.float32))
-        snow_depth.append(np.array(hourly["snow_depth"], dtype=np.float32))
+        wind.append(np.array(hourly["wind_speed_10m"], dtype=np.float32))
 
-    return (np.array(coords), np.stack(temps), np.stack(humidity),
-            np.stack(snow_depth), times)
+    return np.array(coords), np.stack(wind), times
 
 
 def build_grid(src_dataset):
@@ -131,16 +126,14 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade):
-    """Apply physics adjustments using lapse rate and hillshade."""
-    lapse = -9.8 + (humid / 100.0) * 5.8
-    adj = temp + lapse * ((target_elev - source_elev) / 1000.0)
+def apply_physics(speed, target_elev, source_elev, hillshade):
+    """Apply simple physics adjustments for wind speed."""
+    # Increase wind speed with elevation difference (~0.1 m/s per 100 m)
+    adj = speed + 0.1 * ((target_elev - source_elev) / 100.0)
 
-    # Hillshade ranges 0-32767 (int16) -> normalize to 0..1 then shift around 0.5
+    # Hillshade ranges 0-32767 (int16); brighter areas tend to be windier
     insolation = hillshade / 32767.0
-    adj += (insolation - 0.5) * 2.0  # +/-1°C based on illumination
-
-    adj = np.where(snow > 0.1, adj - 1.5, adj)
+    adj *= 1.0 + (insolation - 0.5) * 0.1  # +/-5% modification
     return adj
 
 
@@ -150,7 +143,7 @@ def main():
     if not os.path.exists(WEATHER_PATH):
         raise FileNotFoundError(WEATHER_PATH)
 
-    coords, temps, humids, snows, times = load_weather_points(WEATHER_PATH)
+    coords, winds, times = load_weather_points(WEATHER_PATH)
     time_index = get_time_indices(times)
 
     # Load color scale configuration for reference range
@@ -158,9 +151,9 @@ def main():
     if os.path.exists(COLOR_SCALE_JSON):
         with open(COLOR_SCALE_JSON, "r", encoding="utf-8") as fp:
             scales = json.load(fp)
-        color_scale = scales.get("temperature_2m", {})
+        color_scale = scales.get("wind_speed_10m", {})
         print(
-            f"Temperature scale range: {color_scale.get('min')} to {color_scale.get('max')} °C"
+            f"Wind speed scale range: {color_scale.get('min')} to {color_scale.get('max')} m/s"
         )
 
     with rasterio.open(ELEVATION_TIF) as elev_src:
@@ -196,40 +189,36 @@ def main():
         if period is None:
             raise ValueError(f"No hillshade period for hour {hour}")
 
-        t_vals = temps[:, ti]
-        h_vals = humids[:, ti]
-        s_vals = snows[:, ti]
+        w_vals = winds[:, ti]
         elev_vals = coords[:, 2]
 
         # gather nearest station data
-        t_k = t_vals[idxs]
-        h_k = h_vals[idxs]
-        s_k = s_vals[idxs]
+        w_k = w_vals[idxs]
         e_k = elev_vals[idxs]
 
         hs_flat = hillshade[period].filled(0).ravel()
-        lapse_adj = apply_physics(t_k, h_k, s_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        wind_adj = apply_physics(w_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)
 
-        out_flat = np.sum(lapse_adj * w, axis=1)
+        out_flat = np.sum(wind_adj * w, axis=1)
         out_flat = np.where(grid_elev_flat == NODATA, NODATA, out_flat)
         out = out_flat.reshape(grid_elev.shape).astype(np.float32)
         print(f"{ts}: min {out.min():.1f} max {out.max():.1f}")
 
-        # Map floating point temperature to 0-255 byte range using color scale
+        # Map floating point wind speed to 0-255 byte range using color scale
         if color_scale and "min" in color_scale and "max" in color_scale:
-            tmin = color_scale["min"]
-            tmax = color_scale["max"]
+            wmin = color_scale["min"]
+            wmax = color_scale["max"]
         else:
             # fallback to min/max from data
-            tmin = float(np.nanmin(out[out != NODATA]))
-            tmax = float(np.nanmax(out[out != NODATA]))
+            wmin = float(np.nanmin(out[out != NODATA]))
+            wmax = float(np.nanmax(out[out != NODATA]))
 
         # Clip and scale
-        clipped = np.clip(out, tmin, tmax)
-        scaled = (clipped - tmin) / (tmax - tmin)
+        clipped = np.clip(out, wmin, wmax)
+        scaled = (clipped - wmin) / (wmax - wmin)
         out_byte = (scaled * 255).astype(np.uint8)
         out_byte[out == NODATA] = 0  # set nodata to 0 for byte
 
@@ -237,7 +226,7 @@ def main():
 
         out_dir = os.path.join(OUTPUT_BASE, ts)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "t2m.tif")
+        out_path = os.path.join(out_dir, "wind10m.tif")
 
         # Remove existing file if it exists to ensure clean overwrite
         if os.path.exists(out_path):
@@ -246,7 +235,7 @@ def main():
 
         with rasterio.open(out_path, "w", **profile) as dst:
             dst.write(out_byte, 1)
-            dst.update_tags(units="celsius", processing_time=datetime.utcnow().isoformat(),
+            dst.update_tags(units="m/s", processing_time=datetime.utcnow().isoformat(),
                             source_points_count=len(coords))
 
         print(f"Wrote {out_path}")
