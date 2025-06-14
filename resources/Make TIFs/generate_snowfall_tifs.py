@@ -128,16 +128,13 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics_snowfall(snowfall, humid, target_elev, source_elev, hillshade):
-    """Apply simple physics adjustments for snowfall interpolation."""
-    # Orographic enhancement: ~5% more snowfall per 100 m altitude difference
-    enhancement = 1.0 + 0.05 * ((target_elev - source_elev) / 100.0) * (humid / 100.0)
+def apply_physics_snowfall(snowfall, target_elev, source_elev):
+    """Apply orographic enhancement for snowfall interpolation."""
+    # ADD: Simple orographic factor - 10% per km gain
+    delta_elev_km = (target_elev - source_elev) / 1000.0
+    enhancement = 1.0 + 0.10 * delta_elev_km
+    
     adj = snowfall * np.maximum(enhancement, 0.0)
-
-    # Reduce or increase slightly based on illumination (shadier slopes get more)
-    insolation = hillshade / 32767.0
-    adj *= 1.0 + (0.5 - insolation) * 0.1  # ±10%
-
     return adj
 
 
@@ -199,11 +196,9 @@ def main():
 
         # gather nearest station data
         sf_k = sf_vals[idxs]
-        h_k = h_vals[idxs]
         e_k = elev_vals[idxs]
 
-        hs_flat = hillshade[period].filled(0).ravel()
-        lapse_adj = apply_physics_snowfall(sf_k, h_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        lapse_adj = apply_physics_snowfall(sf_k, grid_elev_flat[:, None], e_k)
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)

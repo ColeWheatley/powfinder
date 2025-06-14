@@ -48,6 +48,7 @@ TIMESTAMPS = [
 
 WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
 ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
+SLOPE_TIF = "resources/terrains/tirol_slope_100m_web.tif"
 # Color scale configuration for temperature range
 COLOR_SCALE_JSON = "color_scales.json"
 # Pre-rendered hillshade for four 3-hour periods (period1=9am, ... period4=6pm)
@@ -131,16 +132,33 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade):
-    """Apply physics adjustments using lapse rate and hillshade."""
+def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade, slope):
+    """Apply physics adjustments using lapse rate, hillshade, and valley effects."""
+    # Base lapse rate with humidity adjustment
     lapse = -9.8 + (humid / 100.0) * 5.8
-    adj = temp + lapse * ((target_elev - source_elev) / 1000.0)
+    
+    # ADD: Lapse-rate cap to prevent overshoot at extremes
+    lapse = np.clip(lapse, -12.0, 12.0)
+    
+    # Basic elevation adjustment
+    elev_diff = (target_elev - source_elev) / 1000.0
+    adj = temp + lapse * elev_diff
 
+    # EDIT: Hillshade term scaled to ±0.5°C (not ±1°C)
     # Hillshade ranges 0-32767 (int16) -> normalize to 0..1 then shift around 0.5
     insolation = hillshade / 32767.0
-    adj += (insolation - 0.5) * 2.0  # +/-1°C based on illumination
+    adj += (insolation - 0.5) * 1.0  # ±0.5°C based on illumination
 
+    # Snow cooling effect
     adj = np.where(snow > 0.1, adj - 1.5, adj)
+    
+    # ADD: Valley cold-pool tweak for morning inversions
+    # If slope < 5° and significant elevation drop nearby, subtract 1.5°C
+    # Note: This is a simplified implementation - in reality would need actual
+    # terrain analysis within 1km radius
+    valley_effect = np.where((slope < 5.0) & (target_elev < source_elev - 300), -1.5, 0.0)
+    adj += valley_effect
+    
     return adj
 
 
@@ -166,6 +184,10 @@ def main():
     with rasterio.open(ELEVATION_TIF) as elev_src:
         grid_elev, xs, ys = build_grid(elev_src)
         profile = elev_src.profile
+
+    # Load slope data
+    with rasterio.open(SLOPE_TIF) as slope_src:
+        grid_slope = slope_src.read(1, masked=True)
 
     hillshade = {}
     for period, path in HILLSHADE_TIFS.items():
@@ -208,7 +230,8 @@ def main():
         e_k = elev_vals[idxs]
 
         hs_flat = hillshade[period].filled(0).ravel()
-        lapse_adj = apply_physics(t_k, h_k, s_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        slope_flat = grid_slope.filled(0).ravel()
+        lapse_adj = apply_physics(t_k, h_k, s_k, grid_elev_flat[:, None], e_k, hs_flat[:, None], slope_flat[:, None])
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)

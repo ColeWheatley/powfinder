@@ -98,8 +98,10 @@ Current State of Project (prototyping branch)
 * ✅ **Consistent Variable Naming**: All TIF output files and scripts renamed to match color_scales.json variable names for frontend compatibility
 * ✅ **Physics-Based Processing**: Temperature TIFs include sophisticated physics (hillshade normalization, lapse rate calculations, snow effects) - other variables use simplified interpolation
 * ⚠️ **Physics Model Status**: Temperature TIF generation uses validated physics model; other weather variables use basic interpolation (physics models may need refinement)
+* ⚠️ **Physics Refinements**: Partial implementation of refined physics models (lapse rate caps, valley effects, cloud attenuation, orographic enhancement) - somewhat tuned for visual plausibility
 * ✅ **Color Scale Management**: Consistent visualization ranges across all weather variables including estimated dewpoint range (-20°C to 20°C)
 * ✅ **Frontend Integration**: Point-based weather visualization with OpenLayers, synchronized to May 24th, 2025 reference date
+* ⚠️ **Tiling Integration**: First attempt at integrating TIF tiling into frontend was attempted but not yet working
 * ✅ **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with proper parameter handling
 * ✅ **Physics Debugging**: Fixed major hillshade normalization bug (corrected from 0-255 to int16 0-32767 range)
 * ✅ **Validation Tools**: Peak temperature testing scripts for TIF accuracy validation (moved to `debugging/` folder)

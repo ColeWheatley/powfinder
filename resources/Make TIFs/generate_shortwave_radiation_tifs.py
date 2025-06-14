@@ -74,6 +74,7 @@ def load_weather_points(path):
 
     coords = []
     radiation = []
+    cloud_cover = []
     times = None
 
     entries = data.get("coordinates", data)
@@ -101,8 +102,9 @@ def load_weather_points(path):
 
         coords.append((info["latitude"], info["longitude"], elevation))
         radiation.append(np.array(hourly["shortwave_radiation"], dtype=np.float32))
+        cloud_cover.append(np.array(hourly["cloud_cover"], dtype=np.float32))
 
-    return np.array(coords), np.stack(radiation), times
+    return np.array(coords), np.stack(radiation), np.stack(cloud_cover), times
 
 
 def build_grid(src_dataset):
@@ -127,11 +129,18 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(rad, target_elev, source_elev, hillshade):
-    """Apply simple altitude and hillshade adjustments to radiation."""
+def apply_physics(rad, cloud_cover, target_elev, source_elev, hillshade):
+    """Apply altitude, hillshade, and cloud cover adjustments to radiation."""
+    # Altitude enhancement
     alt_factor = 1.0 + 0.08 * ((target_elev - source_elev) / 1000.0)
+    
+    # Hillshade effect
     insolation = hillshade / 32767.0
-    return rad * alt_factor * insolation
+    
+    # ADD: Cloud cover attenuation
+    cloud_attenuation = (1.0 - cloud_cover / 100.0) ** 1.7
+    
+    return rad * alt_factor * insolation * cloud_attenuation
 
 
 # --------------------------- Main Processing ---------------------------------
@@ -140,7 +149,7 @@ def main():
     if not os.path.exists(WEATHER_PATH):
         raise FileNotFoundError(WEATHER_PATH)
 
-    coords, radiation, times = load_weather_points(WEATHER_PATH)
+    coords, radiation, cloud_cover, times = load_weather_points(WEATHER_PATH)
     time_index = get_time_indices(times)
 
     # Load color scale configuration for reference range
@@ -187,14 +196,16 @@ def main():
             raise ValueError(f"No hillshade period for hour {hour}")
 
         r_vals = radiation[:, ti]
+        c_vals = cloud_cover[:, ti]
         elev_vals = coords[:, 2]
 
         # gather nearest station data
         r_k = r_vals[idxs]
+        c_k = c_vals[idxs]
         e_k = elev_vals[idxs]
 
         hs_flat = hillshade[period].filled(0).ravel()
-        phys_adj = apply_physics(r_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        phys_adj = apply_physics(r_k, c_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)
