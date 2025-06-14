@@ -249,12 +249,6 @@ def main():
             dst.update_tags(units="celsius", processing_time=datetime.utcnow().isoformat(),
                             source_points_count=len(coords))
 
-        # Original float output code commented out
-        # with rasterio.open(out_path, "w", **profile) as dst:
-        #     dst.write(out, 1)
-        #     dst.update_tags(units="celsius", processing_time=datetime.utcnow().isoformat(),
-        #                     source_points_count=len(coords))
-
         print(f"Wrote {out_path}")
 
 if __name__ == "__main__":
