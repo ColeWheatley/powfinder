@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Generate RH GeoTIFFs by interpolating weather data to a 100m grid.
+"""Generate ``dewpoint_2m.tif`` files for a 100 m grid.
 
-This script mirrors ``generate_t2m_tifs.py`` but outputs relative
-humidity at 2 m (``rh2m.tif``). Weather values are aggregated over
-3‑hour periods and interpolated onto the terrain grid using inverse
-distance weighting with simple physics adjustments. The resulting
-directory structure is::
+This is a simplified variant of ``generate_temperature_2m_tifs.py`` that
+interpolates *dewpoint* rather than air temperature.  Dewpoint is
+computed from the station temperature and relative humidity using the
+Magnus formula.  Only a constant lapse rate is applied when adjusting to
+the DEM height (no hillshade or snow corrections).
 
-    TIFS/100m_resolution/<timestamp>/rh2m.tif
+Usage
+-----
+```
+python generate_td2m_tifs.py
+```
 
-Humidity is influenced by elevation, solar exposure and underlying snow
-cover. The algorithm keeps the source dew‑point roughly constant with
-altitude and applies a sunlight drying factor.
+The output structure is::
+
+    TIFS/100m_resolution/<timestamp>/dewpoint_2m.tif
+
 """
 
 import json
@@ -50,17 +55,9 @@ TIMESTAMPS = [
 
 WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
 ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
-# Colour scale configuration for relative humidity range
+# Optional colour scale configuration for dewpoint range
 COLOR_SCALE_JSON = "color_scales.json"
-# Pre-rendered hillshade for four 3-hour periods (period1=9am, ... period4=6pm)
-HILLSHADE_TIFS = {
-    1: "resources/hillshade/hillshade_100m_period1.tif",
-    2: "resources/hillshade/hillshade_100m_period2.tif",
-    3: "resources/hillshade/hillshade_100m_period3.tif",
-    4: "resources/hillshade/hillshade_100m_period4.tif",
-}
-# Map display hour to hillshade period index
-PERIOD_FROM_HOUR = {9: 1, 12: 2, 15: 3, 18: 4}
+DEWPOINT_LAPSE_RATE = -3.0  # °C per km
 OUTPUT_BASE = "TIFS/100m_resolution"
 NODATA = -9999.0
 
@@ -76,7 +73,6 @@ def load_weather_points(path):
     coords = []
     temps = []
     humidity = []
-    snow_depth = []
     times = None
 
     entries = data.get("coordinates", data)
@@ -105,10 +101,8 @@ def load_weather_points(path):
         coords.append((info["latitude"], info["longitude"], elevation))
         temps.append(np.array(hourly["temperature_2m"], dtype=np.float32))
         humidity.append(np.array(hourly["relative_humidity_2m"], dtype=np.float32))
-        snow_depth.append(np.array(hourly["snow_depth"], dtype=np.float32))
 
-    return (np.array(coords), np.stack(temps), np.stack(humidity),
-            np.stack(snow_depth), times)
+    return (np.array(coords), np.stack(temps), np.stack(humidity), times)
 
 
 def build_grid(src_dataset):
@@ -133,33 +127,17 @@ def get_time_indices(all_times):
     return {t: i for i, t in enumerate(all_times)}
 
 
-def apply_physics(temp, humid, snow, target_elev, source_elev, hillshade):
-    """Return relative humidity adjusted for terrain effects."""
-    dz_km = (target_elev - source_elev) / 1000.0
+def compute_dewpoint(temp, rh):
+    """Return dewpoint in °C from temperature (°C) and relative humidity (%)."""
+    a = 17.27
+    b = 237.7
+    alpha = np.log(rh / 100.0) + (a * temp) / (b + temp)
+    return (b * alpha) / (a - alpha)
 
-    # --- temperature adjustment (reuse from T2M) -----------------------
-    lapse = -9.8 + (humid / 100.0) * 5.8
-    t_adj = temp + lapse * dz_km
-    insolation = hillshade / 32767.0
-    t_adj += (insolation - 0.5) * 2.0
-    t_adj = np.where(snow > 0.1, t_adj - 1.5, t_adj)
 
-    # --- dew point assumption -----------------------------------------
-    ln_rh = np.log(np.maximum(humid, 1e-3) / 100.0)
-    alpha = (17.27 * temp) / (237.7 + temp) + ln_rh
-    dew = (237.7 * alpha) / (17.27 - alpha)
-    dew_adj = dew - 2.0 * dz_km  # weak lapse of dew point
-
-    # Compute RH from adjusted temperature and dew point
-    es_dew = 6.112 * np.exp((17.67 * dew_adj) / (dew_adj + 243.5))
-    es_temp = 6.112 * np.exp((17.67 * t_adj) / (t_adj + 243.5))
-    rh = 100.0 * es_dew / es_temp
-
-    # Sunny slopes tend to dry out; shaded pixels retain moisture
-    rh -= (insolation - 0.5) * 10.0
-    rh = np.where(snow > 0.1, rh + 5.0, rh)
-
-    return np.clip(rh, 0.0, 100.0)
+def apply_physics(dewpoint, target_elev, source_elev):
+    """Apply a constant lapse rate to dewpoint values."""
+    return dewpoint + DEWPOINT_LAPSE_RATE * ((target_elev - source_elev) / 1000.0)
 
 
 # --------------------------- Main Processing ---------------------------------
@@ -168,7 +146,8 @@ def main():
     if not os.path.exists(WEATHER_PATH):
         raise FileNotFoundError(WEATHER_PATH)
 
-    coords, temps, humids, snows, times = load_weather_points(WEATHER_PATH)
+    coords, temps, humids, times = load_weather_points(WEATHER_PATH)
+    dewpoints = compute_dewpoint(temps, humids)
     time_index = get_time_indices(times)
 
     # Load color scale configuration for reference range
@@ -176,21 +155,17 @@ def main():
     if os.path.exists(COLOR_SCALE_JSON):
         with open(COLOR_SCALE_JSON, "r", encoding="utf-8") as fp:
             scales = json.load(fp)
-        color_scale = scales.get("relative_humidity_2m", {})
+        color_scale = scales.get("dewpoint_2m")
         if color_scale:
             print(
-                "Humidity scale range:"
-                f" {color_scale.get('min')} to {color_scale.get('max')} %"
+                f"Dewpoint scale range: {color_scale.get('min')} to {color_scale.get('max')} °C"
             )
 
     with rasterio.open(ELEVATION_TIF) as elev_src:
         grid_elev, xs, ys = build_grid(elev_src)
         profile = elev_src.profile
 
-    hillshade = {}
-    for period, path in HILLSHADE_TIFS.items():
-        with rasterio.open(path) as hs_src:
-            hillshade[period] = hs_src.read(1, masked=True)
+
 
     transformer = Transformer.from_crs("EPSG:4326", profile["crs"], always_xy=True)
     tree, pts_proj = precompute_kdtree(coords[:, :2], transformer)
@@ -212,23 +187,15 @@ def main():
             raise ValueError(f"Timestamp {ts} not found in weather data")
         ti = time_index[ts]
         hour = datetime.fromisoformat(ts).hour
-        period = PERIOD_FROM_HOUR.get(hour)
-        if period is None:
-            raise ValueError(f"No hillshade period for hour {hour}")
 
-        t_vals = temps[:, ti]
-        h_vals = humids[:, ti]
-        s_vals = snows[:, ti]
+        t_vals = dewpoints[:, ti]
         elev_vals = coords[:, 2]
 
         # gather nearest station data
         t_k = t_vals[idxs]
-        h_k = h_vals[idxs]
-        s_k = s_vals[idxs]
         e_k = elev_vals[idxs]
 
-        hs_flat = hillshade[period].filled(0).ravel()
-        lapse_adj = apply_physics(t_k, h_k, s_k, grid_elev_flat[:, None], e_k, hs_flat[:, None])
+        lapse_adj = apply_physics(t_k, grid_elev_flat[:, None], e_k)
 
         w = 1.0 / np.maximum(dists, 1e-6) ** 2
         w /= w.sum(axis=1, keepdims=True)
@@ -238,7 +205,7 @@ def main():
         out = out_flat.reshape(grid_elev.shape).astype(np.float32)
         print(f"{ts}: min {out.min():.1f} max {out.max():.1f}")
 
-        # Map floating point humidity to 0-255 byte range using colour scale
+        # Map floating point dewpoint to 0-255 byte range using color scale
         if color_scale and "min" in color_scale and "max" in color_scale:
             tmin = color_scale["min"]
             tmax = color_scale["max"]
@@ -257,7 +224,7 @@ def main():
 
         out_dir = os.path.join(OUTPUT_BASE, ts)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "rh2m.tif")
+        out_path = os.path.join(out_dir, "dewpoint_2m.tif")
 
         # Remove existing file if it exists to ensure clean overwrite
         if os.path.exists(out_path):
@@ -266,7 +233,8 @@ def main():
 
         with rasterio.open(out_path, "w", **profile) as dst:
             dst.write(out_byte, 1)
-            dst.update_tags(units="percent", processing_time=datetime.utcnow().isoformat(),
+            dst.update_tags(units="celsius (dewpoint)",
+                            processing_time=datetime.utcnow().isoformat(),
                             source_points_count=len(coords))
 
         print(f"Wrote {out_path}")

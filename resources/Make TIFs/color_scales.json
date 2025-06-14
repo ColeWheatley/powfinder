@@ -101,5 +101,16 @@
     "api_max": 960.53,
     "pressure_buffer": 1.2,
     "max": 966.73
+  },
+  "dewpoint_2m": {
+    "palette": [
+      "#8b4513",
+      "#87ceeb",
+      "#4169e1"
+    ],
+    "interpolation": "linear",
+    "min": -20.0,
+    "max": 20.0,
+    "_note": "Range estimated for alpine conditions - not precisely calculated from actual data"
   }
 }
