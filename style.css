@@ -357,7 +357,7 @@ html,body{height:100%;margin:0;}
 /* Map click popup */
 .popup {
     position: absolute;
-    background: rgba(0, 0, 0, 0.85); /* Updated background opacity */
+    background: rgba(0, 0, 0, 0.95); /* Slightly more opaque */
     color: white;
     padding: 1vh 1.5vw; /* Updated padding */
     border-radius: 0.5vh;
@@ -365,8 +365,8 @@ html,body{height:100%;margin:0;}
     transform: translate(-50%, -100%);
     font-family: var(--brand-font);
     font-size: 1.5vh;
-    width: max-content; /* Dynamic width that prevents wrapping */
-    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5); /* Added drop shadow */
+    width: 45vw; /* Wider popup for residual table */
+    box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.6); /* Stronger blur */
 }
 
 .popup::after {
@@ -379,7 +379,7 @@ html,body{height:100%;margin:0;}
     height: 0;
     border-left: 10px solid transparent; /* Size of the arrow */
     border-right: 10px solid transparent; /* Size of the arrow */
-    border-top: 10px solid rgba(0, 0, 0, 0.85); /* Color of the arrow, matches anticipated popup bg */
+    border-top: 10px solid rgba(0, 0, 0, 0.95); /* Color of the arrow, matches popup bg */
     pointer-events: none; /* Ensure arrow doesn't interfere with clicks */
 }
 
@@ -396,4 +396,20 @@ html,body{height:100%;margin:0;}
 }
 .popup-close-button:hover {
     color: #ff4081; /* Accent color on hover, or any other suitable hover effect */
+}
+
+/* Table inside popup showing residuals */
+.popup-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 1vh; /* Spacing below header */
+}
+.popup-table th,
+.popup-table td {
+    border: 1px solid white;
+    padding: 0.4vh 0.8vw; /* Slightly roomier */
+    font-size: 1.4vh;
+}
+.popup-table th {
+    font-weight: bold;
 }
