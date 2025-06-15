@@ -177,7 +177,7 @@ Current Action Items (Priority Order):
 **Current Implementation**: Simplified physics-based temperature interpolation system integrated into frontend workflow.
 
 **Key Components**:
-- **TIF Generation**: `resources/Make TIFs/generate_t2m_tifs.py` - Creates temperature TIFs with physics-based interpolation
+- **TIF Generation**: `resources/Make TIFs/generate_tifs.py` - Unified generator with caching and SQH integration
 - **Color Scale Management**: `resources/Make TIFs/generate_color_scales.py` and `color_scales.json` - Ensures consistent visualization
 - **Validation Tools**: `debugging/test_peak_temperatures.py` - Validates TIF accuracy against API weather data
 
@@ -189,8 +189,8 @@ cd /Users/cole/dev/PowFinder/resources/Make\ TIFs
 # Generate color scales (one-time setup)
 python generate_color_scales.py
 
-# Generate temperature TIFs for all timestamps
-python generate_t2m_tifs.py
+# Generate all GeoTIFF layers
+python generate_tifs.py
 ```
 
 **Technical Details**:
