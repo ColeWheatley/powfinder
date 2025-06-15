@@ -3,6 +3,7 @@
 
 import json
 import os
+import pathlib
 from datetime import datetime
 
 import numpy as np
@@ -24,10 +25,13 @@ TIMESTAMPS = [
     "2025-05-28T15:00:00", "2025-05-28T18:00:00",
 ]
 
-WEATHER_PATH = "resources/meteo_api/weather_data_3hour.json"
-ELEVATION_TIF = "resources/terrains/tirol_100m_float.tif"
-COLOR_SCALE_JSON = "color_scales.json"
-OUTPUT_BASE = "TIFS/100m_resolution"
+# Get the directory where this script is located
+SCRIPT_DIR = pathlib.Path(__file__).parent
+
+WEATHER_PATH = SCRIPT_DIR / "../../resources/meteo_api/weather_data_3hour.json"
+ELEVATION_TIF = SCRIPT_DIR / "../../resources/terrains/tirol_100m_float.tif"
+COLOR_SCALE_JSON = SCRIPT_DIR / "color_scales.json"
+OUTPUT_BASE = SCRIPT_DIR / "../../TIFS/100m_resolution"
 NODATA = -9999.0
 
 
@@ -79,15 +83,17 @@ def get_time_indices(all_times):
 
 
 def weather_penalty(code):
-    if code >= 95:
-        return 0.7
-    if code >= 80:
-        return 0.5
-    if code >= 51:
-        return 0.3
-    if code >= 45:
-        return 0.2
-    return 0.0
+    """Calculate weather penalty based on weather code(s)."""
+    # Handle both scalar and array inputs
+    code = np.asarray(code)
+    penalties = np.zeros_like(code, dtype=float)
+    
+    penalties = np.where(code >= 95, 0.7, penalties)
+    penalties = np.where((code >= 80) & (code < 95), 0.5, penalties) 
+    penalties = np.where((code >= 51) & (code < 80), 0.3, penalties)
+    penalties = np.where((code >= 45) & (code < 51), 0.2, penalties)
+    
+    return penalties
 
 
 def main():

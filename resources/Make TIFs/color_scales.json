@@ -1,8 +1,9 @@
 {
   "temperature_2m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "#ff0000",
-      "#0000ff"
+      "#0000ff",
+      "#ff0000"
     ],
     "interpolation": "linear",
     "min": -17.16,
@@ -11,6 +12,7 @@
     "max": 25.62
   },
   "relative_humidity_2m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#ffffff",
       "#00bfff"
@@ -22,6 +24,7 @@
     "max": 100.0
   },
   "shortwave_radiation": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#000000",
       "#ffff00"
@@ -31,47 +34,56 @@
     "max": 1064.17
   },
   "cloud_cover": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "rgba(255,255,255,0)",
-      "#808080"
+      "rgba(128,128,128,0.3)",
+      "rgba(128,128,128,0.8)"
     ],
     "opacity": true,
     "interpolation": "linear",
-    "min": 0.39,
+    "min": 0.78,
     "max": 100.0
   },
   "snow_depth": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "rgba(255,255,255,0)",
-      "#ffffff",
-      "#0000ff"
+      "rgba(0,0,255,0)",
+      "rgba(0,0,255,1)"
     ],
     "opacity": true,
     "interpolation": "linear",
     "min": 0.0,
     "api_max": 2.51,
-    "max": 2.76
+    "max": 255
   },
   "snowfall": {
+    "last_updated": "2025-06-15T13:25:00[Europe/Berlin]",
     "palette": [
-      "#f0f8ff",
-      "#00008b"
+      "rgba(255,255,255,0)",
+      "rgba(173,216,230,0.7)",
+      "rgba(30,144,255,0.9)",
+      "rgba(0,0,139,1.0)"
     ],
+    "opacity": true,
     "interpolation": "linear",
     "min": 0.04,
     "api_max": 8.19,
     "max": 9.01
   },
   "wind_speed_10m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "#e0ffff",
-      "#008080"
+      "#00ff00",
+      "#ffff00", 
+      "#ff0000"
     ],
     "interpolation": "linear",
     "min": 0.23,
     "max": 53.07
   },
   "weather_code": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#ffd700",
       "#808080",
@@ -85,6 +97,7 @@
     "max": 96
   },
   "freezing_level_height": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#add8e6",
       "#00008b"
@@ -94,6 +107,7 @@
     "max": 3250.0
   },
   "surface_pressure": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#87cefa",
       "#8b0000"
@@ -105,6 +119,7 @@
     "max": 966.73
   },
   "dewpoint_2m": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
     "palette": [
       "#8b4513",
       "#87ceeb",
@@ -115,18 +130,28 @@
     "max": 12.80
   },
   "slope": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
     "palette": [
-      "#0000ff",
-      "#008000",
+      "#00ff00",
       "#ffff00",
-      "#ffa500",
       "#ff0000"
     ],
     "interpolation": "linear",
     "min": 0,
-    "max": 90
+    "max": 50
+  },
+  "elevation": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
+    "palette": [
+      "#000000",
+      "#ffffff"
+    ],
+    "interpolation": "linear",
+    "min": 450,
+    "max": 3800
   },
   "aspect": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
     "palette": [
       "#0000ff",
       "#00ff00",
@@ -139,18 +164,36 @@
     "max": 360
   },
   "sqh": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
+      "rgba(255,255,255,0)",
+      "rgba(255,255,255,0)",
+      "rgba(255,255,255,0)",
+      "rgba(255,255,255,0)",
+      "rgba(255,255,255,0)",
+      "rgba(255,0,0,0.3)",
+      "rgba(255,0,0,0.6)",
       "#ff0000",
-      "#00ff00"
+      "#cc0066",
+      "#ff4081"
     ],
     "interpolation": "linear",
     "min": 0,
     "max": 2
   },
   "skiability": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
+      "rgba(255,0,0,0)",
+      "rgba(255,0,0,0.3)",
+      "rgba(255,0,0,0.6)",
       "#ff0000",
-      "#00ff00"
+      "#cc0066",
+      "#6600cc", 
+      "#0066ff",
+      "#0000ff",
+      "#ff4081",
+      "#ff4081"
     ],
     "interpolation": "linear",
     "min": 0,
