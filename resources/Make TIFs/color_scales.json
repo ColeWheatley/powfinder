@@ -1,9 +1,8 @@
 {
   "temperature_2m": {
     "palette": [
-      "#0000ff",
-      "#ffffff",
-      "#ff0000"
+      "#ff0000",
+      "#0000ff"
     ],
     "interpolation": "linear",
     "min": -17.16,
@@ -33,7 +32,7 @@
   },
   "cloud_cover": {
     "palette": [
-      "#ffffff",
+      "rgba(255,255,255,0)",
       "#808080"
     ],
     "opacity": true,
@@ -43,9 +42,11 @@
   },
   "snow_depth": {
     "palette": [
-      "#f0f8ff",
-      "#4169e1"
+      "rgba(255,255,255,0)",
+      "#ffffff",
+      "#0000ff"
     ],
+    "opacity": true,
     "interpolation": "linear",
     "min": 0.0,
     "api_max": 2.51,
@@ -85,8 +86,8 @@
   },
   "freezing_level_height": {
     "palette": [
-      "#8b4513",
-      "#00ff7f"
+      "#add8e6",
+      "#00008b"
     ],
     "interpolation": "linear",
     "min": 1543.39,
@@ -112,5 +113,47 @@
     "interpolation": "linear",
     "min": -14.39,
     "max": 12.80
+  },
+  "slope": {
+    "palette": [
+      "#0000ff",
+      "#008000",
+      "#ffff00",
+      "#ffa500",
+      "#ff0000"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 90
+  },
+  "aspect": {
+    "palette": [
+      "#0000ff",
+      "#00ff00",
+      "#ff0000",
+      "#ffff00",
+      "#0000ff"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 360
+  },
+  "sqh": {
+    "palette": [
+      "#ff0000",
+      "#00ff00"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 2
+  },
+  "skiability": {
+    "palette": [
+      "#ff0000",
+      "#00ff00"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 2
   }
 }
