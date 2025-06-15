@@ -616,7 +616,7 @@ map.on('singleclick', evt=>{
     handleNoData();
     return;
   }
-  const {p,idx} = data;
+  const {p,timestampIdx} = data;
   const lines=[];
   if(p.info && p.info.type){
     if(p.info.type==='peak'){
@@ -633,7 +633,7 @@ map.on('singleclick', evt=>{
   lines.push(`<strong>Location:</strong> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br>`);
   
   variables.forEach(v=>{
-    const val=p.w[v]?.[idx];
+    const val=p.w[v]?.[timestampIdx];
     if(val!=null) {
       const label = varLabels[v] || v;
       const unit = varUnits[v] || '';
