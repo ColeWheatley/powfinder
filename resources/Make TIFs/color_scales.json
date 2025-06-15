@@ -75,7 +75,7 @@
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
       "#00ff00",
-      "#ffff00", 
+      "#ffff00",
       "#ff0000"
     ],
     "interpolation": "linear",
@@ -166,37 +166,23 @@
   "sqh": {
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "rgba(255,255,255,0)",
-      "rgba(255,255,255,0)",
-      "rgba(255,255,255,0)",
-      "rgba(255,255,255,0)",
-      "rgba(255,255,255,0)",
-      "rgba(255,0,0,0.3)",
-      "rgba(255,0,0,0.6)",
       "#ff0000",
-      "#cc0066",
+      "#0000ff",
       "#ff4081"
     ],
     "interpolation": "linear",
     "min": 0,
-    "max": 2
+    "max": 1
   },
   "skiability": {
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "rgba(255,0,0,0)",
-      "rgba(255,0,0,0.3)",
-      "rgba(255,0,0,0.6)",
       "#ff0000",
-      "#cc0066",
-      "#6600cc", 
-      "#0066ff",
       "#0000ff",
-      "#ff4081",
       "#ff4081"
     ],
     "interpolation": "linear",
     "min": 0,
-    "max": 2
+    "max": 1
   }
 }
