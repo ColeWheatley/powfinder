@@ -94,9 +94,13 @@ const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 const infoBox = document.getElementById('info-box');
 
-// Prevent clicks in the info box from toggling the drawer
 if (infoBox) {
-  infoBox.addEventListener('click', (e) => e.stopPropagation());
+  infoBox.addEventListener('click', (e) => {
+    if (e.target.closest('.layer-item')) {
+      e.stopPropagation();
+    }
+  });
+
 }
 
 // load peak list for name lookups
@@ -418,7 +422,12 @@ function showDaySelector(){
     div.style.setProperty('--selector-basis', '15%');
     div.textContent = formatDay(d);
     if (i === dayIdx) div.classList.add('active');
-    div.onclick = () => { dayIdx = i; updateButtons(); draw(); };
+    div.onclick = () => {
+      dayIdx = i;
+      updateButtons();
+      draw();
+      showDaySelector();
+    };
     dayRow.appendChild(div);
   }
   info.style.display='block';
@@ -441,7 +450,12 @@ function showTimeSelector(){
     div.style.setProperty('--selector-basis', '20%');
     div.textContent = formatTime(d);
     if(i === hourIdx) div.classList.add('active');
-    div.onclick = () => { hourIdx = i; updateButtons(); draw(); };
+    div.onclick = () => {
+      hourIdx = i;
+      updateButtons();
+      draw();
+      showTimeSelector();
+    };
     timeRow.appendChild(div);
   }
   info.style.display='block';
