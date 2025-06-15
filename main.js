@@ -64,7 +64,6 @@ const varLabels = {
   freezing_level_height: 'Freezing Level',
   surface_pressure: 'Surface Pressure',
   dewpoint_2m: 'Dewpoint',
-  hillshade: 'Hillshade',
   elevation: 'Elevation',
   aspect: 'Aspect',
   slope: 'Slope',
@@ -84,7 +83,6 @@ const varUnits = {
   freezing_level_height: 'm',
   surface_pressure: 'hPa',
   dewpoint_2m: '°C',
-  hillshade: '',
   elevation: 'm',
   aspect: '°',
   slope: '°',
@@ -204,6 +202,8 @@ function draw(){
   currentMin = spec.min ?? 0;
   currentMax = spec.max ?? 1;
   
+  const layerType = getLayerType(varName);
+  
   if(!isPointMode){
     // Smooth mode: hide points, show image layer
     src.clear();
@@ -217,6 +217,17 @@ function draw(){
   if (tileLayer.imageLayer) {
     tileLayer.imageLayer.setVisible(false);
   }
+  
+  // For terrain layers, we don't have point data, so switch to smooth mode
+  if (layerType === 'terrain') {
+    isPointMode = false;
+    toggleBtn.classList.add('smooth');
+    layer.setVisible(false);
+    updateTileLayer();
+    showLayerInfoBox();
+    return;
+  }
+  
   layer.setVisible(true);
 
   const feats = points.map(p=>{
@@ -252,7 +263,17 @@ function showLayerInfoBox(){
   if(!info || !t) return;
   info.classList.remove('info-box-selecting');
   const spec = colorScales[varName] || {palette:['#0000ff','#ff0000']};
-  const label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
+  
+  const layerType = getLayerType(varName);
+  
+  // For terrain layers, don't show time info
+  let label;
+  if (layerType === 'terrain') {
+    label = `${varLabels[varName] ?? varName}`;
+  } else {
+    label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
+  }
+  
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
   if(varName === 'weather_code'){
@@ -299,9 +320,20 @@ function updateTileLayer(){
     map.removeLayer(tileLayer.imageLayer);
   }
   
-  // For now, use a simple image layer instead of tiles
-  // This will display the full PNG image for the selected variable and time
-  const imageUrl = `TIFS/100m_resolution/${ts}/${varName}.png`;
+  // Determine the image URL based on layer type
+  let imageUrl;
+  const layerType = getLayerType(varName);
+  
+  if (layerType === 'terrain') {
+    // Static terrain layers
+    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
+  } else if (layerType === 'snow_composite' || layerType === 'weather') {
+    // Time-dependent layers (weather data, skiability, SQH)
+    imageUrl = `TIFS/100m_resolution/${ts}/${varName}.png`;
+  } else {
+    console.warn(`Unknown layer type for ${varName}`);
+    return;
+  }
   
   const src = new ol.source.ImageStatic({
     url: imageUrl,
@@ -317,6 +349,47 @@ function updateTileLayer(){
   // Store reference and add to map
   tileLayer.imageLayer = imageLayer;
   map.addLayer(imageLayer);
+}
+
+// Helper function to determine layer type
+function getLayerType(layerName) {
+  const terrainLayers = ['elevation', 'aspect', 'slope'];
+  const snowCompositeLayers = ['skiability', 'sqh'];
+  
+  if (terrainLayers.includes(layerName)) {
+    return 'terrain';
+  } else if (snowCompositeLayers.includes(layerName)) {
+    return 'snow_composite';
+  } else {
+    return 'weather';
+  }
+}
+
+// Helper function to check if layer supports point mode
+function supportsPointMode(layerName) {
+  const layerType = getLayerType(layerName);
+  // Only weather layers support point mode
+  return layerType === 'weather';
+}
+
+// Helper function to update toggle button state
+function updateToggleButtonState() {
+  const toggleBtn = document.getElementById('mode-toggle');
+  const supportsPoints = supportsPointMode(varName);
+  
+  if (supportsPoints) {
+    // Enable the toggle button
+    toggleBtn.disabled = false;
+    toggleBtn.classList.remove('disabled');
+    toggleBtn.title = 'Toggle between point and smooth visualization';
+  } else {
+    // Disable the toggle button and force smooth mode
+    toggleBtn.disabled = true;
+    toggleBtn.classList.add('disabled');
+    toggleBtn.title = 'This layer only supports smooth visualization';
+    isPointMode = false;
+    toggleBtn.classList.add('smooth');
+  }
 }
 
 
@@ -372,6 +445,9 @@ let isPointMode = true; // Back to starting in point mode
 const toggleBtn = document.getElementById('mode-toggle');
 
 toggleBtn.onclick = () => {
+  // Don't do anything if the button is disabled
+  if (toggleBtn.disabled) return;
+  
   isPointMode = !isPointMode;
   if (isPointMode) {
     toggleBtn.classList.remove('smooth');
@@ -391,12 +467,15 @@ toggleBtn.onclick = () => {
   console.log('Mode:', isPointMode ? 'Point' : 'Smooth');
 };
 
-document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(btn=>{
+// Handle all layer types: weather, terrain, and snow_composite
+document.querySelectorAll('.layer-item[data-layer-name]').forEach(btn=>{
   if(btn.dataset.layerName===varName) btn.classList.add('active');
   btn.onclick=()=>{
-    document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.layer-item[data-layer-name]').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
-    varName=btn.dataset.layerName;draw();
+    varName=btn.dataset.layerName;
+    updateToggleButtonState(); // Update toggle button based on new layer
+    draw();
   };
 });
 
@@ -574,3 +653,6 @@ if (popupCloseButton) {
     overlay.setPosition(undefined); // Also clear the overlay's position
   };
 }
+
+// Initialize toggle button state based on the default layer
+updateToggleButtonState();

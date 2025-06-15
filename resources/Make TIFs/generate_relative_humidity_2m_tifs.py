@@ -2,12 +2,12 @@
 """Generate RH GeoTIFFs by interpolating weather data to a 100m grid.
 
 This script mirrors ``generate_t2m_tifs.py`` but outputs relative
-humidity at 2 m (``rh2m.tif``). Weather values are aggregated over
+humidity at 2 m (``relative_humidity_2m.tif``). Weather values are aggregated over
 3‑hour periods and interpolated onto the terrain grid using inverse
 distance weighting with simple physics adjustments. The resulting
 directory structure is::
 
-    TIFS/100m_resolution/<timestamp>/rh2m.tif
+    TIFS/100m_resolution/<timestamp>/relative_humidity_2m.tif
 
 Humidity is influenced by elevation, solar exposure and underlying snow
 cover. The algorithm keeps the source dew‑point roughly constant with
@@ -257,7 +257,7 @@ def main():
 
         out_dir = os.path.join(OUTPUT_BASE, ts)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "rh2m.tif")
+        out_path = os.path.join(out_dir, "relative_humidity_2m.tif")
 
         # Remove existing file if it exists to ensure clean overwrite
         if os.path.exists(out_path):

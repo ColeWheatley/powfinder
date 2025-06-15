@@ -6,7 +6,7 @@ This script reads the aggregated 3-hour weather dataset and creates
 interpolated radiation rasters for a set of predefined timestamps.  The
 output structure is::
 
-    TIFS/100m_resolution/<timestamp>/radiation.tif
+    TIFS/100m_resolution/<timestamp>/shortwave_radiation.tif
 
 The interpolation uses up to four nearest weather points with inverse
 distance weighting and simple physics adjustments (altitude scaling and
@@ -223,7 +223,7 @@ def main():
 
         out_dir = os.path.join(OUTPUT_BASE, ts)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "radiation.tif")
+        out_path = os.path.join(out_dir, "shortwave_radiation.tif")
 
         # Remove existing file if it exists to ensure clean overwrite
         if os.path.exists(out_path):

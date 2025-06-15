@@ -315,6 +315,21 @@ html,body{height:100%;margin:0;}
     color: white;
 }
 
+/* Disabled toggle button styling */
+.toggle-button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+.toggle-button.disabled .toggle-slider {
+    background-color: rgba(128, 128, 128, 0.5);
+}
+
+.toggle-button.disabled .toggle-label {
+    color: rgba(255, 255, 255, 0.4);
+}
+
 
 .brand.flash-error,
 #drawer-caret.flash-error {
