@@ -344,9 +344,6 @@ def physics_skiability(deps: Dict[str, np.ndarray], elev: np.ndarray,
     return skiability
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Variable Definitions
 
@@ -440,7 +437,6 @@ VARIABLES = {
         outputs=["powder_depth", "powder_quality"],
         depends_on_previous=True
     ),
-
     
     "skiability": Variable(
         key="skiability",
