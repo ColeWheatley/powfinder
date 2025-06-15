@@ -55,7 +55,7 @@
     "interpolation": "linear",
     "min": 0.0,
     "api_max": 2.51,
-    "max": 255
+    "max": 3.0
   },
   "snowfall": {
     "last_updated": "2025-06-15T13:25:00[Europe/Berlin]",

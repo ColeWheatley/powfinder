@@ -156,7 +156,12 @@ def physics_snowfall(sf, humid, tgt_elev, src_elev, hill):
     return sf * np.maximum(enh, 0.0) * (1.0 + (0.5 - ins) * 0.1)
 
 
-def physics_dewpoint(dp, tgt_elev, src_elev):
+def physics_dewpoint(temp, humid, tgt_elev, src_elev):
+    # Calculate dewpoint from temperature and humidity using Magnus formula
+    a, b = 17.27, 237.7
+    alpha = (a * temp) / (b + temp) + np.log(np.maximum(humid, 1e-3) / 100.0)
+    dp = (b * alpha) / (a - alpha)
+    # Apply elevation adjustment
     return dp - 2.0 * ((tgt_elev - src_elev) / 1000.0)
 
 
@@ -166,6 +171,12 @@ def physics_pressure(p, tgt_elev, src_elev):
 
 def physics_identity(v, *args):
     return v
+
+
+def physics_cloud_cover(cloud, humid, tgt_elev, src_elev):
+    """Cloud cover with humidity adjustment."""
+    # Slightly increase cloud cover in high humidity conditions
+    return np.clip(cloud + (humid - 50) * 0.1, 0, 100)
 
 
 def compute_dewpoint(temp, rh):
@@ -187,13 +198,14 @@ def physics_powder(prev_depth, prev_quality, snowfall, temp, rad, wind, hours=3)
     return depth, np.clip(quality, 0.0, 1.0)
 
 
-def physics_skiability(depth, wind, codes):
+def physics_skiability(wind, codes, tgt_elev, src_elev):
+    # Use a base skiability of 1.0 and apply penalties
     penalties = np.zeros_like(codes, dtype=float)
     penalties = np.where(codes >= 95, 0.7, penalties)
     penalties = np.where((codes >= 80) & (codes < 95), 0.5, penalties)
     penalties = np.where((codes >= 51) & (codes < 80), 0.3, penalties)
     penalties = np.where((codes >= 45) & (codes < 51), 0.2, penalties)
-    ski = depth - 0.1 * wind - penalties
+    ski = 1.0 - 0.1 * wind - penalties
     return np.clip(ski, 0, None)
 
 # ---------------------------------------------------------------------------
@@ -242,7 +254,7 @@ VARIABLES = [
         depends_on_previous=True,
     ),
     Variable("sqh", ("powder_depth", "powder_quality"), physics_identity, "sqh"),
-    Variable("skiability", ("powder_depth", "wind_speed_10m", "weather_code"), physics_skiability, "ski"),
+    Variable("skiability", ("wind_speed_10m", "weather_code"), physics_skiability, "ski"),
 ]
 
 VAR_BY_KEY = {v.key: v for v in VARIABLES}
@@ -270,7 +282,7 @@ def save_fingerprint(var: Variable) -> None:
 # ---------------------------------------------------------------------------
 # Interpolation helper
 
-def interpolate(var: Variable, ti: int, hill: np.ndarray | None, arrays: Dict[str, np.ndarray], idxs: np.ndarray, weights: np.ndarray, grid_elev_flat: np.ndarray, coords_elev: np.ndarray) -> np.ndarray:
+def interpolate(var: Variable, ti: int, hill: np.ndarray | None, arrays: Dict[str, np.ndarray], idxs: np.ndarray, weights: np.ndarray, grid_elev_flat: np.ndarray, coords_elev: np.ndarray, grid_shape: tuple) -> np.ndarray:
     dep_arrays = [arrays[d][:, ti] for d in var.deps if d in arrays]
     data_k = [arr[idxs] for arr in dep_arrays]
     if var.needs_hillshade:
@@ -281,7 +293,7 @@ def interpolate(var: Variable, ti: int, hill: np.ndarray | None, arrays: Dict[st
         result = var.physics(*data_k, grid_elev_flat[:, None], coords_elev[idxs])
     out_flat = np.sum(result * weights, axis=1)
     out_flat = np.where(grid_elev_flat == NODATA, NODATA, out_flat)
-    return out_flat.reshape(grid_elev_flat.shape)
+    return out_flat.reshape(grid_shape)
 
 # ---------------------------------------------------------------------------
 
@@ -342,10 +354,10 @@ def main(vars_to_process: List[str]) -> None:
             out_dir.mkdir(parents=True, exist_ok=True)
 
             if var.depends_on_previous:
-                snowfall = interpolate(VAR_BY_KEY["snowfall"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev)
-                temp = interpolate(VAR_BY_KEY["temperature_2m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev)
-                rad = interpolate(VAR_BY_KEY["shortwave_radiation"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev)
-                wind = interpolate(VAR_BY_KEY["wind_speed_10m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev)
+                snowfall = interpolate(VAR_BY_KEY["snowfall"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
+                temp = interpolate(VAR_BY_KEY["temperature_2m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
+                rad = interpolate(VAR_BY_KEY["shortwave_radiation"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
+                wind = interpolate(VAR_BY_KEY["wind_speed_10m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
                 depth, qual = physics_powder(prev_depth, prev_quality, snowfall.ravel(), temp.ravel(), rad.ravel(), wind.ravel())
                 prev_depth, prev_quality = depth, qual
                 results = {
@@ -353,7 +365,7 @@ def main(vars_to_process: List[str]) -> None:
                     "powder_quality": qual.reshape(grid_elev.shape),
                 }
             else:
-                data = interpolate(var, ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev)
+                data = interpolate(var, ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
                 results = {var.outputs[0]: data}
 
             for out_name, data in results.items():
