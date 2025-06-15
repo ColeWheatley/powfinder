@@ -94,13 +94,13 @@ const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
 const infoBox = document.getElementById('info-box');
 
-// Prevent drawer toggle only when clicking selector buttons inside the info box
 if (infoBox) {
   infoBox.addEventListener('click', (e) => {
     if (e.target.closest('.layer-item')) {
       e.stopPropagation();
     }
   });
+
 }
 
 // load peak list for name lookups
