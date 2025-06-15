@@ -8,7 +8,7 @@ weather variables.  Output goes to `color_scales.json`.
 Assumptions
 -----------
 * Weather data lives in `resources/meteo_api/weather_data_3hour.json`
-  (the 165 MB file already produced) OR in `predictions.csv`
+  (the 81MB file available on GitHub) OR in `predictions.csv`
 * All values in the JSON are already 3-hour aggregates.
 * Terrain points are ≥2 300 m; we add simple lapse/pressure buffers so
   valley pixels will not clip the colour ramp.

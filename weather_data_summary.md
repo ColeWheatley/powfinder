@@ -76,7 +76,8 @@ This document describes the comprehensive weather dataset collected for PowFinde
 - **End Date:** 2025-05-28T21:00:00
 
 ### Data Volume
-- **Raw File Size:** 165MB (`weather_data_3hour.json`)
+- **Raw File Size:** 81MB (`weather_data_3hour.json`) - Optimized from original 165MB
+- **Backup File Size:** 165MB (`weather_data_3hour_backup.json`) - Original unoptimized version
 - **Total Data Points:** 5.6 million (5,000 coordinates × 112 periods × 10 variables)
 - **Backup File:** `weather_data_3hour_backup.json` (local safety copy)
 
@@ -150,10 +151,10 @@ This document describes the comprehensive weather dataset collected for PowFinde
 ## File Management
 
 ### Storage Strategy
-- **Local Storage:** Complete dataset maintained locally (165MB)
-- **Git Exclusion:** Large files excluded via `.gitignore` 
-- **Backup Strategy:** Duplicate backup file for data safety
-- **Cloud Sync:** Excluded from GitHub due to 100MB limit
+- **Local Storage:** Complete dataset maintained locally (81MB active, 165MB backup)
+- **Git Tracking:** Main file (81MB) now tracked in Git repository (under GitHub's 100MB limit)
+- **Backup Strategy:** Original 165MB backup file maintained locally but excluded from Git
+- **Cloud Sync:** Main weather data file now available on GitHub for AI agent access
 
 ### Access Patterns
 - **Read-Only:** Weather data is immutable once collected
