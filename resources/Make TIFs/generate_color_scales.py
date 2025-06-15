@@ -39,7 +39,7 @@ import statistics as st
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # up to repo root
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent  # current script directory
 JSON_PATH = ROOT / "resources" / "meteo_api" / "weather_data_3hour.json"
-CSV_PATH  = ROOT / "resources" / "pipeline"   / "predictions.csv"
+# CSV_PATH  = ROOT / "resources" / "pipeline"   / "predictions.csv"  # Removed - pipeline directory deleted
 OUT_PATH  = SCRIPT_DIR / "color_scales.json"  # output in same folder as script
 
 VAR_ORDER = [
@@ -76,13 +76,6 @@ def read_values():
             for k in VAR_ORDER:
                 if k in hh:
                     vals[k].extend(hh[k])
-    elif CSV_PATH.exists():
-        with open(CSV_PATH,newline='',encoding="utf-8") as fp:
-            rdr = csv.DictReader(fp)
-            for row in rdr:
-                for k in VAR_ORDER:
-                    if row.get(k):
-                        vals[k].append(float(row[k]))
     else:
         print("❌ No weather dataset found.", file=sys.stderr)
         sys.exit(1)
