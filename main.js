@@ -92,6 +92,16 @@ const varUnits = {
 
 const dayBtn = document.getElementById('day-control-button');
 const timeBtn = document.getElementById('time-control-button');
+const infoBox = document.getElementById('info-box');
+
+// Prevent drawer toggle only when clicking selector buttons inside the info box
+if (infoBox) {
+  infoBox.addEventListener('click', (e) => {
+    if (e.target.closest('.layer-item')) {
+      e.stopPropagation();
+    }
+  });
+}
 
 // load peak list for name lookups
 const peaksPromise = fetch('resources/meteo_api/tirol_peaks.geojson')
@@ -290,7 +300,9 @@ function showLayerInfoBox(){
     cats.forEach(c=>{
       const div = document.createElement('div');
       div.className = 'layer-item';
-      div.style.flexBasis = `${100/cats.length}%`;
+      const flexMap = {3:30,4:20,5:15,6:12};
+      const basis = flexMap[cats.length] ?? (100/cats.length);
+      div.style.setProperty('--selector-basis', `${basis}%`);
       div.innerHTML = `<span style="background:${c.color};width:1em;height:1em;display:inline-block;margin-right:0.5em"></span>${c.label}`;
       row.appendChild(div);
     });
@@ -407,9 +419,15 @@ function showDaySelector(){
     const d = new Date(availableTimestamps[timestampIdx]);
     const div = document.createElement('div');
     div.className = 'layer-item';
+    div.style.setProperty('--selector-basis', '15%');
     div.textContent = formatDay(d);
     if (i === dayIdx) div.classList.add('active');
-    div.onclick = () => { dayIdx = i; updateButtons(); draw(); };
+    div.onclick = () => {
+      dayIdx = i;
+      updateButtons();
+      draw();
+      showDaySelector();
+    };
     dayRow.appendChild(div);
   }
   info.style.display='block';
@@ -429,9 +447,15 @@ function showTimeSelector(){
     const d = new Date(tsStr);
     const div = document.createElement('div');
     div.className = 'layer-item';
+    div.style.setProperty('--selector-basis', '20%');
     div.textContent = formatTime(d);
     if(i === hourIdx) div.classList.add('active');
-    div.onclick = () => { hourIdx = i; updateButtons(); draw(); };
+    div.onclick = () => {
+      hourIdx = i;
+      updateButtons();
+      draw();
+      showTimeSelector();
+    };
     timeRow.appendChild(div);
   }
   info.style.display='block';
@@ -635,14 +659,30 @@ window.toggleDrawer = function() {
 // Event listener for 'Escape' key press
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    // Check if the drawer is open
     if (drawerOpen) {
       toggleDrawer();
     }
-    // Check if the popup is visible
     if (popup.style.display !== 'none') {
       popup.style.display = 'none';
     }
+  } else if (event.key === 'ArrowRight') {
+    const idx = dayIdx * 4 + hourIdx;
+    if (idx < availableTimestamps.length - 1) {
+      hourIdx++;
+      if (hourIdx > 3) { hourIdx = 0; dayIdx++; }
+      updateButtons();
+      draw();
+    }
+    event.preventDefault();
+  } else if (event.key === 'ArrowLeft') {
+    const idx = dayIdx * 4 + hourIdx;
+    if (idx > 0) {
+      hourIdx--;
+      if (hourIdx < 0) { hourIdx = 3; dayIdx--; }
+      updateButtons();
+      draw();
+    }
+    event.preventDefault();
   }
 });
 
