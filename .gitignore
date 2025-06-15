@@ -6,7 +6,6 @@
 *.png
 
 # Specific large weather JSON files
-resources/meteo_api/weather_data_3hour.json
 resources/meteo_api/weather_data_3hour_backup.json
 
 # Node modules and package manager files
