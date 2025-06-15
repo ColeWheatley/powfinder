@@ -10,7 +10,6 @@ Powfinder
 * **Hillshade Processing**: `resources/hillshade/render_hillshade.py` - Solar illumination modeling
 * **Shadow Processing**: `resources/shadows/render_shadow_map.py` - Binary terrain obstruction mapping
 * **Terrain Data**: `resources/terrains/` - Multi-resolution DEM files (excluded from Git)
-* **Pipeline Utilities**: `resources/pipeline/` - Weather processing utilities
 * **Debugging Tools**: `debugging/` - Temperature validation and diagnostic scripts
 
 Project Overview and Rationale
