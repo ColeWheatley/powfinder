@@ -225,7 +225,7 @@ def main():
         # Clip and scale
         clipped = np.clip(out, tmin, tmax)
         scaled = (clipped - tmin) / (tmax - tmin)
-        out_byte = (scaled * 255).astype(np.uint8)
+        out_byte = (scaled * 254 + 1).astype(np.uint8)
         out_byte[out == NODATA] = 0  # set nodata to 0 for byte
 
         profile.update(dtype="uint8", nodata=0)

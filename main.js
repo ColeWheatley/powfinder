@@ -62,7 +62,14 @@ const varLabels = {
   wind_speed_10m: 'Wind Speed',
   weather_code: 'Weather Code',
   freezing_level_height: 'Freezing Level',
-  surface_pressure: 'Surface Pressure'
+  surface_pressure: 'Surface Pressure',
+  dewpoint_2m: 'Dewpoint',
+  hillshade: 'Hillshade',
+  elevation: 'Elevation',
+  aspect: 'Aspect',
+  slope: 'Slope',
+  skiability: 'Skiability',
+  sqh: 'SQH'
 };
 
 const varUnits = {
@@ -75,7 +82,14 @@ const varUnits = {
   wind_speed_10m: 'm/s',
   weather_code: '',
   freezing_level_height: 'm',
-  surface_pressure: 'hPa'
+  surface_pressure: 'hPa',
+  dewpoint_2m: '°C',
+  hillshade: '',
+  elevation: 'm',
+  aspect: '°',
+  slope: '°',
+  skiability: '',
+  sqh: ''
 };
 
 const dayBtn = document.getElementById('day-control-button');
@@ -134,18 +148,23 @@ function formatTime(d){
   return `${hour}${period}`;
 }
 
-function hexToRgb(hex){
-  hex = hex.replace('#','');
-  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
-  const num = parseInt(hex,16);
-  return [num>>16 & 255, num>>8 & 255, num & 255];
+function parseColor(str){
+  if(str.startsWith('rgba')){
+    const m = str.match(/rgba\((\d+),(\d+),(\d+),(\d*\.?\d+)\)/);
+    return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseFloat(m[4])];
+  }
+  const hex = str.replace('#','');
+  const full = hex.length===3 ? hex.split('').map(c=>c+c).join('') : hex;
+  const num = parseInt(full,16);
+  return [num>>16 & 255, num>>8 & 255, num & 255, 1];
 }
 
 function interpColor(c1,c2,t){
   return [
     Math.round(c1[0] + (c2[0]-c1[0])*t),
     Math.round(c1[1] + (c2[1]-c1[1])*t),
-    Math.round(c1[2] + (c2[2]-c1[2])*t)
+    Math.round(c1[2] + (c2[2]-c1[2])*t),
+    c1[3] + (c2[3]-c1[3])*t
   ];
 }
 
@@ -169,9 +188,12 @@ function color(val, varName){
   const scaled = t * (palette.length - 1);
   const idx = Math.floor(scaled);
   const frac = scaled - idx;
-  const c1 = hexToRgb(palette[idx]);
-  const c2 = hexToRgb(palette[Math.min(idx+1, palette.length-1)]);
+  const c1 = parseColor(palette[idx]);
+  const c2 = parseColor(palette[Math.min(idx+1, palette.length-1)]);
   const c = interpColor(c1,c2,frac);
+  if(spec.opacity || c[3] !== 1){
+    return `rgba(${c[0]},${c[1]},${c[2]},${c[3].toFixed(2)})`;
+  }
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
@@ -230,20 +252,41 @@ function showLayerInfoBox(){
   if(!info || !t) return;
   info.classList.remove('info-box-selecting');
   const spec = colorScales[varName] || {palette:['#0000ff','#ff0000']};
-  const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
   const label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
-  info.innerHTML = `
-    <div class="info-box-left">
-      ${label}
-    </div>
-    <div class="info-box-right">
-      <span>${currentMin.toFixed(1)}${unit}</span>
-      <div class="legend-bar" style="${barStyle}"></div>
-      <span>${currentMax.toFixed(1)}${unit}</span>
-    </div>
-  `;
+  if(varName === 'weather_code'){
+    const cats = [
+      {range:'0-3', label:'Clear/cloudy', color:spec.palette[0]},
+      {range:'45-48', label:'Fog', color:spec.palette[1]},
+      {range:'51-86', label:'Rain/showers', color:spec.palette[2]},
+      {range:'71-77', label:'Snow', color:spec.palette[3]},
+      {range:'95-99', label:'Thunder', color:spec.palette[4]}
+    ];
+    info.innerHTML = `<div class="info-box-left">${label}</div>`;
+    const row = document.createElement('div');
+    row.className = 'date-selector-row';
+    cats.forEach(c=>{
+      const div = document.createElement('div');
+      div.className = 'layer-item';
+      div.style.flexBasis = `${100/cats.length}%`;
+      div.innerHTML = `<span style="background:${c.color};width:1em;height:1em;display:inline-block;margin-right:0.5em"></span>${c.label}`;
+      row.appendChild(div);
+    });
+    info.appendChild(row);
+  }else{
+    const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
+    info.innerHTML = `
+      <div class="info-box-left">
+        ${label}
+      </div>
+      <div class="info-box-right">
+        <span>${currentMin.toFixed(1)}${unit}</span>
+        <div class="legend-bar" style="${barStyle}"></div>
+        <span>${currentMax.toFixed(1)}${unit}</span>
+      </div>
+    `;
+  }
   info.style.display = 'block';
 }
 function updateTileLayer(){
@@ -351,9 +394,6 @@ toggleBtn.onclick = () => {
 document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(btn=>{
   if(btn.dataset.layerName===varName) btn.classList.add('active');
   btn.onclick=()=>{
-    // Ignore clicks on not-implemented items
-    if(btn.classList.contains('not-implemented')) return;
-    
     document.querySelectorAll('.layer-item[data-layer-type="weather"]').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     varName=btn.dataset.layerName;draw();
