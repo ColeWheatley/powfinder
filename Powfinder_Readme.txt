@@ -100,7 +100,7 @@ Current State of Project (prototyping branch)
 * ✅ **API Integration**: Direct Open-Meteo API calls for arbitrary map locations with proper parameter handling
 * ✅ **Physics Debugging**: Fixed major hillshade normalization bug (corrected from 0-255 to int16 0-32767 range)
 * ✅ **Validation Tools**: Peak temperature testing scripts for TIF accuracy validation (moved to `debugging/` folder)
-* ✅ **Weather Data Pipeline**: Complete 165MB weather dataset covering 5,000 coordinates (3,000 peaks + 2,000 random points) for 5 days (May 24-28, 2025), 20 timestamps total
+* ✅ **Weather Data Pipeline**: Complete 81MB weather dataset covering 5,000 coordinates (3,000 peaks + 2,000 random points) for 5 days (May 24-28, 2025), 20 timestamps total - Now available on GitHub
 * ✅ **Terrain processing pipeline**: Complete DEM processing at 5m, 25m, 100m resolutions with slope/aspect calculations
 * ✅ **Hillshade modeling implemented**: Solar illumination calculations at multiple resolutions across 4 time periods
 * ✅ **Data management**: Large terrain/shadow files (~32GB) properly excluded from Git repository
@@ -163,7 +163,7 @@ Current Action Items (Priority Order):
 * ✅ Complete weather API debugging and parameter validation
 * ✅ Build robust resumable weather collection system
 * ✅ Generate 5,000 validated coordinates (3,000 peaks + 2,000 random points)
-* ✅ Execute full weather data collection for all 5,000 coordinates (May 24-28, 2025) - Complete with 165MB weather_data_3hour.json covering 5 days and 20 timestamps
+* ✅ Execute full weather data collection for all 5,000 coordinates (May 24-28, 2025) - Complete with 81MB weather_data_3hour.json covering 5 days and 20 timestamps (optimized from 165MB backup)
 * ✅ Implement TIF generation pipeline with physics-based interpolation and color scale management
 * ✅ Debug and fix physics calculations (hillshade normalization, lapse rate adjustments)
 * ✅ Integrate frontend with consistent date mapping and API calls
@@ -241,7 +241,7 @@ python interpolate_layers.py
 Creates GeoTIFF and PNG map layers for web visualization (50m resolution, Tirol boundary).
 
 ### Key Pipeline Files
-- **Input**: `weather_data_3hour.json` (165MB weather data)
+- **Input**: `weather_data_3hour.json` (81MB weather data, available on GitHub)
 - **Configuration**: `physics_params.json` (physics model parameters)
 - **Task Management**: `task_queue.json` (1,474 processing tasks)
 - **Output**: `predictions.csv` (weather predictions), `residuals.csv` (validation data)
