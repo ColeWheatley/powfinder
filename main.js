@@ -205,6 +205,140 @@ function color(val, varName){
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
+// Cache canvases for sampled PNGs
+const canvasCache = {};
+
+function loadCanvas(url){
+  return new Promise((resolve, reject) => {
+    if(canvasCache[url]) return resolve(canvasCache[url]);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      c.getContext('2d').drawImage(img,0,0);
+      canvasCache[url] = c;
+      resolve(c);
+    };
+    img.onerror = () => reject(new Error('load fail'));
+    img.src = url;
+  });
+}
+
+function colorToValue(pixel, varName){
+  const spec = colorScales[varName];
+  if(!spec) return null;
+  if(pixel[3] === 0) return null;
+
+  const palette = spec.palette.map(parseColor);
+  if(spec.discrete){
+    let best=0, bestDist=Infinity;
+    for(let i=0;i<palette.length;i++){
+      const c=palette[i];
+      const d=(c[0]-pixel[0])**2+(c[1]-pixel[1])**2+(c[2]-pixel[2])**2;
+      if(d<bestDist){bestDist=d;best=i;}
+    }
+    const t=best/(palette.length-1);
+    return spec.min + t*(spec.max-spec.min);
+  }
+
+  let bestVal=null,bestDist=Infinity;
+  for(let i=0;i<palette.length-1;i++){
+    const c1=palette[i], c2=palette[i+1];
+    const dx=c2[0]-c1[0], dy=c2[1]-c1[1], dz=c2[2]-c1[2];
+    const dot=(pixel[0]-c1[0])*dx+(pixel[1]-c1[1])*dy+(pixel[2]-c1[2])*dz;
+    const len2=dx*dx+dy*dy+dz*dz;
+    const t=Math.max(0,Math.min(1,len2?dot/len2:0));
+    const r=c1[0]+dx*t, g=c1[1]+dy*t, b=c1[2]+dz*t;
+    const d=(pixel[0]-r)**2+(pixel[1]-g)**2+(pixel[2]-b)**2;
+    if(d<bestDist){bestDist=d;bestVal=i+t;}
+  }
+  if(bestVal==null) return null;
+  const t=bestVal/(palette.length-1);
+  return spec.min + t*(spec.max-spec.min);
+}
+
+async function getPngValue(varName, tsStr, lat, lon){
+  const layerType = getLayerType(varName);
+  let imageUrl;
+  if(layerType === 'terrain'){
+    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
+  }else{
+    imageUrl = `TIFS/100m_resolution/${tsStr}/${varName}.png`;
+  }
+  try{
+    const canvas = await loadCanvas(imageUrl);
+    const coord = ol.proj.fromLonLat([lon, lat]);
+    const xRatio = (coord[0]-TILE_EXTENT[0])/(TILE_EXTENT[2]-TILE_EXTENT[0]);
+    const yRatio = (TILE_EXTENT[3]-coord[1])/(TILE_EXTENT[3]-TILE_EXTENT[1]);
+    const x = Math.round(xRatio*canvas.width);
+    const y = Math.round(yRatio*canvas.height);
+    if(x<0||x>=canvas.width||y<0||y>=canvas.height) return null;
+    const data = canvas.getContext('2d').getImageData(x,y,1,1).data;
+    return colorToValue(data, varName);
+  }catch(e){
+    return null;
+  }
+}
+
+function haversine(lat1, lon1, lat2, lon2){
+  const R=6371000;
+  const rad=Math.PI/180;
+  const dLat=(lat2-lat1)*rad;
+  const dLon=(lon2-lon1)*rad;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function nearestDataPoint(lat,lon){
+  let best=null,dist=Infinity;
+  for(const p of points){
+    const d=haversine(lat,lon,p.lat,p.lon);
+    if(d<dist){dist=d;best=p;}
+  }
+  return best?{point:best,distance:dist}:null;
+}
+
+async function showResidualPopup(lat, lon, srcVals, srcLabel, tsStr, nearest, coordinate){
+  const vars = [...variables];
+  if(!vars.includes('elevation')) vars.push('elevation');
+  const pngVals={};
+  for(const v of vars){
+    pngVals[v] = await getPngValue(v, tsStr, lat, lon);
+  }
+
+  let middle='';
+  if(nearest){
+    if(nearest.point.info && nearest.point.info.type==='peak'){
+      const pk=findPeak(nearest.point.lat, nearest.point.lon);
+      const name = pk?pk.name:(nearest.point.info.name||'Peak');
+      middle = `${name} - ${Math.round(nearest.distance)}m away`;
+    }else{
+      middle = `Validation Ping - ${Math.round(nearest.distance)}m away`;
+    }
+  }
+
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;">
+               <div>${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
+               <div>${middle}</div>
+             </div>`;
+  html += `<table class="popup-table"><tr><th>Variable</th><th>${srcLabel}</th><th>Extrapolated</th><th>Delta</th></tr>`;
+  vars.forEach(v=>{
+    const srcVal = srcVals[v];
+    const pngVal = pngVals[v];
+    const unit = varUnits[v]||'';
+    const srcDisp = srcVal!=null ? (typeof srcVal==='number'?srcVal.toFixed(1):srcVal)+unit : 'N/A';
+    const pngDisp = pngVal!=null ? pngVal.toFixed(1)+unit : 'N/A';
+    const delta = (srcVal!=null && pngVal!=null) ? (pngVal - srcVal).toFixed(1) : '';
+    html += `<tr><td>${varLabels[v]||v}</td><td>${srcDisp}</td><td>${pngDisp}</td><td>${delta}</td></tr>`;
+  });
+  html += '</table>';
+  popupContent.innerHTML = html;
+  overlay.setPosition(coordinate);
+  popup.style.display='block';
+}
+
 function draw(){
   const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
   if(timestampIdx >= availableTimestamps.length) return;
@@ -507,7 +641,7 @@ function findPeak(lat,lon){
   return peaks.find(p=>Math.abs(p.lat-lat)<1e-4 && Math.abs(p.lon-lon)<1e-4);
 }
 
-map.on('singleclick', evt=>{
+map.on('singleclick', async evt=>{
   if(drawerOpen){
     toggleDrawer();
     return;
@@ -515,136 +649,61 @@ map.on('singleclick', evt=>{
   overlay.setPosition(undefined);
   const feature = map.forEachFeatureAtPixel(evt.pixel,f=>f);
 
-  const handleNoData = () => {
-    const clickedCoord = ol.proj.toLonLat(evt.coordinate);
-    const [lon, lat] = clickedCoord;
+  const clicked = ol.proj.toLonLat(evt.coordinate);
+  const [lon,lat] = clicked;
+  const tsStr = availableTimestamps[dayIdx*4 + hourIdx];
+  if(!tsStr){
+    popupContent.textContent = 'Time data unavailable';
+    overlay.setPosition(evt.coordinate);
+    popup.style.display='block';
+    return;
+  }
 
-    // Get current selected timestamp
-    const tsStr = availableTimestamps[dayIdx*4 + hourIdx];
-    if(!tsStr){
-        popupContent.textContent = 'Time data unavailable for API request.';
-        overlay.setPosition(evt.coordinate);
-        popup.style.display = 'block';
-        return;
-    }
+  const nearest = nearestDataPoint(lat,lon);
 
-    // Get the selected date and time from the frontend interface
+  if(!feature || !feature.get('data')){
+    // Fetch from API
     const selectedDate = new Date(tsStr);
-    const dateStr = selectedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-
-    // Build Open-Meteo API URL with same parameters as collection script
-    // Use the date range that covers our selected time
+    const dateStr = selectedDate.toISOString().split('T')[0];
     const apiParams = new URLSearchParams({
-        latitude: lat.toFixed(6),
-        longitude: lon.toFixed(6),
-        model: 'icon-d2',
-        hourly: [
-            'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation',
-            'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m',
-            'weather_code', 'freezing_level_height', 'surface_pressure'
-        ].join(','),
-        start_date: dateStr,
-        end_date: dateStr,
-        timezone: 'Europe/Vienna'
+      latitude: lat.toFixed(6),
+      longitude: lon.toFixed(6),
+      model: 'icon-d2',
+      hourly: [
+        'temperature_2m','relative_humidity_2m','shortwave_radiation','cloud_cover','snow_depth','snowfall','wind_speed_10m','weather_code','freezing_level_height','surface_pressure'
+      ].join(','),
+      start_date: dateStr,
+      end_date: dateStr,
+      timezone: 'Europe/Vienna'
     });
 
     const apiUrl = `https://api.open-meteo.com/v1/forecast?${apiParams}`;
-
-    popupContent.textContent = 'Loading weather data...';
+    popupContent.textContent='Loading weather data...';
     overlay.setPosition(evt.coordinate);
-    popup.style.display = 'block';
-
-    fetch(apiUrl)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`API request failed: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(apiData => {
-        if (!apiData.hourly || !apiData.hourly.time) {
-          throw new Error('Invalid API response structure');
-        }
-
-        // Find the closest time index to our selected time
-        const targetTime = selectedDate.toISOString();
-        const apiTimes = apiData.hourly.time;
-        let closestIndex = 0;
-        let minDiff = Math.abs(new Date(apiTimes[0]).getTime() - selectedDate.getTime());
-
-        for (let i = 1; i < apiTimes.length; i++) {
-          const diff = Math.abs(new Date(apiTimes[i]).getTime() - selectedDate.getTime());
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestIndex = i;
-          }
-        }
-
-        // Extract weather values for the closest time
-        const weatherData = {};
-        Object.keys(apiData.hourly).forEach(param => {
-          if (param !== 'time' && apiData.hourly[param][closestIndex] !== null) {
-            weatherData[param] = apiData.hourly[param][closestIndex];
-          }
-        });
-
-        // Format and display
-        let formattedHtml = `<div><strong>Location:</strong> ${lat.toFixed(4)}, ${lon.toFixed(4)}</div>`;
-        formattedHtml += `<div><strong>Time:</strong> ${apiTimes[closestIndex]}</div><br>`;
-
-        Object.entries(weatherData).forEach(([key, value]) => {
-          const label = varLabels[key] || key;
-          const unit = varUnits[key] || '';
-          const displayValue = typeof value === 'number' ? value.toFixed(1) : value;
-          formattedHtml += `<div>${label}: ${displayValue}${unit}</div>`;
-        });
-
-        popupContent.innerHTML = formattedHtml;
-      })
-      .catch(error => {
-        console.error('Weather API error:', error);
-        popupContent.textContent = `Failed to fetch weather data: ${error.message}`;
-      });
-  };
-
-  if(!feature){
-    handleNoData();
-    return;
-  }
-  const data = feature.get('data');
-  if(!data){
-    handleNoData();
-    return;
-  }
-  const {p,timestampIdx} = data;
-  const lines=[];
-  if(p.info && p.info.type){
-    if(p.info.type==='peak'){
-      const peak=findPeak(p.lat,p.lon);
-      if(peak){
-        lines.push(`<strong>Peak:</strong> ${peak.name} (${peak.ele}m)`);
-      }else{
-        lines.push('<strong>Peak point</strong>');
+    popup.style.display='block';
+    try{
+      const apiData = await fetch(apiUrl).then(r=>{if(!r.ok) throw new Error('API'); return r.json();});
+      const apiTimes = apiData.hourly.time;
+      let closestIndex=0, minDiff=Math.abs(new Date(apiTimes[0]).getTime()-new Date(tsStr).getTime());
+      for(let i=1;i<apiTimes.length;i++){
+        const d=Math.abs(new Date(apiTimes[i]).getTime()-new Date(tsStr).getTime());
+        if(d<minDiff){minDiff=d;closestIndex=i;}
       }
-    }else{
-      lines.push('<strong>Random point</strong>');
+      const srcVals={};
+      variables.forEach(v=>{ if(apiData.hourly[v]) srcVals[v]=apiData.hourly[v][closestIndex]; });
+      srcVals.elevation = apiData.elevation;
+      await showResidualPopup(lat,lon,srcVals,'API',tsStr,nearest,evt.coordinate);
+    }catch(e){
+      popupContent.textContent='Failed to fetch weather data';
     }
+    return;
   }
-  lines.push(`<strong>Location:</strong> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br>`);
-  
-  variables.forEach(v=>{
-    const val=p.w[v]?.[timestampIdx];
-    if(val!=null) {
-      const label = varLabels[v] || v;
-      const unit = varUnits[v] || '';
-      const displayValue = typeof val === 'number' ? val.toFixed(1) : val;
-      lines.push(`${label}: ${displayValue}${unit}`);
-    }
-  });
-  popupContent.innerHTML=lines.join('<br>');
-  overlay.setPosition(evt.coordinate);
-  popup.style.display='block';
 
+  const {p,timestampIdx} = feature.get('data');
+  const srcVals={};
+  variables.forEach(v=>{ srcVals[v]=p.w[v]?.[timestampIdx]; });
+  srcVals.elevation = p.info?.elevation;
+  await showResidualPopup(lat,lon,srcVals,'JSON',tsStr,nearest,evt.coordinate);
 });
 
 // Drawer toggle functionality
