@@ -66,8 +66,8 @@ def render_sqh_png(depth_tif: pathlib.Path, qual_tif: pathlib.Path, out_png: pat
         depth = dsrc.read(1).astype(float)
         qual = qsrc.read(1).astype(float)
         mask = (depth == dsrc.nodata) | np.isnan(depth)
-        depth_norm = np.clip(depth / 255.0, 0, 1)
-        qual_norm = np.clip((qual / 255.0 - vmin) / (vmax - vmin), 0, 1)
+        depth_norm = np.clip(depth / spec.get("max", 100.0), 0, 1)
+        qual_norm = np.clip((qual - vmin) / (vmax - vmin), 0, 1)
 
     rgba = cmap(qual_norm)
     rgba[..., 3] = depth_norm
@@ -167,8 +167,7 @@ def tif_to_png(tif_path: pathlib.Path):
     with rasterio.open(tif_path) as src:
         data = src.read(1)
         mask = (data == src.nodata) | np.isnan(data)
-        # TIF data is already 0-255, so normalize to 0-1 for colormap
-        norm = np.clip(data / 255.0, 0, 1)
+        norm = np.clip((data.astype(float) - vmin) / (vmax - vmin), 0, 1)
 
     rgba = cmap(norm)
     # Preserve colormap alpha, but set nodata areas to transparent
@@ -223,6 +222,8 @@ def main():
         if ts_dir.name not in TIMESTAMPS:
             continue
         for tif in ts_dir.glob("*.tif"):
+            if tif.stem == "snow_depth":
+                continue
             var = tif.stem  # Get variable name from filename
             png_path = tif.parent / f"{tif.stem}.png"
             if needs_update(tif, png_path, var):

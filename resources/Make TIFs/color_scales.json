@@ -163,6 +163,19 @@
     "min": 0,
     "max": 360
   },
+  "powder_depth": {
+    "palette": ["rgba(255,255,255,0)", "rgba(255,255,255,1)"],
+    "opacity": true,
+    "min": 0,
+    "max": 100,
+    "interpolation": "linear"
+  },
+  "powder_quality": {
+    "palette": ["#ff0000", "#0000ff", "#ff4081"],
+    "min": 0,
+    "max": 1,
+    "interpolation": "linear"
+  },
   "sqh": {
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
