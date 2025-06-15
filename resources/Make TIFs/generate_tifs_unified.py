@@ -59,21 +59,23 @@ HILLSHADE_TIFS = {
 
 class Variable:
     """Configuration for a weather variable or derived layer."""
-    
+
     def __init__(
         self,
         key: str,
-        deps: Tuple[str, ...],
         physics: Callable,
         unit: str,
+        weather_deps: Optional[Tuple[str, ...]] = None,
+        tif_deps: Optional[Tuple[str, ...]] = None,
         needs_hill: bool = False,
         outputs: Optional[List[str]] = None,
         depends_on_previous: bool = False,
     ):
         self.key = key
-        self.deps = deps
         self.physics = physics
         self.unit = unit
+        self.weather_deps = list(weather_deps or [])
+        self.tif_deps = list(tif_deps or [])
         self.needs_hill = needs_hill
         self.outputs = outputs or [key]
         self.depends_on_previous = depends_on_previous
@@ -224,7 +226,7 @@ def physics_surface_pressure(deps: Dict[str, np.ndarray], elev: np.ndarray,
 
 
 def physics_powder(deps: Dict[str, np.ndarray], elev: np.ndarray,
-                  hill: Optional[np.ndarray], 
+                  hill: Optional[np.ndarray],
                   previous_state: Optional[Tuple[np.ndarray, np.ndarray]] = None,
                   dt_hours: float = 3.0) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -260,15 +262,15 @@ def physics_powder(deps: Dict[str, np.ndarray], elev: np.ndarray,
     # Degradation factors
     
     # Temperature effects
-    melt_rate = np.maximum(0, temp - 0) * 0.02 * dt_hours  # cm/hour above 0°C
+    melt_rate = np.maximum(0, temp) * 0.02 * dt_hours
     powder_depth = np.maximum(0, powder_depth - melt_rate)
-    
+
     # Wind scouring
-    wind_scour = wind * 0.001 * dt_hours
+    wind_scour = wind * 0.01 * dt_hours
     powder_depth = np.maximum(0, powder_depth - wind_scour)
-    
+
     # Natural compaction
-    compaction = powder_depth * 0.01 * dt_hours  # 1% per 3 hours
+    compaction = 0.005 * dt_hours
     powder_depth = np.maximum(0, powder_depth - compaction)
     
     # Quality degradation
@@ -338,8 +340,14 @@ def physics_skiability(deps: Dict[str, np.ndarray], elev: np.ndarray,
     
     # Zero out where no powder
     skiability = np.where(powder_depth < 1.0, 0.0, skiability)
-    
+
     return skiability
+
+
+def physics_sqh(powder_state: Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    """Return powder quality for SQH visualisation."""
+    _, quality = powder_state
+    return quality.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -348,102 +356,161 @@ def physics_skiability(deps: Dict[str, np.ndarray], elev: np.ndarray,
 VARIABLES = {
     "temperature_2m": Variable(
         key="temperature_2m",
-        deps=("temperature_2m", "elevation", "shortwave_radiation"),
         physics=physics_temperature,
         unit="celsius",
+        weather_deps=("temperature_2m", "elevation", "shortwave_radiation"),
         needs_hill=True
     ),
     
     "freezing_level_height": Variable(
         key="freezing_level_height",
-        deps=("freezing_level_height", "temperature_2m"),
         physics=physics_freezing_level,
-        unit="meters"
+        unit="meters",
+        weather_deps=("freezing_level_height", "temperature_2m")
     ),
     
     "relative_humidity_2m": Variable(
         key="relative_humidity_2m",
-        deps=("relative_humidity_2m", "elevation"),
         physics=physics_relative_humidity,
-        unit="percent"
+        unit="percent",
+        weather_deps=("relative_humidity_2m", "elevation")
     ),
     
     "cloud_cover": Variable(
         key="cloud_cover",
-        deps=("cloud_cover",),
         physics=physics_cloud_cover,
-        unit="percent"
+        unit="percent",
+        weather_deps=("cloud_cover",)
     ),
     
     "shortwave_radiation": Variable(
         key="shortwave_radiation",
-        deps=("shortwave_radiation",),
         physics=physics_shortwave_radiation,
         unit="watts_per_m2",
+        weather_deps=("shortwave_radiation",),
         needs_hill=True
     ),
     
     "snow_depth": Variable(
         key="snow_depth",
-        deps=("snow_depth",),
         physics=physics_snow_depth,
-        unit="cm"
+        unit="cm",
+        weather_deps=("snow_depth",)
     ),
     
     "snowfall": Variable(
         key="snowfall",
-        deps=("snowfall", "elevation"),
         physics=physics_snowfall,
-        unit="mm"
+        unit="mm",
+        weather_deps=("snowfall", "elevation")
     ),
     
     "wind_speed_10m": Variable(
         key="wind_speed_10m",
-        deps=("wind_speed_10m", "elevation"),
         physics=physics_wind_speed,
-        unit="meters_per_second"
+        unit="meters_per_second",
+        weather_deps=("wind_speed_10m", "elevation")
     ),
     
     "dewpoint_2m": Variable(
         key="dewpoint_2m",
-        deps=("temperature_2m", "relative_humidity_2m", "elevation", "shortwave_radiation"),
         physics=physics_dewpoint,
         unit="celsius",
+        weather_deps=("temperature_2m", "relative_humidity_2m", "elevation", "shortwave_radiation"),
         needs_hill=True
     ),
     
     "weather_code": Variable(
         key="weather_code",
-        deps=("weather_code",),
         physics=physics_weather_code,
-        unit="code"
+        unit="code",
+        weather_deps=("weather_code",)
     ),
     
     "surface_pressure": Variable(
         key="surface_pressure",
-        deps=("surface_pressure", "elevation"),
         physics=physics_surface_pressure,
-        unit="hPa"
+        unit="hPa",
+        weather_deps=("surface_pressure", "elevation")
     ),
     
     "powder": Variable(
         key="powder",
-        deps=("temperature_2m", "snowfall", "wind_speed_10m", "shortwave_radiation", "elevation"),
         physics=physics_powder,
         unit="powder",
+        weather_deps=("temperature_2m", "snowfall", "wind_speed_10m", "shortwave_radiation", "elevation"),
         needs_hill=True,
         outputs=["powder_depth", "powder_quality"],
         depends_on_previous=True
     ),
+
+    "sqh": Variable(
+        key="sqh",
+        physics=physics_sqh,
+        unit="quality",
+        tif_deps=("powder_depth", "powder_quality"),
+    ),
     
     "skiability": Variable(
         key="skiability",
-        deps=("temperature_2m", "wind_speed_10m", "weather_code", "cloud_cover", "elevation", "shortwave_radiation"),
         physics=physics_skiability,
         unit="quality",
+        weather_deps=("temperature_2m", "wind_speed_10m", "weather_code", "cloud_cover", "elevation", "shortwave_radiation"),
+        tif_deps=("powder_depth", "powder_quality"),
         needs_hill=True
     ),
 }
+
+
+def topo_sort(var_names: List[str]) -> List[str]:
+    """Topologically sort variables based on tif dependencies."""
+    # Map output name -> variable key
+    output_to_var = {}
+    for v in VARIABLES.values():
+        for out in v.outputs:
+            output_to_var[out] = v.key
+
+    # Expand dependencies
+    needed = set()
+    stack = list(var_names)
+    while stack:
+        name = stack.pop()
+        if name in needed:
+            continue
+        needed.add(name)
+        var = VARIABLES[name]
+        for dep in var.tif_deps:
+            dep_var = output_to_var.get(dep)
+            if dep_var and dep_var not in needed:
+                stack.append(dep_var)
+
+    # Build graph
+    in_deg = {n: 0 for n in needed}
+    edges = {n: set() for n in needed}
+    for n in needed:
+        var = VARIABLES[n]
+        for dep in var.tif_deps:
+            dep_var = output_to_var.get(dep)
+            if dep_var and dep_var in needed:
+                edges[dep_var].add(n)
+                in_deg[n] += 1
+
+    # Kahn's algorithm
+    queue = [n for n, d in in_deg.items() if d == 0]
+    ordered = []
+    while queue:
+        cur = queue.pop(0)
+        ordered.append(cur)
+        for nxt in edges[cur]:
+            in_deg[nxt] -= 1
+            if in_deg[nxt] == 0:
+                queue.append(nxt)
+
+    if len(ordered) != len(needed):
+        raise RuntimeError("Cyclic dependency detected")
+
+    # Keep only requested vars in resulting order
+    return [v for v in ordered if v in var_names]
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +664,20 @@ def load_previous_powder_state(timestamp_idx: int, timestamps: List[str],
     return depth, quality
 
 
+def load_powder_state_for_timestamp(timestamp: str, output_base: Path) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Load powder state for the given timestamp if available."""
+    ts_dir = output_base / timestamp
+    depth_path = ts_dir / "powder_depth.tif"
+    quality_path = ts_dir / "powder_quality.tif"
+    if not depth_path.exists() or not quality_path.exists():
+        return None
+    with rasterio.open(depth_path) as src:
+        depth = src.read(1)
+    with rasterio.open(quality_path) as src:
+        quality = src.read(1)
+    return depth, quality
+
+
 def get_all_timestamps_from_weather(weather_data: Dict[str, Any]) -> List[str]:
     """Extract all available timestamps from weather data."""
     # Get timestamps from first coordinate
@@ -693,7 +774,7 @@ def process_timestamp(
         if var_name not in VARIABLES:
             print(f"Unknown variable: {var_name}")
             continue
-        
+
         var = VARIABLES[var_name]
         
         # Check if regeneration needed
@@ -704,7 +785,26 @@ def process_timestamp(
         print(f"  Generating {var_name}")
         
         # Prepare dependencies
-        deps = {dep: weather_grids[dep] for dep in var.deps if dep in weather_grids}
+        deps = {dep: weather_grids[dep] for dep in var.weather_deps if dep in weather_grids}
+        tif_deps_data = {}
+        for dep in var.tif_deps:
+            if dep in ("powder_depth", "powder_quality") and updated_powder_state is not None:
+                depth, quality = updated_powder_state
+                if dep == "powder_depth":
+                    tif_deps_data[dep] = depth
+                else:
+                    tif_deps_data[dep] = quality
+            else:
+                loaded = load_powder_state_for_timestamp(timestamp, OUTPUT_BASE)
+                if loaded is not None:
+                    d, q = loaded
+                    if dep == "powder_depth":
+                        tif_deps_data[dep] = d
+                    elif dep == "powder_quality":
+                        tif_deps_data[dep] = q
+                else:
+                    print(f"    Warning: Missing dependency {dep} for {var.key}")
+                    tif_deps_data[dep] = np.zeros_like(elevation)
         
         # Handle special cases
         if var.key == "powder":
@@ -723,17 +823,32 @@ def process_timestamp(
             write_geotiff(result[1], output_dir / "powder_quality.tif", metadata, "quality")
             
         elif var.key == "skiability":
-            # Skiability needs current powder state
             if updated_powder_state is None:
-                print(f"    Warning: No powder state for skiability, skipping")
-                continue
-            
-            result = var.physics(deps, elevation, hillshade, updated_powder_state)
+                loaded = load_powder_state_for_timestamp(timestamp, OUTPUT_BASE)
+                if loaded is None:
+                    print(f"    Warning: No powder state for skiability, skipping")
+                    continue
+                powder_state_for_use = loaded
+            else:
+                powder_state_for_use = updated_powder_state
+
+            result = var.physics({**deps, **tif_deps_data}, elevation, hillshade, powder_state_for_use)
             write_geotiff(result, output_dir / f"{var.key}.tif", metadata, var.unit)
-            
+
+        elif var.key == "sqh":
+            if updated_powder_state is None:
+                powder_state_for_use = load_powder_state_for_timestamp(timestamp, OUTPUT_BASE)
+                if powder_state_for_use is None:
+                    print(f"    Warning: No powder state for SQH, skipping")
+                    continue
+            else:
+                powder_state_for_use = updated_powder_state
+
+            result = var.physics(powder_state_for_use)
+            write_geotiff(result, output_dir / f"{var.key}.tif", metadata, var.unit)
+
         else:
-            # Standard variable
-            result = var.physics(deps, elevation, hillshade)
+            result = var.physics({**deps, **tif_deps_data}, elevation, hillshade)
             write_geotiff(result, output_dir / f"{var.key}.tif", metadata, var.unit)
         
         # Save fingerprint
@@ -753,7 +868,8 @@ def main():
         variables = args.variables
     else:
         variables = list(VARIABLES.keys())
-    
+
+    variables = topo_sort(variables)
     print(f"Generating TIFs for: {', '.join(variables)}")
     
     # Load data
