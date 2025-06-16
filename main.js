@@ -1,12 +1,36 @@
 import 'https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js';
 
+// Create base map layers
+const osmLayer = new ol.layer.Tile({ 
+  source: new ol.source.OSM({
+    cacheSize: 16384  // 4x default cache size for smooth zooming
+  })
+});
+
+const lightBaseLayer = new ol.layer.Tile({
+  source: new ol.source.XYZ({
+    url: 'https://{a-d}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png'
+  })
+});
+
+const hillshadeLayer = new ol.layer.Tile({
+  source: new ol.source.XYZ({
+    url: 'TIFS/100m_resolution/terrainPNGs/hillshade.png'
+  }),
+  opacity: 0.3,
+  visible: false  // Initially hidden
+});
+
+const labelsLayer = new ol.layer.Tile({
+  source: new ol.source.Stamen({
+    layer: 'toner-labels'  // Just black text, zero background
+  }),
+  visible: false  // Initially hidden
+});
+
 const map = new ol.Map({
   target: 'map',
-  layers: [new ol.layer.Tile({ 
-    source: new ol.source.OSM({
-      cacheSize: 8192  // 4x default cache size for smooth zooming
-    })
-  })],
+  layers: [osmLayer, lightBaseLayer, hillshadeLayer, labelsLayer],
   view: new ol.View({
     center: ol.proj.fromLonLat([11.3558, 47.0108]), // Zuckerhütl coordinates
     zoom: 12 // Closer zoom to see mountain detail
@@ -600,13 +624,36 @@ timeBtn.onclick=()=>{showTimeSelector();};
 
 // Toggle button functionality
 let isPointMode = true; // Back to starting in point mode
+
+// Function to update base map layers based on mode
+function updateBaseMapLayers() {
+  if (isPointMode) {
+    // Point mode: Show OSM, hide smooth mode layers
+    osmLayer.setVisible(true);
+    lightBaseLayer.setVisible(false);
+    hillshadeLayer.setVisible(false);
+    labelsLayer.setVisible(false);
+  } else {
+    // Smooth mode: Show light base + hillshade + labels, hide OSM
+    osmLayer.setVisible(false);
+    lightBaseLayer.setVisible(true);
+    hillshadeLayer.setVisible(true);
+    labelsLayer.setVisible(true);
+  }
+}
+
+// Initialize with point mode base map
+updateBaseMapLayers();
+
 const toggleBtn = document.getElementById('mode-toggle');
 
-toggleBtn.onclick = () => {
+function toggleMode() {
   // Don't do anything if the button is disabled
   if (toggleBtn.disabled) return;
   
   isPointMode = !isPointMode;
+  updateBaseMapLayers();
+  
   if (isPointMode) {
     toggleBtn.classList.remove('smooth');
     // Hide any existing image layer
@@ -623,7 +670,9 @@ toggleBtn.onclick = () => {
     draw(); // This will update the image layer
   }
   console.log('Mode:', isPointMode ? 'Point' : 'Smooth');
-};
+}
+
+toggleBtn.onclick = toggleMode;
 
 // Handle all layer types: weather, terrain, and snow_composite
 document.querySelectorAll('.layer-item[data-layer-name]').forEach(btn=>{
@@ -773,6 +822,10 @@ document.addEventListener('keydown', (event) => {
       updateButtons();
       draw();
     }
+    event.preventDefault();
+  } else if (event.key === 'Shift' && event.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT) {
+    // Right shift key toggles between point/smooth mode
+    toggleMode();
     event.preventDefault();
   }
 });
