@@ -56,17 +56,21 @@ def generate_all_timestamps(start_time: str, end_time: str) -> List[str]:
 # Generate ALL timestamps for TIF creation (including historical)
 ALL_TIMESTAMPS = generate_all_timestamps("2025-05-14T00:00:00", "2025-05-28T18:00:00")
 
-WEATHER_PATH = Path("resources/meteo_api/weather_data_3hour.json")
-ELEVATION_TIF = Path("resources/terrains/tirol_100m_float.tif")
-COLOR_SCALE_JSON = Path("resources/Make TIFs/color_scales.json")
-OUTPUT_BASE = Path("TIFS/100m_resolution")
+# Script-relative paths - always work regardless of where script is run from
+SCRIPT_DIR = Path(__file__).parent  # /Users/cole/dev/PowFinder/resources/Make TIFs/
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # /Users/cole/dev/PowFinder/
+
+WEATHER_PATH = PROJECT_ROOT / "resources/meteo_api/weather_data_3hour.json"
+ELEVATION_TIF = PROJECT_ROOT / "resources/terrains/tirol_100m_float.tif"
+COLOR_SCALE_JSON = SCRIPT_DIR / "color_scales.json"
+OUTPUT_BASE = PROJECT_ROOT / "TIFS/100m_resolution"
 NODATA = -9999.0
 
 HILLSHADE_TIFS = {
-    1: Path("resources/hillshade/hillshade_100m_period1.tif"),
-    2: Path("resources/hillshade/hillshade_100m_period2.tif"),
-    3: Path("resources/hillshade/hillshade_100m_period3.tif"),
-    4: Path("resources/hillshade/hillshade_100m_period4.tif"),
+    1: PROJECT_ROOT / "resources/hillshade/hillshade_100m_period1.tif",
+    2: PROJECT_ROOT / "resources/hillshade/hillshade_100m_period2.tif",
+    3: PROJECT_ROOT / "resources/hillshade/hillshade_100m_period3.tif",
+    4: PROJECT_ROOT / "resources/hillshade/hillshade_100m_period4.tif",
 }
 PERIOD_FROM_HOUR = {9: 1, 12: 2, 15: 3, 18: 4}
 
@@ -211,19 +215,19 @@ def compute_dewpoint(temp, rh):
 def update_powder_state(prev_mm, new_snow_mm, temp_C, rad_Wm2):
     """Return new powder depth [mm] and quality [0–1]."""
     DEPTH_MAX_MM = 1000           # 100 cm → 1000 mm
-    SETTLING_FRAC = 0.05          # 5 % depth loss per 3 h
-    MELT_MM_PER_DEG = 0.4         # very crude melt parameter
+    SETTLING_FRAC = 0.015         # 1.5% depth loss per 3h (more realistic)
+    MELT_MM_PER_DEG = 0.2         # reduced melt rate
     
-    # 1. settle (compaction)
+    # 1. settle (compaction) - much more conservative
     depth_mm = prev_mm * (1 - SETTLING_FRAC)
     
     # 2. simple melt when temps near/above freezing
-    if temp_C > -2:
-        melt_mm = max(temp_C + 2, 0) * MELT_MM_PER_DEG
+    if temp_C > -1:  # only melt above -1°C
+        melt_mm = max(temp_C + 1, 0) * MELT_MM_PER_DEG
         depth_mm = max(depth_mm - melt_mm, 0)
     
-    # 3. add fresh snowfall
-    depth_mm += new_snow_mm
+    # 3. add fresh snowfall (multiply by 10 to get realistic depths)
+    depth_mm += new_snow_mm * 10
     
     # 4. cap at sane upper bound
     return min(depth_mm, DEPTH_MAX_MM)
@@ -253,16 +257,16 @@ def physics_powder(prev_depth, prev_quality, snowfall, temp, rad, wind, cloud_co
         print(f"Warning: No snowfall data for {timestamp}, skipping accumulation")
 
     # Apply physics using vectorized update_powder_state logic
-    # 1. Settling (compaction) - 5% loss per 3h
-    depth_mm = depth_mm * (1 - 0.05)
+    # 1. Settling (compaction) - 1.5% loss per 3h (more realistic)
+    depth_mm = depth_mm * (1 - 0.015)
     
-    # 2. Melt when temps near/above freezing
+    # 2. Melt when temps near/above freezing (more conservative)
     if temp is not None and not np.all(temp == NODATA):
-        melt_mm = np.where(temp > -2, np.maximum(temp + 2, 0) * 0.4, 0)
+        melt_mm = np.where(temp > -1, np.maximum(temp + 1, 0) * 0.2, 0)
         depth_mm = np.maximum(depth_mm - melt_mm, 0)
     
-    # 3. Add fresh snowfall
-    depth_mm = depth_mm + new_snow_mm
+    # 3. Add fresh snowfall (multiply by 10 for realistic depths)
+    depth_mm = depth_mm + (new_snow_mm * 10)
     
     # 4. Cap at sane upper bound
     depth_mm = np.minimum(depth_mm, DEPTH_MAX_MM)
@@ -301,20 +305,48 @@ def physics_powder(prev_depth, prev_quality, snowfall, temp, rad, wind, cloud_co
 
     return depth_mm, np.clip(quality, 0.0, 1.0)
 
-def physics_skiability(wind, codes, tgt_elev, src_elev):
-    # Use a base skiability of 1.0 and apply penalties
+def calculate_weather_penalties(codes):
+    """Calculate weather-based skiing penalties from weather codes."""
     penalties = np.zeros_like(codes, dtype=float)
-    penalties = np.where(codes >= 95, 0.7, penalties)
-    penalties = np.where((codes >= 80) & (codes < 95), 0.5, penalties)
-    penalties = np.where((codes >= 51) & (codes < 80), 0.3, penalties)
-    penalties = np.where((codes >= 45) & (codes < 51), 0.2, penalties)
-    ski = 1.0 - 0.1 * wind - penalties
-    ski = np.clip(ski, 0, None)
+    penalties = np.where(codes >= 95, 0.7, penalties)  # Thunderstorms
+    penalties = np.where((codes >= 80) & (codes < 95), 0.5, penalties)  # Heavy precip
+    penalties = np.where((codes >= 51) & (codes < 80), 0.3, penalties)  # Rain/drizzle
+    penalties = np.where((codes >= 45) & (codes < 51), 0.2, penalties)  # Fog
+    return penalties
+
+def physics_skiability(wind, codes, powder_depth, powder_quality, temp, tgt_elev):
+    """Calculate skiability based on snow conditions, weather, and terrain."""
+    # Ensure all arrays are flattened to the same shape
+    wind = np.asarray(wind).flatten()
+    codes = np.asarray(codes).flatten()
+    powder_depth = np.asarray(powder_depth).flatten()
+    powder_quality = np.asarray(powder_quality).flatten()
+    temp = np.asarray(temp).flatten()
+    tgt_elev = np.asarray(tgt_elev).flatten()
+    
+    # Start with snow conditions (powder_depth should be in mm)
+    snow_score = np.minimum(powder_depth / 100.0, 1.0)  # 100mm (10cm) = full score
+    quality_score = powder_quality
+    
+    # Apply weather penalties
+    wind_penalty = np.minimum(wind / 20.0, 1.0)  # 20m/s = unskiable
+    weather_penalty = calculate_weather_penalties(codes)
+    
+    # Combine factors
+    skiability = snow_score * quality_score * (1 - wind_penalty) * (1 - weather_penalty)
+    
+    # Hard limits
+    skiability = np.where(powder_depth < 10.0, 0, skiability)  # Less than 10mm (1cm)
+    skiability = np.where(tgt_elev < 800, 0, skiability)  # Too low elevation
+    skiability = np.where(temp > 5, skiability * 0.5, skiability)  # Too warm
     
     # Preserve NODATA from inputs
-    nodata_mask = (wind == NODATA) | (codes == NODATA)
-    ski[nodata_mask] = NODATA
-    return ski
+    nodata_mask = ((wind == NODATA) | (codes == NODATA) | 
+                   (powder_depth == NODATA) | (powder_quality == NODATA) | 
+                   (temp == NODATA) | (tgt_elev == NODATA))
+    skiability = np.where(nodata_mask, NODATA, skiability)
+    
+    return np.clip(skiability, 0, 1)
 
 # ---------------------------------------------------------------------------
 # Variable configuration
@@ -361,7 +393,7 @@ VARIABLES = [
         outputs=["powder_depth", "powder_quality"],
         depends_on_previous=True,
     ),
-    Variable("skiability", ("wind_speed_10m", "weather_code"), physics_skiability, "ski"),
+    Variable("skiability", ("wind_speed_10m", "weather_code", "powder_depth", "powder_quality", "temperature_2m", "elevation"), physics_skiability, "ski"),
 ]
 
 VAR_BY_KEY = {v.key: v for v in VARIABLES}
@@ -581,11 +613,21 @@ def main(vars_to_process: List[str]) -> None:
             elif var_key in WEATHER_VARS:
                 results = {var.outputs[0]: weather_data[var_key]}
             elif var_key == "skiability":
+                # Get powder data from previous results (default to zeros if not available)
+                if 'prev_depth' in locals() and prev_depth is not None:
+                    powder_depth = prev_depth
+                    powder_quality = prev_quality
+                else:
+                    powder_depth = np.zeros_like(grid_elev.flatten())
+                    powder_quality = np.zeros_like(grid_elev.flatten())
+                
                 ski = physics_skiability(
                     weather_data["wind_speed_10m"],
                     weather_data["weather_code"],
-                    grid_elev,
-                    grid_elev,
+                    powder_depth,
+                    powder_quality,
+                    weather_data["temperature_2m"],
+                    grid_elev.flatten(),
                 )
                 results = {"skiability": ski.reshape(grid_elev.shape)}
 

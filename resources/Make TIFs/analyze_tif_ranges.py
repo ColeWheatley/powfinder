@@ -51,7 +51,14 @@ def get_variable_units(variable_name):
         'snowfall': 'mm',
         'freezing_level_height': 'm',
         'wind_speed_10m': 'm/s',
-        'weather_code': ''
+        'weather_code': '',
+        'skiability': '',  # dimensionless 0-1 scale
+        'powder_depth': 'mm',  # powder depth in millimeters
+        'sqh': '',  # dimensionless
+        'snow_depth': 'm',  # snow depth in meters
+        'elevation': 'm',  # elevation in meters
+        'aspect': '°',  # aspect in degrees
+        'slope': '°'  # slope in degrees
     }
     return units_map.get(variable_name, '')
 
@@ -89,18 +96,23 @@ def convert_to_physical_values(scaled_values, variable_name, color_scales):
     return physical
 
 
-def analyze_variable_tifs(variable_name, base_dir="TIFS/100m_resolution", color_scales=None):
+def analyze_variable_tifs(variable_name, base_dir=None, color_scales=None):
     """
     Analyze all TIF files for a specific variable across all timestamps.
     
     Args:
         variable_name: Name of the variable (e.g., 'dewpoint_2m', 'temperature_2m')
-        base_dir: Base directory containing timestamp subdirectories
+        base_dir: Base directory containing timestamp subdirectories (defaults to script-relative path)
         color_scales: Color scales configuration for unit conversion
         
     Returns:
         dict: Statistics including global_min, global_max, timestamp_count, valid_pixel_count
     """
+    if base_dir is None:
+        # Use script-relative path for robustness
+        script_dir = pathlib.Path(__file__).parent
+        base_dir = script_dir / ".." / ".." / "TIFS" / "100m_resolution"
+    
     base_path = pathlib.Path(base_dir)
     
     global_min = float('inf')
@@ -176,8 +188,13 @@ def analyze_variable_tifs(variable_name, base_dir="TIFS/100m_resolution", color_
     return stats
 
 
-def find_all_variables(base_dir="TIFS/100m_resolution"):
+def find_all_variables(base_dir=None):
     """Find all unique variable names in the TIF directories."""
+    if base_dir is None:
+        # Use script-relative path for robustness
+        script_dir = pathlib.Path(__file__).parent
+        base_dir = script_dir / ".." / ".." / "TIFS" / "100m_resolution"
+    
     base_path = pathlib.Path(base_dir)
     variables = set()
     
@@ -216,14 +233,130 @@ def generate_color_scale_update(stats_dict):
         print(f"}},")
 
 
+def analyze_variable_with_histogram(variable_name, base_dir=None, color_scales=None, num_bins=10):
+    """
+    Analyze variable with histogram/distribution statistics.
+    """
+    if base_dir is None:
+        # Use script-relative path for robustness
+        script_dir = pathlib.Path(__file__).parent
+        base_dir = script_dir / ".." / ".." / "TIFS" / "100m_resolution"
+    
+    base_path = pathlib.Path(base_dir)
+    
+    all_valid_data = []
+    timestamp_count = 0
+    units = get_variable_units(variable_name)
+    
+    print(f"\nAnalyzing {variable_name} ({units}):")
+    print("-" * 50)
+    
+    # Collect all valid data
+    for timestamp_dir in sorted(base_path.iterdir()):
+        if not timestamp_dir.is_dir():
+            continue
+            
+        tif_path = timestamp_dir / f"{variable_name}.tif"
+        if not tif_path.exists():
+            continue
+            
+        timestamp_count += 1
+        
+        with rasterio.open(tif_path) as src:
+            data = src.read(1)
+            nodata = src.nodata
+            
+            # Create mask for valid data
+            if nodata is not None:
+                valid_mask = (data != nodata) & ~np.isnan(data) & (data != -9999) & (data > 0)
+            else:
+                valid_mask = ~np.isnan(data) & (data != -9999) & (data > 0)
+            
+            if np.any(valid_mask):
+                valid_data = data[valid_mask]
+                
+                # Convert to physical values if possible
+                if color_scales and variable_name in color_scales:
+                    physical_data = convert_to_physical_values(valid_data, variable_name, color_scales)
+                else:
+                    # For variables without color scales, normalize 0-255 to 0-1
+                    physical_data = valid_data / 255.0
+                    
+                all_valid_data.extend(physical_data)
+    
+    if not all_valid_data:
+        print(f"  No valid data found for {variable_name}")
+        return None
+        
+    # Convert to numpy array for statistics
+    all_data = np.array(all_valid_data)
+    
+    # Calculate statistics
+    stats = {
+        'variable': variable_name,
+        'min': float(np.min(all_data)),
+        'max': float(np.max(all_data)),
+        'mean': float(np.mean(all_data)),
+        'median': float(np.median(all_data)),
+        'std': float(np.std(all_data)),
+        'percentiles': {
+            '1%': float(np.percentile(all_data, 1)),
+            '5%': float(np.percentile(all_data, 5)),
+            '25%': float(np.percentile(all_data, 25)),
+            '50%': float(np.percentile(all_data, 50)),
+            '75%': float(np.percentile(all_data, 75)),
+            '95%': float(np.percentile(all_data, 95)),
+            '99%': float(np.percentile(all_data, 99))
+        },
+        'timestamp_count': timestamp_count,
+        'total_pixels': len(all_data),
+        'units': units
+    }
+    
+    # Create histogram
+    hist, bin_edges = np.histogram(all_data, bins=num_bins)
+    
+    print(f"\nDistribution for {variable_name}:")
+    print(f"  Min: {stats['min']:.3f}{units}")
+    print(f"  Max: {stats['max']:.3f}{units}")
+    print(f"  Mean: {stats['mean']:.3f}{units}")
+    print(f"  Median: {stats['median']:.3f}{units}")
+    print(f"  Std Dev: {stats['std']:.3f}{units}")
+    print(f"\nPercentiles:")
+    for pct, val in stats['percentiles'].items():
+        print(f"  {pct}: {val:.3f}{units}")
+    
+    print(f"\nHistogram ({num_bins} bins):")
+    for i, count in enumerate(hist):
+        bin_start = bin_edges[i]
+        bin_end = bin_edges[i + 1]
+        pct = (count / len(all_data)) * 100
+        bar = '█' * int(pct / 2)  # Scale bar to fit
+        print(f"  [{bin_start:.3f}-{bin_end:.3f}): {count:8d} ({pct:5.1f}%) {bar}")
+    
+    # Find peak bin
+    peak_bin_idx = np.argmax(hist)
+    peak_start = bin_edges[peak_bin_idx]
+    peak_end = bin_edges[peak_bin_idx + 1]
+    print(f"\n  Peak bin: [{peak_start:.3f}-{peak_end:.3f}) with {hist[peak_bin_idx]} pixels ({(hist[peak_bin_idx]/len(all_data)*100):.1f}%)")
+    
+    return stats
+
+
 def main():
     # Load color scales for unit conversion
     color_scales = load_color_scales()
     
     if len(sys.argv) > 1:
-        # Analyze specific variable
+        # Analyze specific variable with histogram
         variable_name = sys.argv[1]
-        stats = analyze_variable_tifs(variable_name, color_scales=color_scales)
+        
+        # Use histogram analysis for skiability and other key variables
+        if variable_name in ['skiability', 'powder_depth', 'powder_quality', 'sqh']:
+            stats = analyze_variable_with_histogram(variable_name, color_scales=color_scales, num_bins=20)
+        else:
+            stats = analyze_variable_tifs(variable_name, color_scales=color_scales)
+            
         if stats:
             generate_color_scale_update({variable_name: stats})
     else:
