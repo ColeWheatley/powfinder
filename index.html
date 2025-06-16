@@ -27,8 +27,12 @@
     <div id="drawer-content">
       <div id="layer-panel" style="width: 75%; box-sizing: border-box;">
         <div id="layer-grid">
-          <!-- Available Weather Data (10 variables) -->
+          <!-- Priority Layers -->
+          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="skiability">Skiability</div>
+          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="sqh">SQH</div>
           <div class="layer-item" data-layer-type="weather" data-layer-name="temperature_2m">Temperature (2m)</div>
+          
+          <!-- Other Weather Variables -->
           <div class="layer-item" data-layer-type="weather" data-layer-name="relative_humidity_2m">Rel. Humidity (2m)</div>
           <div class="layer-item" data-layer-type="weather" data-layer-name="shortwave_radiation">Radiation</div>
           <div class="layer-item" data-layer-type="weather" data-layer-name="cloud_cover">Cloud Cover</div>
@@ -39,13 +43,13 @@
           <div class="layer-item" data-layer-type="weather" data-layer-name="freezing_level_height">Freezing Level</div>
           <div class="layer-item" data-layer-type="weather" data-layer-name="surface_pressure">Surf. Pressure</div>
           
-          <!-- Not Yet Implemented -->
+          <!-- Dewpoint -->
           <div class="layer-item" data-layer-type="weather" data-layer-name="dewpoint_2m">Dewpoint (2m)</div>
+          
+          <!-- Terrain Variables -->
           <div class="layer-item" data-layer-type="terrain" data-layer-name="elevation">Elevation</div>
           <div class="layer-item" data-layer-type="terrain" data-layer-name="aspect">Aspect</div>
           <div class="layer-item" data-layer-type="terrain" data-layer-name="slope">Slope</div>
-          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="skiability">Skiability</div>
-          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="sqh">SQH</div>
         </div>
       </div>
       <div id="settings-grid-panel" style="width: 25%; box-sizing: border-box;">
