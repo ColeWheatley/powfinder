@@ -164,10 +164,10 @@
     "max": 360
   },
   "powder_depth": {
-    "palette": ["rgba(255,255,255,0)", "rgba(255,255,255,1)"],
+    "palette": ["rgba(255,255,255,0.3)", "rgba(255,255,255,1)"],
     "opacity": true,
     "min": 0,
-    "max": 100,
+    "max": 20,
     "interpolation": "linear"
   },
   "powder_quality": {
