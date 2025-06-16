@@ -172,7 +172,7 @@ def tif_to_png(tif_path: pathlib.Path):
     with rasterio.open(tif_path) as src:
         data = src.read(1).astype(float)
         mask = (data == src.nodata) | np.isnan(data)
-        norm = np.clip((data - 1) / 254.0, 0, 1)
+        norm = np.clip(data / 255.0, 0, 1)   # values were written in 1..255
 
     rgba = cmap(norm)
     # Preserve colormap alpha, but set nodata areas to transparent
