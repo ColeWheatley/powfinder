@@ -151,6 +151,14 @@ def tif_to_png(tif_path: pathlib.Path):
         render_sqh_png(depth_path, quality_path, tif_path.parent / "sqh.png", spec)
         return
     
+    # Special handling for skiability - use powder depth for opacity like SQH
+    if var == "skiability":
+        depth_path = tif_path.parent / "powder_depth.tif"
+        out_png = tif_path.parent / "skiability.png"
+        if depth_path.exists():
+            render_sqh_png(depth_path, tif_path, out_png, spec)
+            return
+    
     # PNG name will be: temperature_2m.png
     png_name = var + ".png"
     out_png = tif_path.parent / png_name
@@ -224,8 +232,6 @@ def main():
         if ts_dir.name not in FRONTEND_TIMESTAMPS:  # Only process frontend timestamps for PNGs
             continue
         for tif in ts_dir.glob("*.tif"):
-            if tif.stem == "snow_depth":  # Skip snow_depth PNGs as requested
-                continue
             var = tif.stem  # Get variable name from filename
             png_path = tif.parent / f"{tif.stem}.png"
             
@@ -236,7 +242,8 @@ def main():
                 sqh_png = tif.parent / "sqh.png"
                 if qual_path.exists():
                     spec = CS.get("sqh", {})
-                    if spec and needs_update(tif, sqh_png, "sqh"):
+                    # Check if either powder depth OR quality TIF is newer than SQH PNG
+                    if spec and (needs_update(tif, sqh_png, "sqh") or needs_update(qual_path, sqh_png, "sqh")):
                         print(f"  → {tif.relative_to(BASE)} + quality → sqh.png")
                         render_sqh_png(tif, qual_path, sqh_png, spec)
                         updated_count += 1
