@@ -15,7 +15,7 @@ const lightBaseLayer = new ol.layer.Tile({
 
 const hillshadeLayer = new ol.layer.Tile({
   source: new ol.source.XYZ({
-    url: 'TIFS/100m_resolution/terrainPNGs/hillshade.png'
+    url: 'web-resources/images/terrain/hillshade.png'
   }),
   opacity: 0.3,
   visible: false  // Initially hidden
@@ -135,7 +135,7 @@ if (infoBox) {
 }
 
 // load peak list for name lookups
-const peaksPromise = fetch('resources/meteo_api/tirol_peaks.geojson')
+const peaksPromise = fetch('web-resources/data/tirol_peaks.geojson')
   .then(r => r.json())
   .then(g => {
     peaks = g.features.map(f => ({
@@ -146,7 +146,7 @@ const peaksPromise = fetch('resources/meteo_api/tirol_peaks.geojson')
     }));
   }).catch(() => {});
 
-const colorScalePromise = fetch('resources/Make%20TIFs/color_scales.json')
+const colorScalePromise = fetch('web-resources/data/color_scales.json')
   .then(r => r.json())
   .then(d => { colorScales = d; })
   .catch(e => console.error('Color scale load failed', e));
@@ -158,7 +158,7 @@ function loadWeatherData() {
   weatherDataLoading = true;
   console.log('Loading weather data for point validation...');
   
-  return fetch('weather_data_frontend.json')
+  return fetch('web-resources/data/weather_data_frontend.json')
     .then(r => r.json())
     .then(d => {
       const sample = d.coordinates.find(c => c.weather_data_3hour);
@@ -186,13 +186,18 @@ function loadWeatherData() {
     });
 }
 
-// Simplified initial load - just load essentials
+// Simplified initial load - just load essentials, weather data loads separately
 const weatherPromise = Promise.resolve(); // Don't load weather data initially
 
 Promise.all([colorScalePromise, weatherPromise, peaksPromise]).then(() => {
   updateButtons();
   draw();
 });
+
+// Load weather data after 2 seconds - prioritize over PNG preloading
+setTimeout(() => {
+  loadWeatherData();
+}, 2000);
 
 function formatDay(d){
   // Use May 24th as reference "Today" 
@@ -318,9 +323,9 @@ async function getPngValue(varName, tsStr, lat, lon){
   const layerType = getLayerType(varName);
   let imageUrl;
   if(layerType === 'terrain'){
-    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
+    imageUrl = `web-resources/images/terrain/${varName}.png`;
   }else{
-    imageUrl = `TIFS/100m_resolution/${tsStr}/${varName}.png`;
+    imageUrl = `web-resources/images/weather/${tsStr}/${varName}.png`;
   }
   try{
     const canvas = await loadCanvas(imageUrl);
@@ -543,10 +548,10 @@ function updateTileLayer(){
   
   if (layerType === 'terrain') {
     // Static terrain layers
-    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
+    imageUrl = `web-resources/images/terrain/${varName}.png`;
   } else if (layerType === 'snow_composite' || layerType === 'weather') {
     // Time-dependent layers (weather data, skiability, SQH)
-    imageUrl = `TIFS/100m_resolution/${ts}/${varName}.png`;
+    imageUrl = `web-resources/images/weather/${ts}/${varName}.png`;
   } else {
     console.warn(`Unknown layer type for ${varName}`);
     return;
@@ -916,7 +921,7 @@ function generateAllPngUrls() {
   // Terrain PNGs (always available)
   const terrainVars = ['elevation', 'aspect', 'slope'];
   terrainVars.forEach(varName => {
-    allUrls.push(`TIFS/100m_resolution/terrainPNGs/${varName}.png`);
+    allUrls.push(`web-resources/images/terrain/${varName}.png`);
   });
   
   // Weather and composite PNGs (time-based)
@@ -927,7 +932,7 @@ function generateAllPngUrls() {
   
   availableTimestamps.forEach(timestamp => {
     weatherVars.forEach(varName => {
-      allUrls.push(`TIFS/100m_resolution/${timestamp}/${varName}.png`);
+      allUrls.push(`web-resources/images/weather/${timestamp}/${varName}.png`);
     });
   });
   
@@ -975,6 +980,12 @@ function preloadPngsInBackground() {
 
 // Start preloading when the app initializes
 window.addEventListener('load', () => {
-  // Give the page a moment to fully load, then start preloading
-  setTimeout(preloadPngsInBackground, 3000);
+  // Load weather data after 2 seconds for better UX
+  setTimeout(() => {
+    console.log('Auto-loading weather data...');
+    loadWeatherData();
+  }, 2000);
+  
+  // Give weather data priority - start PNG preloading after weather data has had time to load
+  setTimeout(preloadPngsInBackground, 5000);
 });
