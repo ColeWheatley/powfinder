@@ -512,6 +512,7 @@ def main(vars_to_process: List[str]) -> None:
                         grid_elev,
                     )
                     results = {"skiability": ski.reshape(grid_elev.shape)}
+
                 else:
                     data = interpolate(
                         var,
