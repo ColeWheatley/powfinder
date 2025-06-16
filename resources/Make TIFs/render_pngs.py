@@ -170,6 +170,7 @@ def tif_to_png(tif_path: pathlib.Path):
         norm = np.clip(data / 255.0, 0, 1)
         print(f"[DEBUG] {var} PNG normalisation range: {norm.min():.3f}-{norm.max():.3f}")
 
+
     rgba = cmap(norm)
     # Preserve colormap alpha, but set nodata areas to transparent
     rgba[mask, 3] = 0.0  # Only set nodata pixels to transparent
