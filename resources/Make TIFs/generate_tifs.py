@@ -247,7 +247,12 @@ def physics_skiability(wind, codes, tgt_elev, src_elev):
     penalties = np.where((codes >= 51) & (codes < 80), 0.3, penalties)
     penalties = np.where((codes >= 45) & (codes < 51), 0.2, penalties)
     ski = 1.0 - 0.1 * wind - penalties
-    return np.clip(ski, 0, None)
+    ski = np.clip(ski, 0, None)
+    
+    # Preserve NODATA from inputs
+    nodata_mask = (wind == NODATA) | (codes == NODATA)
+    ski[nodata_mask] = NODATA
+    return ski
 
 # ---------------------------------------------------------------------------
 # Variable configuration
