@@ -1,5 +1,8 @@
 import 'https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js';
 
+// Resource base path - single source of truth for all asset URLs
+const RES = './';
+
 // Create base map layers
 const osmLayer = new ol.layer.Tile({ 
   source: new ol.source.OSM({
@@ -15,7 +18,7 @@ const lightBaseLayer = new ol.layer.Tile({
 
 const hillshadeLayer = new ol.layer.Tile({
   source: new ol.source.XYZ({
-    url: 'web-resources/images/terrain/hillshade.png'
+    url: `TIFS/100m_resolution/terrainPNGs/hillshade.png`
   }),
   opacity: 0.3,
   visible: false  // Initially hidden
@@ -135,8 +138,11 @@ if (infoBox) {
 }
 
 // load peak list for name lookups
-const peaksPromise = fetch('web-resources/data/tirol_peaks.geojson')
-  .then(r => r.json())
+const peaksPromise = fetch(`resources/meteo_api/tirol_peaks.geojson`)
+  .then(r => {
+    if (!r.ok) throw new Error(`Missing resources/meteo_api/tirol_peaks.geojson - status ${r.status}`);
+    return r.json();
+  })
   .then(g => {
     peaks = g.features.map(f => ({
       name: f.properties.name,
@@ -146,8 +152,11 @@ const peaksPromise = fetch('web-resources/data/tirol_peaks.geojson')
     }));
   }).catch(() => {});
 
-const colorScalePromise = fetch('web-resources/data/color_scales.json')
-  .then(r => r.json())
+const colorScalePromise = fetch(`resources/Make TIFs/color_scales.json`)
+  .then(r => {
+    if (!r.ok) throw new Error(`Missing resources/Make TIFs/color_scales.json - status ${r.status}`);
+    return r.json();
+  })
   .then(d => { colorScales = d; })
   .catch(e => console.error('Color scale load failed', e));
 
@@ -158,7 +167,7 @@ function loadWeatherData() {
   weatherDataLoading = true;
   console.log('Loading weather data for point validation...');
   
-  return fetch('web-resources/data/weather_data_frontend.json')
+  return fetch('resources/meteo_api/weather_data_frontend.json')
     .then(r => r.json())
     .then(d => {
       const sample = d.coordinates.find(c => c.weather_data_3hour);
@@ -323,9 +332,9 @@ async function getPngValue(varName, tsStr, lat, lon){
   const layerType = getLayerType(varName);
   let imageUrl;
   if(layerType === 'terrain'){
-    imageUrl = `web-resources/images/terrain/${varName}.png`;
+    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
   }else{
-    imageUrl = `web-resources/images/weather/${tsStr}/${varName}.png`;
+    imageUrl = `TIFS/100m_resolution/${tsStr}/${varName}.png`;
   }
   try{
     const canvas = await loadCanvas(imageUrl);
@@ -548,10 +557,10 @@ function updateTileLayer(){
   
   if (layerType === 'terrain') {
     // Static terrain layers
-    imageUrl = `web-resources/images/terrain/${varName}.png`;
+    imageUrl = `TIFS/100m_resolution/terrainPNGs/${varName}.png`;
   } else if (layerType === 'snow_composite' || layerType === 'weather') {
     // Time-dependent layers (weather data, skiability, SQH)
-    imageUrl = `web-resources/images/weather/${ts}/${varName}.png`;
+    imageUrl = `TIFS/100m_resolution/${ts}/${varName}.png`;
   } else {
     console.warn(`Unknown layer type for ${varName}`);
     return;
@@ -921,7 +930,7 @@ function generateAllPngUrls() {
   // Terrain PNGs (always available)
   const terrainVars = ['elevation', 'aspect', 'slope'];
   terrainVars.forEach(varName => {
-    allUrls.push(`web-resources/images/terrain/${varName}.png`);
+    allUrls.push(`TIFS/100m_resolution/terrainPNGs/${varName}.png`);
   });
   
   // Weather and composite PNGs (time-based)
@@ -932,7 +941,7 @@ function generateAllPngUrls() {
   
   availableTimestamps.forEach(timestamp => {
     weatherVars.forEach(varName => {
-      allUrls.push(`web-resources/images/weather/${timestamp}/${varName}.png`);
+      allUrls.push(`TIFS/100m_resolution/${timestamp}/${varName}.png`);
     });
   });
   
