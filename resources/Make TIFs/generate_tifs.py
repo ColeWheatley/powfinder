@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import rasterio
@@ -298,6 +299,50 @@ VARIABLES = [
 
 VAR_BY_KEY = {v.key: v for v in VARIABLES}
 
+# Weather variables that can be processed independently
+WEATHER_VARS = [
+    "temperature_2m",
+    "dewpoint_2m",
+    "relative_humidity_2m",
+    "shortwave_radiation",
+    "snowfall",
+    "snow_depth",
+    "wind_speed_10m",
+    "weather_code",
+    "surface_pressure",
+    "cloud_cover",
+    "freezing_level_height",
+]
+
+
+def _init_worker(arrays_, idxs_, weights_, grid_elev_flat_, coords_elev_, grid_shape_):
+    """Initializer for worker processes to avoid repeatedly pickling data."""
+    global ARRAYS, IDXS, WEIGHTS, GRID_ELEV_FLAT, COORDS_ELEV, GRID_SHAPE
+    ARRAYS = arrays_
+    IDXS = idxs_
+    WEIGHTS = weights_
+    GRID_ELEV_FLAT = grid_elev_flat_
+    COORDS_ELEV = coords_elev_
+    GRID_SHAPE = grid_shape_
+
+
+def _interp_worker(args: Tuple[str, int, np.ndarray]):
+    """Worker function to interpolate a single variable."""
+    var_key, ti, hill = args
+    var = VAR_BY_KEY[var_key]
+    data = interpolate(
+        var,
+        ti,
+        hill,
+        ARRAYS,
+        IDXS,
+        WEIGHTS,
+        GRID_ELEV_FLAT,
+        COORDS_ELEV,
+        GRID_SHAPE,
+    )
+    return var_key, data
+
 # ---------------------------------------------------------------------------
 # Caching
 
@@ -379,12 +424,46 @@ def main(vars_to_process: List[str]) -> None:
     # Sort timestamps chronologically for proper forward integration
     sorted_timestamps = sorted(ALL_TIMESTAMPS, key=lambda x: datetime.fromisoformat(x))
 
+    # ------------------------------------------------------------------
+    # Pre-interpolate weather data for all timestamps to avoid redundancy
+    print("Precomputing weather grids...")
+    weather_cache: Dict[str, Dict[str, np.ndarray]] = {}
+    with ProcessPoolExecutor(
+        initializer=_init_worker,
+        initargs=(arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape),
+    ) as executor:
+        for ts in sorted_timestamps:
+            if ts not in tindex:
+                continue
+            ti = tindex[ts]
+            hour = datetime.fromisoformat(ts).hour
+            period = PERIOD_FROM_HOUR.get(hour)
+            hs = hillshade.get(period, np.zeros_like(grid_elev_flat))
+
+            futures = [executor.submit(_interp_worker, (v, ti, hs)) for v in WEATHER_VARS]
+            ts_results = {k: d for k, d in (f.result() for f in futures)}
+            weather_cache[ts] = ts_results
+
     # Define which variables are needed for powder physics
-    POWDER_REQUIRED_VARS = ["snowfall", "temperature_2m", "shortwave_radiation", 
-                           "wind_speed_10m", "cloud_cover", "relative_humidity_2m", 
-                           "powder", "skiability"]
-    
-    for var_key in vars_to_process:
+    POWDER_REQUIRED_VARS = [
+        "snowfall",
+        "temperature_2m",
+        "shortwave_radiation",
+        "wind_speed_10m",
+        "cloud_cover",
+        "relative_humidity_2m",
+        "powder",
+        "skiability",
+    ]
+
+    # Order variables: weather first, then powder, then skiability
+    ordered_vars = [v for v in WEATHER_VARS if v in vars_to_process]
+    if "powder" in vars_to_process:
+        ordered_vars.append("powder")
+    if "skiability" in vars_to_process:
+        ordered_vars.append("skiability")
+
+    for var_key in ordered_vars:
         var = VAR_BY_KEY[var_key]
         
         # Skip non-essential variables for historical timestamps
@@ -405,11 +484,6 @@ def main(vars_to_process: List[str]) -> None:
         prev_quality = None
         
         for ts in timestamps_to_process:
-            ti = tindex[ts]
-            hour = datetime.fromisoformat(ts).hour
-            period = PERIOD_FROM_HOUR.get(hour)
-            hs = hillshade.get(period, np.zeros_like(grid_elev_flat))  # Use zeros for nighttime
-
             out_dir = OUTPUT_BASE / ts
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -417,29 +491,46 @@ def main(vars_to_process: List[str]) -> None:
                 # Load previous powder state
                 if prev_depth is None:
                     prev_depth, prev_quality = load_powder_state(ts, grid_elev.shape, sorted_timestamps)
-                
-                # Get current weather data
-                snowfall = interpolate(VAR_BY_KEY["snowfall"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                temp = interpolate(VAR_BY_KEY["temperature_2m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                rad = interpolate(VAR_BY_KEY["shortwave_radiation"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                wind = interpolate(VAR_BY_KEY["wind_speed_10m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                cloud_cover = interpolate(VAR_BY_KEY["cloud_cover"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                relative_humidity = interpolate(VAR_BY_KEY["relative_humidity_2m"], ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
-                
-                # Apply powder physics
-                depth, qual = physics_powder(prev_depth, prev_quality, snowfall.ravel(), temp.ravel(), 
-                                           rad.ravel(), wind.ravel(), cloud_cover.ravel(), 
-                                           relative_humidity.ravel(), ts, grid_elev_flat)
-                
+
+                w = weather_cache[ts]
+                depth, qual = physics_powder(
+                    prev_depth,
+                    prev_quality,
+                    w["snowfall"].ravel(),
+                    w["temperature_2m"].ravel(),
+                    w["shortwave_radiation"].ravel(),
+                    w["wind_speed_10m"].ravel(),
+                    w["cloud_cover"].ravel(),
+                    w["relative_humidity_2m"].ravel(),
+                    ts,
+                    grid_elev_flat,
+                )
+
                 # Update state for next iteration
                 prev_depth, prev_quality = depth, qual
-                
+
                 results = {
                     "powder_depth": depth.reshape(grid_elev.shape),
                     "powder_quality": qual.reshape(grid_elev.shape),
                 }
             else:
-                data = interpolate(var, ti, hs, arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape)
+                if var_key in WEATHER_VARS:
+                    data = weather_cache[ts][var_key]
+                else:
+                    hour = datetime.fromisoformat(ts).hour
+                    period = PERIOD_FROM_HOUR.get(hour)
+                    hs = hillshade.get(period, np.zeros_like(grid_elev_flat))
+                    data = interpolate(
+                        var,
+                        tindex[ts],
+                        hs,
+                        arrays,
+                        idxs,
+                        weights,
+                        grid_elev_flat,
+                        coords_elev,
+                        grid_elev.shape,
+                    )
                 results = {var.outputs[0]: data}
 
             for out_name, data in results.items():
