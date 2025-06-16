@@ -28,7 +28,7 @@ COLOR_SCALES_PATH = SCRIPT_DIR / "color_scales.json"
 CS = json.load(open(COLOR_SCALES_PATH))
 
 # Only publish a subset of timestamps to the web frontend
-TIMESTAMPS = [
+FRONTEND_TIMESTAMPS = [
     "2025-05-24T09:00:00", "2025-05-24T12:00:00", "2025-05-24T15:00:00", "2025-05-24T18:00:00",
     "2025-05-25T09:00:00", "2025-05-25T12:00:00", "2025-05-25T15:00:00", "2025-05-25T18:00:00",
     "2025-05-26T09:00:00", "2025-05-26T12:00:00", "2025-05-26T15:00:00", "2025-05-26T18:00:00",
@@ -66,11 +66,17 @@ def render_sqh_png(depth_tif: pathlib.Path, qual_tif: pathlib.Path, out_png: pat
         depth = dsrc.read(1).astype(float)
         qual = qsrc.read(1).astype(float)
         mask = (depth == dsrc.nodata) | np.isnan(depth)
-        depth_norm = np.clip(depth / spec.get("max", 100.0), 0, 1)
-        qual_norm = np.clip((qual - vmin) / (vmax - vmin), 0, 1)
+        
+        # Convert from scaled uint8 back to physical units
+        depth_phys = (depth - 1) / 254.0 * 100.0  # Max depth 100cm
+        qual_phys = (qual - 1) / 254.0  # Quality 0-1
+        
+        # Normalize for visualization
+        depth_norm = np.clip(depth_phys / 100.0, 0, 1)  # Opacity from depth
+        qual_norm = np.clip((qual_phys - vmin) / (vmax - vmin), 0, 1)  # Color from quality
 
     rgba = cmap(qual_norm)
-    rgba[..., 3] = depth_norm
+    rgba[..., 3] = depth_norm  # Use depth for opacity
     rgba[mask, 3] = 0.0
     plt.imsave(out_png, rgba)
 
@@ -214,18 +220,36 @@ def main():
     updated_count = 0
     skipped_count = 0
     
-    # Process weather/composite layers (timestamp-based TIFs)
+    # Process weather/composite layers (timestamp-based TIFs) - ONLY for frontend timestamps
     print("🌤️  Processing weather and composite layers...")
     for ts_dir in BASE.iterdir():
         if not ts_dir.is_dir() or ts_dir.name == "terrainPNGs":
             continue
-        if ts_dir.name not in TIMESTAMPS:
+        if ts_dir.name not in FRONTEND_TIMESTAMPS:  # Only process frontend timestamps for PNGs
             continue
         for tif in ts_dir.glob("*.tif"):
-            if tif.stem == "snow_depth":
+            if tif.stem == "snow_depth":  # Skip snow_depth PNGs as requested
                 continue
             var = tif.stem  # Get variable name from filename
             png_path = tif.parent / f"{tif.stem}.png"
+            
+            # Special handling for SQH
+            if var == "powder_depth":
+                # Generate SQH PNG from powder depth and quality
+                qual_path = tif.parent / "powder_quality.tif"
+                sqh_png = tif.parent / "sqh.png"
+                if qual_path.exists():
+                    spec = CS.get("sqh", {})
+                    if spec and needs_update(tif, sqh_png, "sqh"):
+                        print(f"  → {tif.relative_to(BASE)} + quality → sqh.png")
+                        render_sqh_png(tif, qual_path, sqh_png, spec)
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
+                continue
+            elif var == "powder_quality":
+                continue  # Skip individual quality PNG, handled with depth
+            
             if needs_update(tif, png_path, var):
                 tif_to_png(tif)
                 updated_count += 1
