@@ -724,6 +724,38 @@ document.addEventListener('keydown', (event) => {
     if (popup.style.display !== 'none') {
       popup.style.display = 'none';
     }
+  } else if (event.key === ' ') {
+    // Spacebar toggles settings panel
+    toggleDrawer();
+    event.preventDefault();
+  } else if (event.key === 'ArrowUp') {
+    // Up arrow cycles to previous layer
+    const layers = Array.from(document.querySelectorAll('.layer-item[data-layer-name]'));
+    const currentIndex = layers.findIndex(layer => layer.dataset.layerName === varName);
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : layers.length - 1;
+    const prevLayer = layers[prevIndex];
+    
+    // Update active layer
+    layers.forEach(layer => layer.classList.remove('active'));
+    prevLayer.classList.add('active');
+    varName = prevLayer.dataset.layerName;
+    updateToggleButtonState();
+    draw();
+    event.preventDefault();
+  } else if (event.key === 'ArrowDown') {
+    // Down arrow cycles to next layer
+    const layers = Array.from(document.querySelectorAll('.layer-item[data-layer-name]'));
+    const currentIndex = layers.findIndex(layer => layer.dataset.layerName === varName);
+    const nextIndex = currentIndex < layers.length - 1 ? currentIndex + 1 : 0;
+    const nextLayer = layers[nextIndex];
+    
+    // Update active layer
+    layers.forEach(layer => layer.classList.remove('active'));
+    nextLayer.classList.add('active');
+    varName = nextLayer.dataset.layerName;
+    updateToggleButtonState();
+    draw();
+    event.preventDefault();
   } else if (event.key === 'ArrowRight') {
     const idx = dayIdx * 4 + hourIdx;
     if (idx < availableTimestamps.length - 1) {

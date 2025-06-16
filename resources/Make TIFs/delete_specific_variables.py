@@ -74,7 +74,7 @@ PNGS_TO_DELETE = [
     # Derived variables - UNCOMMENTED = WILL BE DELETED
     # "powder_depth",
     # "powder_quality", 
-    # "sqh",
+    "sqh",
     "skiability",
 ]
 

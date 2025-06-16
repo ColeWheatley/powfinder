@@ -180,23 +180,36 @@
   "sqh": {
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "#ff0000",
-      "#0000ff",
-      "#ff4081"
+      "rgba(220,20,60,0.1)",
+      "rgba(220,20,60,0.2)",
+      "rgba(220,20,60,0.3)",
+      "rgba(204,153,255,0.4)",
+      "rgba(153,153,255,0.5)",
+      "rgba(102,102,255,0.6)",
+      "rgba(51,51,255,0.7)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)"
     ],
-    "interpolation": "linear",
     "min": 0,
-    "max": 1
+    "max": 1,
+    "interpolation": "discrete"
   },
   "skiability": {
     "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
     "palette": [
-      "#ff0000",
-      "#0000ff",
-      "#ff4081"
+      "rgba(255,0,0,0.1)",
+      "rgba(204,153,255,0.4)",
+      "rgba(153,153,255,0.5)",
+      "rgba(102,102,255,0.6)",
+      "rgba(51,51,255,0.7)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)"
     ],
-    "interpolation": "linear",
     "min": 0,
-    "max": 0.8
+    "max": 1,
+    "interpolation": "discrete"
   }
 }
