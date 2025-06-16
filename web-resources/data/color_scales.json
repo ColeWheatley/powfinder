@@ -1,0 +1,215 @@
+{
+  "temperature_2m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#0000ff",
+      "#ff0000"
+    ],
+    "interpolation": "linear",
+    "min": -17.16,
+    "api_max": 22.97,
+    "elevation_buffer": 0.65,
+    "max": 25.62
+  },
+  "relative_humidity_2m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#ffffff",
+      "#00bfff"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.39,
+    "api_max": 100.0,
+    "max": 100.0
+  },
+  "shortwave_radiation": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#000000",
+      "#ffff00"
+    ],
+    "interpolation": "linear",
+    "min": 4.17,
+    "max": 1064.17
+  },
+  "cloud_cover": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "rgba(255,255,255,0)",
+      "rgba(128,128,128,0.3)",
+      "rgba(128,128,128,0.8)"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.78,
+    "max": 100.0
+  },
+  "snow_depth": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "rgba(0,0,255,0)",
+      "rgba(0,0,255,1)"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.0,
+    "api_max": 2.51,
+    "max": 1
+  },
+  "snowfall": {
+    "last_updated": "2025-06-15T13:25:00[Europe/Berlin]",
+    "palette": [
+      "rgba(255,255,255,0)",
+      "rgba(30,144,255,0.7)",
+      "rgba(30,144,255,0.9)",
+      "rgba(0,0,139,1.0)"
+    ],
+    "opacity": true,
+    "interpolation": "linear",
+    "min": 0.04,
+    "api_max": 8.19,
+    "max": 9.01
+  },
+  "wind_speed_10m": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#00ff00",
+      "#ffff00",
+      "#ff0000"
+    ],
+    "interpolation": "linear",
+    "min": 0.23,
+    "max": 53.07
+  },
+  "weather_code": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#ffd700",
+      "#808080",
+      "#4169e1",
+      "#ffffff",
+      "#ff4500"
+    ],
+    "discrete": true,
+    "interpolation": "linear",
+    "min": 0,
+    "max": 96
+  },
+  "freezing_level_height": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#add8e6",
+      "#00008b"
+    ],
+    "interpolation": "linear",
+    "min": 1543.39,
+    "max": 3250.0
+  },
+  "surface_pressure": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "#87cefa",
+      "#8b0000"
+    ],
+    "interpolation": "linear",
+    "min": 638.90,
+    "api_max": 960.53,
+    "pressure_buffer": 1.2,
+    "max": 966.73
+  },
+  "dewpoint_2m": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
+    "palette": [
+      "#8b4513",
+      "#87ceeb",
+      "#4169e1"
+    ],
+    "interpolation": "linear",
+    "min": -14.39,
+    "max": 12.80
+  },
+  "slope": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
+    "palette": [
+      "#00ff00",
+      "#ffff00",
+      "#ff0000"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 50
+  },
+  "elevation": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
+    "palette": [
+      "#000000",
+      "#ffffff"
+    ],
+    "interpolation": "linear",
+    "min": 450,
+    "max": 3800
+  },
+  "aspect": {
+    "last_updated": "2025-06-15T10:00:00[Europe/Berlin]",
+    "palette": [
+      "#0000ff",
+      "#00ff00",
+      "#ff0000",
+      "#ffff00",
+      "#0000ff"
+    ],
+    "interpolation": "linear",
+    "min": 0,
+    "max": 360
+  },
+  "powder_depth": {
+    "palette": ["rgba(255,255,255,0.3)", "rgba(255,255,255,1)"],
+    "opacity": true,
+    "min": 0,
+    "max": 50,
+    "interpolation": "linear",
+    "comment": "powder depth in mm (not cm) - max 50mm = 5cm"
+  },
+  "powder_quality": {
+    "palette": ["#ff0000", "#0000ff", "#ff4081"],
+    "min": 0,
+    "max": 1,
+    "interpolation": "linear"
+  },
+  "sqh": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "rgba(220,20,60,0.1)",
+      "rgba(220,20,60,0.2)",
+      "rgba(220,20,60,0.3)",
+      "rgba(204,153,255,0.4)",
+      "rgba(153,153,255,0.5)",
+      "rgba(102,102,255,0.6)",
+      "rgba(51,51,255,0.7)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)"
+    ],
+    "min": 0,
+    "max": 1,
+    "interpolation": "discrete"
+  },
+  "skiability": {
+    "last_updated": "2025-06-15T13:23:00[Europe/Berlin]",
+    "palette": [
+      "rgba(255,0,0,0.1)",
+      "rgba(204,153,255,0.4)",
+      "rgba(153,153,255,0.5)",
+      "rgba(102,102,255,0.6)",
+      "rgba(51,51,255,0.7)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)",
+      "rgba(255,64,129,1.0)"
+    ],
+    "min": 0,
+    "max": 1,
+    "interpolation": "discrete"
+  }
+}
