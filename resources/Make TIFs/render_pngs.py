@@ -168,12 +168,11 @@ def tif_to_png(tif_path: pathlib.Path):
     print(f"  → {tif_path.relative_to(BASE)} → {png_name} (updating)")
 
     cmap = build_cmap(spec["palette"])
-    vmin, vmax = spec["min"], spec["max"]
 
     with rasterio.open(tif_path) as src:
-        data = src.read(1)
+        data = src.read(1).astype(float)
         mask = (data == src.nodata) | np.isnan(data)
-        norm = np.clip((data.astype(float) - vmin) / (vmax - vmin), 0, 1)
+        norm = np.clip((data - 1) / 254.0, 0, 1)
 
     rgba = cmap(norm)
     # Preserve colormap alpha, but set nodata areas to transparent

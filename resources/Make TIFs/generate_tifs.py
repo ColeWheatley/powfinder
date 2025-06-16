@@ -424,25 +424,6 @@ def main(vars_to_process: List[str]) -> None:
     # Sort timestamps chronologically for proper forward integration
     sorted_timestamps = sorted(ALL_TIMESTAMPS, key=lambda x: datetime.fromisoformat(x))
 
-    # ------------------------------------------------------------------
-    # Pre-interpolate weather data for all timestamps to avoid redundancy
-    print("Precomputing weather grids...")
-    weather_cache: Dict[str, Dict[str, np.ndarray]] = {}
-    with ProcessPoolExecutor(
-        initializer=_init_worker,
-        initargs=(arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape),
-    ) as executor:
-        for ts in sorted_timestamps:
-            if ts not in tindex:
-                continue
-            ti = tindex[ts]
-            hour = datetime.fromisoformat(ts).hour
-            period = PERIOD_FROM_HOUR.get(hour)
-            hs = hillshade.get(period, np.zeros_like(grid_elev_flat))
-
-            futures = [executor.submit(_interp_worker, (v, ti, hs)) for v in WEATHER_VARS]
-            ts_results = {k: d for k, d in (f.result() for f in futures)}
-            weather_cache[ts] = ts_results
 
     # Define which variables are needed for powder physics
     POWDER_REQUIRED_VARS = [
@@ -463,66 +444,79 @@ def main(vars_to_process: List[str]) -> None:
     if "skiability" in vars_to_process:
         ordered_vars.append("skiability")
 
-    for var_key in ordered_vars:
-        var = VAR_BY_KEY[var_key]
-        
-        # Skip non-essential variables for historical timestamps
-        # Current approach processes ALL then filters
-        timestamps_to_process = [ts for ts in sorted_timestamps if ts in tindex]
+    # Determine which variables can be skipped entirely based on fingerprints
+    skip_map = {k: should_skip(VAR_BY_KEY[k]) for k in ordered_vars}
 
-        # Better: only process what's needed
-        if var_key not in POWDER_REQUIRED_VARS:
-            timestamps_to_process = sorted([ts for ts in FRONTEND_TIMESTAMPS if ts in tindex])
-        
-        if should_skip(var):
-            print(f"Skipping {var.key} (up to date)")
-            continue
-        print(f"Generating {var.key}...")
-        
-        # Initialize powder state for forward integration
-        prev_depth = None
-        prev_quality = None
-        
-        for ts in timestamps_to_process:
+    prev_depth = None
+    prev_quality = None
+
+    with ProcessPoolExecutor(
+        initializer=_init_worker,
+        initargs=(arrays, idxs, weights, grid_elev_flat, coords_elev, grid_elev.shape),
+    ) as executor:
+        for ts in sorted_timestamps:
+            if ts not in tindex:
+                continue
+
+            ti = tindex[ts]
+            hour = datetime.fromisoformat(ts).hour
+            period = PERIOD_FROM_HOUR.get(hour)
+            hs = hillshade.get(period, np.zeros_like(grid_elev_flat))
+
+            # Interpolate all required weather variables for this timestamp
+            futures = [executor.submit(_interp_worker, (v, ti, hs)) for v in WEATHER_VARS]
+            weather_data = {k: d for k, d in (f.result() for f in futures)}
+
             out_dir = OUTPUT_BASE / ts
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            if var.depends_on_previous:
-                # Load previous powder state
-                if prev_depth is None:
-                    prev_depth, prev_quality = load_powder_state(ts, grid_elev.shape, sorted_timestamps)
+            for var_key in ordered_vars:
+                if skip_map.get(var_key):
+                    continue
 
-                w = weather_cache[ts]
-                depth, qual = physics_powder(
-                    prev_depth,
-                    prev_quality,
-                    w["snowfall"].ravel(),
-                    w["temperature_2m"].ravel(),
-                    w["shortwave_radiation"].ravel(),
-                    w["wind_speed_10m"].ravel(),
-                    w["cloud_cover"].ravel(),
-                    w["relative_humidity_2m"].ravel(),
-                    ts,
-                    grid_elev_flat,
-                )
+                if var_key not in POWDER_REQUIRED_VARS and ts not in FRONTEND_TIMESTAMPS:
+                    continue
 
-                # Update state for next iteration
-                prev_depth, prev_quality = depth, qual
+                var = VAR_BY_KEY[var_key]
 
-                results = {
-                    "powder_depth": depth.reshape(grid_elev.shape),
-                    "powder_quality": qual.reshape(grid_elev.shape),
-                }
-            else:
-                if var_key in WEATHER_VARS:
-                    data = weather_cache[ts][var_key]
+                if var.depends_on_previous:
+                    if prev_depth is None:
+                        prev_depth, prev_quality = load_powder_state(ts, grid_elev.shape, sorted_timestamps)
+
+                    depth, qual = physics_powder(
+                        prev_depth,
+                        prev_quality,
+                        weather_data["snowfall"].ravel(),
+                        weather_data["temperature_2m"].ravel(),
+                        weather_data["shortwave_radiation"].ravel(),
+                        weather_data["wind_speed_10m"].ravel(),
+                        weather_data["cloud_cover"].ravel(),
+                        weather_data["relative_humidity_2m"].ravel(),
+                        ts,
+                        grid_elev_flat,
+                    )
+
+                    prev_depth, prev_quality = depth, qual
+
+                    results = {
+                        "powder_depth": depth.reshape(grid_elev.shape),
+                        "powder_quality": qual.reshape(grid_elev.shape),
+                    }
+                elif var_key in WEATHER_VARS:
+                    results = {var.outputs[0]: weather_data[var_key]}
+                elif var_key == "skiability":
+                    ski = physics_skiability(
+                        weather_data["wind_speed_10m"],
+                        weather_data["weather_code"],
+                        grid_elev,
+                        grid_elev,
+                    )
+                    results = {"skiability": ski.reshape(grid_elev.shape)}
+
                 else:
-                    hour = datetime.fromisoformat(ts).hour
-                    period = PERIOD_FROM_HOUR.get(hour)
-                    hs = hillshade.get(period, np.zeros_like(grid_elev_flat))
                     data = interpolate(
                         var,
-                        tindex[ts],
+                        ti,
                         hs,
                         arrays,
                         idxs,
@@ -531,30 +525,33 @@ def main(vars_to_process: List[str]) -> None:
                         coords_elev,
                         grid_elev.shape,
                     )
-                results = {var.outputs[0]: data}
+                    results = {var.outputs[0]: data}
 
-            for out_name, data in results.items():
-                scale = color_scales.get(out_name, {})
-                if "min" in scale and "max" in scale:
-                    vmin = scale["min"]
-                    vmax = scale["max"]
-                else:
-                    valid = data[data != NODATA]
-                    vmin = float(np.nanmin(valid)) if valid.size else 0.0
-                    vmax = float(np.nanmax(valid)) if valid.size else 1.0
-                clipped = np.clip(data, vmin, vmax)
-                scaled = (clipped - vmin) / (vmax - vmin) if vmax != vmin else clipped
-                out_byte = (scaled * 254 + 1).astype(np.uint8)
-                out_byte[data == NODATA] = 0
-                profile.update(dtype="uint8", nodata=0)
-                out_path = out_dir / f"{out_name}.tif"
-                if out_path.exists():
-                    out_path.unlink()
-                with rasterio.open(out_path, "w", **profile) as dst:
-                    dst.write(out_byte, 1)
-                    dst.update_tags(units=var.units, processing_time=datetime.utcnow().isoformat(), source_points_count=len(coords))
-                tifs_created += 1
-        save_fingerprint(var)
+                for out_name, data in results.items():
+                    scale = color_scales.get(out_name, {})
+                    if "min" in scale and "max" in scale:
+                        vmin = scale["min"]
+                        vmax = scale["max"]
+                    else:
+                        valid = data[data != NODATA]
+                        vmin = float(np.nanmin(valid)) if valid.size else 0.0
+                        vmax = float(np.nanmax(valid)) if valid.size else 1.0
+                    clipped = np.clip(data, vmin, vmax)
+                    scaled = (clipped - vmin) / (vmax - vmin) if vmax != vmin else clipped
+                    out_byte = (scaled * 254 + 1).astype(np.uint8)
+                    out_byte[data == NODATA] = 0
+                    profile.update(dtype="uint8", nodata=0)
+                    out_path = out_dir / f"{out_name}.tif"
+                    if out_path.exists():
+                        out_path.unlink()
+                    with rasterio.open(out_path, "w", **profile) as dst:
+                        dst.write(out_byte, 1)
+                        dst.update_tags(units=var.units, processing_time=datetime.utcnow().isoformat(), source_points_count=len(coords))
+                    tifs_created += 1
+
+    for var_key in ordered_vars:
+        if not skip_map.get(var_key):
+            save_fingerprint(VAR_BY_KEY[var_key])
     
     # Print timing summary
     end_time = time.time()
