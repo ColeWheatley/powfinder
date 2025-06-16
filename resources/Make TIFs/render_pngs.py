@@ -132,11 +132,6 @@ def terrain_needs_update(png_path: pathlib.Path, var_name: str) -> bool:
             return True
     
     return False
-    
-    color_scales_mtime = COLOR_SCALES_PATH.stat().st_mtime
-    png_mtime = png_path.stat().st_mtime
-    
-    return color_scales_mtime > png_mtime
 
 def tif_to_png(tif_path: pathlib.Path):
     var = tif_path.stem  # Just use the stem directly
@@ -172,7 +167,8 @@ def tif_to_png(tif_path: pathlib.Path):
     with rasterio.open(tif_path) as src:
         data = src.read(1).astype(float)
         mask = (data == src.nodata) | np.isnan(data)
-        norm = np.clip((data - 1) / 254.0, 0, 1)
+        norm = np.clip(data / 255.0, 0, 1)
+        print(f"[DEBUG] {var} PNG normalisation range: {norm.min():.3f}-{norm.max():.3f}")
 
     rgba = cmap(norm)
     # Preserve colormap alpha, but set nodata areas to transparent
