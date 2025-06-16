@@ -57,6 +57,9 @@ const popupCloseButton = document.getElementById('popup-close-button');
 const overlay = new ol.Overlay({ element: popup, positioning: 'bottom-center', stopEvent: false });
 map.addOverlay(overlay);
 
+// Declare toggle button early to avoid usage before declaration
+const toggleBtn = document.getElementById('mode-toggle');
+
 let times = [], points = [], varName = 'sqh'; // Default to SQH layer
 let variables = [];
 let colorScales = {};
@@ -588,7 +591,6 @@ function supportsPointMode(layerName) {
 
 // Helper function to update toggle button state
 function updateToggleButtonState() {
-  const toggleBtn = document.getElementById('mode-toggle');
   const supportsPoints = supportsPointMode(varName);
   
   if (supportsPoints) {
@@ -694,8 +696,6 @@ updateBaseMapLayers();
 if (toggleBtn) {
   toggleBtn.classList.add('smooth');
 }
-
-const toggleBtn = document.getElementById('mode-toggle');
 
 function toggleMode() {
   // Don't do anything if the button is disabled
@@ -903,3 +903,78 @@ if (popupCloseButton) {
 
 // Initialize toggle button state based on the default layer
 updateToggleButtonState();
+
+// Background PNG preloading system
+let preloadingActive = false;
+let preloadedCount = 0;
+let totalPngsToPreload = 0;
+
+// Generate all PNG URLs to preload
+function generateAllPngUrls() {
+  const allUrls = [];
+  
+  // Terrain PNGs (always available)
+  const terrainVars = ['elevation', 'aspect', 'slope'];
+  terrainVars.forEach(varName => {
+    allUrls.push(`TIFS/100m_resolution/terrainPNGs/${varName}.png`);
+  });
+  
+  // Weather and composite PNGs (time-based)
+  const weatherVars = ['temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
+                      'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
+                      'weather_code', 'freezing_level_height', 'surface_pressure', 
+                      'dewpoint_2m', 'skiability', 'sqh'];
+  
+  availableTimestamps.forEach(timestamp => {
+    weatherVars.forEach(varName => {
+      allUrls.push(`TIFS/100m_resolution/${timestamp}/${varName}.png`);
+    });
+  });
+  
+  // Sort alphabetically for systematic loading
+  return allUrls.sort();
+}
+
+function preloadPngsInBackground() {
+  if (preloadingActive) return;
+  const allUrls = generateAllPngUrls();
+  preloadingActive = true;
+  totalPngsToPreload = allUrls.length;
+  preloadedCount = 0;
+  
+  console.log(`Starting background preload of ${totalPngsToPreload} PNGs...`);
+  
+  // Preload with delay to avoid overwhelming the browser
+  let urlIndex = 0;
+  
+  function preloadNext() {
+    if (urlIndex >= allUrls.length) {
+      console.log(`✅ Preloaded all ${preloadedCount} PNGs successfully!`);
+      preloadingActive = false;
+      return;
+    }
+    
+    const url = allUrls[urlIndex++];
+    loadCanvas(url)
+      .then(() => {
+        preloadedCount++;
+        if (preloadedCount % 10 === 0) {
+          console.log(`📥 Preloaded ${preloadedCount}/${totalPngsToPreload} PNGs (${Math.round(preloadedCount/totalPngsToPreload*100)}%)`);
+        }
+        // Small delay between requests to avoid overwhelming the browser
+        setTimeout(preloadNext, 50);
+      })
+      .catch(err => {
+        // Silently continue on error - some PNGs might not exist
+        setTimeout(preloadNext, 50);
+      });
+  }
+  
+  preloadNext();
+}
+
+// Start preloading when the app initializes
+window.addEventListener('load', () => {
+  // Give the page a moment to fully load, then start preloading
+  setTimeout(preloadPngsInBackground, 3000);
+});
