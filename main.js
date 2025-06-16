@@ -57,9 +57,13 @@ const popupCloseButton = document.getElementById('popup-close-button');
 const overlay = new ol.Overlay({ element: popup, positioning: 'bottom-center', stopEvent: false });
 map.addOverlay(overlay);
 
-let times = [], points = [], varName = 'temperature_2m';
+let times = [], points = [], varName = 'sqh'; // Default to SQH layer
 let variables = [];
 let colorScales = {};
+
+// Weather data lazy loading
+let weatherData = null;
+let weatherDataLoading = false;
 
 // Available tile timestamps - these match the actual tile directory names
 const availableTimestamps = [
@@ -144,19 +148,43 @@ const colorScalePromise = fetch('resources/Make%20TIFs/color_scales.json')
   .then(d => { colorScales = d; })
   .catch(e => console.error('Color scale load failed', e));
 
-const weatherPromise = fetch('resources/meteo_api/weather_data_3hour.json').then(r => r.json()).then(d => {
-  const sample = d.coordinates.find(c => c.weather_data_3hour);
-  if (!sample) return;
-  times = sample.weather_data_3hour.hourly.time.map(t => new Date(t));
-  variables = Object.keys(sample.weather_data_3hour.hourly)
-    .filter(k => k !== 'time' && k !== 'time_units');
-  points = d.coordinates.filter(c => c.weather_data_3hour).map(c => ({
-    lat: c.coordinate_info.latitude ?? c.latitude,
-    lon: c.coordinate_info.longitude ?? c.longitude,
-    info: c.coordinate_info || {},
-    w: c.weather_data_3hour.hourly
-  }));
-}).catch(e => console.error('Weather data load failed', e));
+// Lazy load weather data for point mode validation
+function loadWeatherData() {
+  if (weatherData || weatherDataLoading) return Promise.resolve(weatherData);
+  
+  weatherDataLoading = true;
+  console.log('Loading weather data for point validation...');
+  
+  return fetch('weather_data_frontend.json')
+    .then(r => r.json())
+    .then(d => {
+      const sample = d.coordinates.find(c => c.weather_data_3hour);
+      if (sample) {
+        times = sample.weather_data_3hour.hourly.time.map(t => new Date(t));
+        variables = Object.keys(sample.weather_data_3hour.hourly)
+          .filter(k => k !== 'time' && k !== 'time_units');
+        points = d.coordinates.filter(c => c.weather_data_3hour).map(c => ({
+          lat: c.coordinate_info.latitude ?? c.latitude,
+          lon: c.coordinate_info.longitude ?? c.longitude,
+          info: c.coordinate_info || {},
+          w: c.weather_data_3hour.hourly
+        }));
+        weatherData = d;
+        weatherDataReady = true;
+        console.log('Weather data loaded successfully (16MB frontend optimized)');
+      }
+      weatherDataLoading = false;
+      return weatherData;
+    })
+    .catch(e => {
+      console.error('Weather data load failed', e);
+      weatherDataLoading = false;
+      return null;
+    });
+}
+
+// Simplified initial load - just load essentials
+const weatherPromise = Promise.resolve(); // Don't load weather data initially
 
 Promise.all([colorScalePromise, weatherPromise, peaksPromise]).then(() => {
   updateButtons();
@@ -381,6 +409,21 @@ function draw(){
     return;
   }
 
+  // Point mode: Load weather data if needed, then show points
+  if (!weatherDataReady) {
+    // Show loading message and load data
+    src.clear();
+    layer.setVisible(false);
+    console.log('Loading weather data for point mode...');
+    loadWeatherData().then(() => {
+      if (weatherDataReady) {
+        draw(); // Retry after data loads
+      }
+    });
+    showLayerInfoBox();
+    return;
+  }
+
   // Point mode: show points, hide image layer
   if (tileLayer.imageLayer) {
     tileLayer.imageLayer.setVisible(false);
@@ -390,6 +433,7 @@ function draw(){
   if (layerType === 'terrain') {
     isPointMode = false;
     toggleBtn.classList.add('smooth');
+    updateBaseMapLayers();
     layer.setVisible(false);
     updateTileLayer();
     showLayerInfoBox();
@@ -623,7 +667,8 @@ dayBtn.onclick=()=>{showDaySelector();};
 timeBtn.onclick=()=>{showTimeSelector();};
 
 // Toggle button functionality
-let isPointMode = true; // Back to starting in point mode
+let isPointMode = false; // Default to smooth mode for web
+let weatherDataReady = false;
 
 // Function to update base map layers based on mode
 function updateBaseMapLayers() {
@@ -642,8 +687,13 @@ function updateBaseMapLayers() {
   }
 }
 
-// Initialize with point mode base map
+// Initialize with smooth mode base map
 updateBaseMapLayers();
+
+// Update toggle button to reflect smooth mode
+if (toggleBtn) {
+  toggleBtn.classList.add('smooth');
+}
 
 const toggleBtn = document.getElementById('mode-toggle');
 
@@ -676,7 +726,7 @@ toggleBtn.onclick = toggleMode;
 
 // Handle all layer types: weather, terrain, and snow_composite
 document.querySelectorAll('.layer-item[data-layer-name]').forEach(btn=>{
-  if(btn.dataset.layerName===varName) btn.classList.add('active');
+  if(btn.dataset.layerName===varName) btn.classList.add('active'); // SQH will be active
   btn.onclick=()=>{
     document.querySelectorAll('.layer-item[data-layer-name]').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
@@ -706,6 +756,19 @@ map.on('singleclick', async evt=>{
     overlay.setPosition(evt.coordinate);
     popup.style.display='block';
     return;
+  }
+
+  // Load weather data if needed for validation
+  if (!weatherDataReady) {
+    popupContent.textContent = 'Loading weather data...';
+    overlay.setPosition(evt.coordinate);
+    popup.style.display = 'block';
+    
+    await loadWeatherData();
+    if (!weatherDataReady) {
+      popupContent.textContent = 'Failed to load weather data';
+      return;
+    }
   }
 
   const nearest = nearestDataPoint(lat,lon);
