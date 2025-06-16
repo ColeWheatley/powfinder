@@ -208,41 +208,74 @@ def compute_dewpoint(temp, rh):
     return (b * alpha) / (a - alpha)
 
 
+def update_powder_state(prev_mm, new_snow_mm, temp_C, rad_Wm2):
+    """Return new powder depth [mm] and quality [0–1]."""
+    DEPTH_MAX_MM = 1000           # 100 cm → 1000 mm
+    SETTLING_FRAC = 0.05          # 5 % depth loss per 3 h
+    MELT_MM_PER_DEG = 0.4         # very crude melt parameter
+    
+    # 1. settle (compaction)
+    depth_mm = prev_mm * (1 - SETTLING_FRAC)
+    
+    # 2. simple melt when temps near/above freezing
+    if temp_C > -2:
+        melt_mm = max(temp_C + 2, 0) * MELT_MM_PER_DEG
+        depth_mm = max(depth_mm - melt_mm, 0)
+    
+    # 3. add fresh snowfall
+    depth_mm += new_snow_mm
+    
+    # 4. cap at sane upper bound
+    return min(depth_mm, DEPTH_MAX_MM)
+
 def physics_powder(prev_depth, prev_quality, snowfall, temp, rad, wind, cloud_cover, relative_humidity, timestamp, grid_elev_flat, hours=3):
     """Forward integrate powder conditions, gracefully handling missing data."""
-    depth = np.array(prev_depth, dtype=np.float32, copy=True)
+    DEPTH_MAX_MM = 1000  # 100 cm max depth in mm
+    
+    # Create copies to avoid modifying input arrays - prev_depth is already in mm
+    depth_mm = np.array(prev_depth, dtype=np.float32, copy=True)
     quality = np.array(prev_quality, dtype=np.float32, copy=True)
 
-    nodata_mask = prev_depth == NODATA
+    nodata_mask = depth_mm == NODATA
 
+    # Add new snow (if any)
+    new_snow_mm = 0
     if snowfall is not None and not np.all(snowfall == NODATA):
-        new_snow = np.where(snowfall == NODATA, 0, snowfall * 0.1)
-        depth = depth + new_snow
+        valid_snowfall = snowfall[snowfall != NODATA]
+        if len(valid_snowfall) > 0:
+            snowfall_mean = np.mean(valid_snowfall)
+            snowfall_max = np.max(valid_snowfall)
+            print(f"[DEBUG] Raw snowfall at {timestamp}: max={snowfall_max:.2f}mm, mean={snowfall_mean:.2f}mm")
+            
+            # snowfall is already in mm from API
+            new_snow_mm = np.where(snowfall == NODATA, 0, snowfall)
     else:
         print(f"Warning: No snowfall data for {timestamp}, skipping accumulation")
 
+    # Apply physics using vectorized update_powder_state logic
+    # 1. Settling (compaction) - 5% loss per 3h
+    depth_mm = depth_mm * (1 - 0.05)
+    
+    # 2. Melt when temps near/above freezing
     if temp is not None and not np.all(temp == NODATA):
-        if rad is not None and not np.all(rad == NODATA):
-            longwave_out = 315
-            net_energy = rad - longwave_out
-            melt_factor = np.where((temp > 0) & (net_energy > 0),
-                                   (temp * 0.02 * hours) * (net_energy / 100), 0)
-        else:
-            melt_factor = np.where(temp > 0, temp * 0.01 * hours, 0)
-            print(f"Warning: No radiation data for {timestamp}, using simple melt model")
-        depth = np.maximum(0, depth - melt_factor)
-    else:
-        print(f"Warning: No temperature data for {timestamp}, skipping melt")
-
+        melt_mm = np.where(temp > -2, np.maximum(temp + 2, 0) * 0.4, 0)
+        depth_mm = np.maximum(depth_mm - melt_mm, 0)
+    
+    # 3. Add fresh snowfall
+    depth_mm = depth_mm + new_snow_mm
+    
+    # 4. Cap at sane upper bound
+    depth_mm = np.minimum(depth_mm, DEPTH_MAX_MM)
+    
+    # Additional wind scour effect
     if wind is not None and not np.all(wind == NODATA):
-        depth = np.maximum(0, depth - wind * 0.01 * hours)
-    else:
-        print(f"Warning: No wind data for {timestamp}, skipping wind scour")
+        # Wind scouring: 0.02 * wind_speed² mm per step for exposed areas
+        wind_scour = 0.02 * np.square(wind) * hours / 3.0  # normalize to 3h step
+        depth_mm = np.maximum(0, depth_mm - wind_scour)
 
-    depth = np.maximum(0, depth - 0.005 * hours)  # compaction
-
+    # Update quality based on conditions
     if snowfall is not None and not np.all(snowfall == NODATA):
-        quality = np.where(np.where(snowfall == NODATA, 0, snowfall) > 1, 1.0, quality * 0.98)
+        quality = np.where(new_snow_mm > 1, 1.0, quality * 0.98)
 
     if rad is not None and not np.all(rad == NODATA):
         quality = np.where(rad > 200, quality * 0.95, quality)
@@ -263,11 +296,10 @@ def physics_powder(prev_depth, prev_quality, snowfall, temp, rad, wind, cloud_co
         quality = np.where((relative_humidity > 90) & (temp < -5),
                           np.minimum(quality * 1.02, 1.0), quality)
 
-    depth[nodata_mask] = NODATA
+    depth_mm[nodata_mask] = NODATA
     quality[nodata_mask] = NODATA
 
-    return depth, np.clip(quality, 0.0, 1.0)
-
+    return depth_mm, np.clip(quality, 0.0, 1.0)
 
 def physics_skiability(wind, codes, tgt_elev, src_elev):
     # Use a base skiability of 1.0 and apply penalties
@@ -475,6 +507,11 @@ def main(vars_to_process: List[str]) -> None:
                     needed_vars.add(var_key)
                 elif var_key in POWDER_REQUIRED_VARS:
                     needed_vars.add(var_key)
+        
+        # Add dependencies for skiability
+        if "skiability" in vars_to_process:
+            needed_vars.add("wind_speed_10m")
+            needed_vars.add("weather_code")
 
         weather_data = {}
         for var_key in needed_vars:
@@ -496,7 +533,21 @@ def main(vars_to_process: List[str]) -> None:
         for var_key in ordered_vars:
             if skip_map.get(var_key):
                 continue
-            if var_key not in POWDER_REQUIRED_VARS and ts not in FRONTEND_TIMESTAMPS:
+            
+            # Determine if we should process this variable for this timestamp
+            should_process = False
+            
+            if ts in FRONTEND_TIMESTAMPS:
+                # Always process ALL variables for frontend timestamps
+                should_process = True
+            elif var_key in POWDER_REQUIRED_VARS:
+                # Process powder-required variables for all timestamps (historical)
+                should_process = True
+            else:
+                # Skip non-powder variables for historical timestamps
+                should_process = False
+                
+            if not should_process:
                 continue
 
             var = VAR_BY_KEY[var_key]
@@ -552,28 +603,29 @@ def main(vars_to_process: List[str]) -> None:
                 )
                 results = {var.outputs[0]: data}
 
-        for out_name, data in results.items():
-            scale = color_scales.get(out_name, {})
-            if "min" in scale and "max" in scale:
-                vmin = scale["min"]
-                vmax = scale["max"]
-            else:
-                valid = data[data != NODATA]
-                vmin = float(np.nanmin(valid)) if valid.size else 0.0
-                vmax = float(np.nanmax(valid)) if valid.size else 1.0
-            clipped = np.clip(data, vmin, vmax)
-            scaled = (clipped - vmin) / (vmax - vmin) if vmax != vmin else clipped
-            out_byte = (scaled * 254 + 1).astype(np.uint8)
-            out_byte[data == NODATA] = 0
-            profile.update(dtype="uint8", nodata=0)
-            out_path = out_dir / f"{out_name}.tif"
-            if out_path.exists():
-                out_path.unlink()
-            with rasterio.open(out_path, "w", **profile) as dst:
-                dst.write(out_byte, 1)
-                dst.update_tags(units=var.units, processing_time=datetime.utcnow().isoformat(), source_points_count=len(coords))
-            print(f"[DEBUG] {out_name} byte range: {out_byte.min()}-{out_byte.max()}")
-            tifs_created += 1
+            # Process results for this variable
+            for out_name, data in results.items():
+                scale = color_scales.get(out_name, {})
+                if "min" in scale and "max" in scale:
+                    vmin = scale["min"]
+                    vmax = scale["max"]
+                else:
+                    valid = data[data != NODATA]
+                    vmin = float(np.nanmin(valid)) if valid.size else 0.0
+                    vmax = float(np.nanmax(valid)) if valid.size else 1.0
+                clipped = np.clip(data, vmin, vmax)
+                scaled = (clipped - vmin) / (vmax - vmin) if vmax != vmin else clipped
+                out_byte = (scaled * 254 + 1).astype(np.uint8)
+                out_byte[data == NODATA] = 0
+                profile.update(dtype="uint8", nodata=0)
+                out_path = out_dir / f"{out_name}.tif"
+                if out_path.exists():
+                    out_path.unlink()
+                with rasterio.open(out_path, "w", **profile) as dst:
+                    dst.write(out_byte, 1)
+                    dst.update_tags(units=var.units, processing_time=datetime.utcnow().isoformat(), source_points_count=len(coords))
+                print(f"[DEBUG] {out_name} byte range: {out_byte.min()}-{out_byte.max()}")
+                tifs_created += 1
 
         # Release memory for this timestamp
         del weather_data
@@ -613,12 +665,16 @@ def load_powder_state(timestamp: str, grid_shape: tuple, sorted_timestamps: List
     if depth_path.exists() and quality_path.exists():
         with rasterio.open(depth_path) as dsrc, rasterio.open(quality_path) as qsrc:
             # Convert from uint8 back to physical units
-            depth = dsrc.read(1).astype(np.float32)
-            quality = qsrc.read(1).astype(np.float32)
-            # Reverse the scaling: out_byte = (scaled * 254 + 1)
-            depth_phys = (depth - 1) / 254.0 * 100.0  # Assuming max depth 100cm
-            quality_phys = (quality - 1) / 254.0  # Quality is 0-1
-            return depth_phys.ravel(), quality_phys.ravel()
+            depth_bytes = dsrc.read(1).astype(np.float32)
+            quality_bytes = qsrc.read(1).astype(np.float32)
+            
+            # CRITICAL FIX: Properly decode from byte values to physical units
+            # depth_mm = byte_val / 255 * DEPTH_MAX_MM (not just byte_val!)
+            DEPTH_MAX_MM = 1000  # 100 cm in mm
+            depth_mm = depth_bytes / 255.0 * DEPTH_MAX_MM  # Convert bytes to mm
+            quality_phys = quality_bytes / 255.0  # Convert bytes to 0-1 range
+            
+            return depth_mm.ravel(), quality_phys.ravel()
     else:
         # Fallback to zero initialization if previous state not found
         flat_size = np.prod(grid_shape)
