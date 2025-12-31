@@ -643,14 +643,13 @@ function showLayerInfoBox(){
   
   const layerType = getLayerType(varName);
   
-  // For terrain layers, don't show time info
-  let label;
-  if (layerType === 'terrain') {
-    label = `${varLabels[varName] ?? varName}`;
-  } else {
-    label = `${varLabels[varName] ?? varName} ${formatDay(t)} at ${formatTime(t)}`;
-  }
+  const label = `${varLabels[varName] ?? varName}`;
+  const timeLabel = `${formatDay(t)} at ${formatTime(t)}`;
   
+  // Update mobile-only floating date/time
+  const mobDt = document.getElementById('mobile-datetime');
+  if(mobDt) mobDt.textContent = timeLabel;
+
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
   if(varName === 'weather_code'){
@@ -661,7 +660,9 @@ function showLayerInfoBox(){
       {range:'71-77', label:'Snow', color:spec.palette[3]},
       {range:'95-99', label:'Thunder', color:spec.palette[4]}
     ];
-    info.innerHTML = `<div class="info-box-left">${label}</div>`;
+    // For weather code, we just show the label on desktop, and maybe just the grid on mobile?
+    // We'll keep the left label for desktop, hide on mobile
+    info.innerHTML = `<div class="info-box-left desktop-only">${label} ${timeLabel}</div>`;
     const row = document.createElement('div');
     row.className = 'date-selector-row';
     cats.forEach(c=>{
@@ -677,12 +678,14 @@ function showLayerInfoBox(){
   }else{
     const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
     info.innerHTML = `
-      <div class="info-box-left">
-        ${label}
+      <div class="info-box-left desktop-only">
+        ${label} ${timeLabel}
       </div>
       <div class="info-box-right">
         <span>${currentMin.toFixed(1)}${unit}</span>
-        <div class="legend-bar" style="${barStyle}"></div>
+        <div class="legend-bar" style="${barStyle}">
+            <span class="legend-overlay-title mobile-only">${label}</span>
+        </div>
         <span>${currentMax.toFixed(1)}${unit}</span>
       </div>
     `;

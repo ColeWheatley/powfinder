@@ -43,6 +43,48 @@ html,body{height:100%;margin:0;}
     pointer-events: none; /* Let clicks pass through if needed, though it's just a label */
 }
 
+/* Mobile Date/Time - Floating (Hidden by default) */
+.mobile-datetime {
+    display: none;
+    position: fixed;
+    top: 2vh;
+    right: 2vw;
+    z-index: 2000;
+    font-family: var(--brand-font);
+    font-size: 1.8vh;
+    color: white;
+    background: var(--bar-bg);
+    backdrop-filter: blur(10px);
+    padding: 0.8vh 1.5vh;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    pointer-events: none;
+}
+
+/* Helper classes for visibility toggling */
+.desktop-only { display: block; }
+.mobile-only { display: none; }
+
+/* Legend Overlay Title */
+.legend-overlay-title {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-weight: bold;
+    text-shadow: 0 0 4px black, 0 0 2px black;
+    white-space: nowrap;
+    pointer-events: none;
+    font-size: 1.6vh;
+}
+
+.legend-bar {
+    position: relative; /* Needed for absolute positioning of title */
+}
+
 /* Drawer container */
 #drawer-container{
     position:fixed;left:0;bottom:-28vh; /* Updated */
@@ -682,23 +724,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        .mobile-brand {
-
-
-
-
-
-
-
-            display: block; /* Show floating logo on mobile */
-
-
-
-
-
-
-
-        }
+            .mobile-brand {
 
 
 
@@ -714,7 +740,183 @@ html,body{height:100%;margin:0;}
 
 
 
-        #drawer-caret {
+                display: block; /* Show floating logo on mobile */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .mobile-datetime {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                display: block; /* Show floating date/time on mobile */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .desktop-only { display: none !important; }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .mobile-only { display: block !important; }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #drawer-caret {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
 
 
 
@@ -1342,7 +1544,7 @@ html,body{height:100%;margin:0;}
 
 
 
-            #info-box.info-box-selecting .layer-item {
+                #info-box.info-box-selecting .layer-item {
 
 
 
@@ -1374,19 +1576,23 @@ html,body{height:100%;margin:0;}
 
 
 
+                    font-size: 2vh;
+
+
+
+
+
+
+
     
 
 
 
-        font-size: 2vh;
 
 
 
-        padding: 1.5vh 2vw;
 
-
-
-    }
+        
 
 
 
@@ -1394,7 +1600,335 @@ html,body{height:100%;margin:0;}
 
 
 
-    .info-box-left {
+    
+
+
+
+
+
+
+
+                    padding: 1.5vh 2vw;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                .info-box-right {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    width: 100%; /* Full width for the legend bar container */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    justify-content: space-between; /* Space out min/max values */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                .info-box-left {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    font-size: 1.8vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
 
 
 
