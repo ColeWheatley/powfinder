@@ -39,7 +39,8 @@ html,body{height:100%;margin:0;}
     backdrop-filter: blur(10px);
     padding: 0.8vh 1.5vh;
     border-radius: 15px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     pointer-events: none; /* Let clicks pass through if needed, though it's just a label */
 }
 
@@ -57,7 +58,8 @@ html,body{height:100%;margin:0;}
     backdrop-filter: blur(10px);
     padding: 0.8vh 1.5vh;
     border-radius: 15px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     pointer-events: none;
 }
 
@@ -101,6 +103,9 @@ html,body{height:100%;margin:0;}
     width: 100%; /* Take full width of parent */
     height: 100%; /* Take full height of parent */
     border-radius: 0.5vh;
+    border: 1.5px solid rgba(255,255,255);
+    box-sizing: border-box; /* Ensure border doesn't add to width */
+    margin: 0;
 }
 
 /* Drawer container */
@@ -111,6 +116,8 @@ html,body{height:100%;margin:0;}
     transition:bottom .35s ease;
     font-family:var(--brand-font);
     background:var(--bar-bg);backdrop-filter:blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5);
 }
 #drawer-container.open{ bottom:0; }
 
@@ -300,7 +307,7 @@ html,body{height:100%;margin:0;}
     border-radius: 0.5vh; 
     cursor: pointer;
     font-size: 1.8vh; /* Increased font size */
-    transition: background-color 0.2s, color 0.2s;
+    transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
     background-color: rgba(0, 0, 0, 0.7); 
     backdrop-filter: blur(10px); 
     display: flex; 
@@ -309,6 +316,8 @@ html,body{height:100%;margin:0;}
     overflow: hidden; 
     text-overflow: ellipsis; 
     white-space: nowrap; 
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .layer-item:hover {
@@ -318,6 +327,8 @@ html,body{height:100%;margin:0;}
 .layer-item.active {
     background-color: var(--accent); 
     color: white;
+    box-shadow: 0 0 15px var(--accent), inset 0 0 5px rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.5);
 }
 
 /* Not implemented layer items */
@@ -354,6 +365,8 @@ html,body{height:100%;margin:0;}
     overflow: hidden;
     font-size: 1.8vh;
     transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .toggle-slider {
@@ -424,20 +437,6 @@ html,body{height:100%;margin:0;}
 
 /* Info box styling is now part of #drawer-bar section above */
 /* #info-box > div styling is now part of #drawer-bar section above */
-
-/* Simple legend for collapsed info box */
-.legend {
-    display: flex;
-    align-items: center;
-    font-size: 1.3vh;
-}
-.legend-bar {
-    flex-grow: 1;
-    min-width: 10vw; /* Ensures visibility */
-    height: 3vh;
-    margin: 0 0.5vw;
-    border: 1.5px solid rgba(255,255,255);
-}
 
 /* Map click popup */
 .popup {
@@ -1545,7 +1544,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                /* Info box adjustments */
+                    /* Info box adjustments */
 
 
 
@@ -1561,7 +1560,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                #info-box {
+                    #info-box {
 
 
 
@@ -1577,7 +1576,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    margin: 0;
+                        margin: 0;
 
 
 
@@ -1593,7 +1592,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    padding: 0; /* Remove padding so bar hits edges */
+                        padding: 0; /* Remove padding so bar hits edges */
 
 
 
@@ -1609,7 +1608,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    max-height: none;
+                        max-height: none;
 
 
 
@@ -1625,7 +1624,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    flex-grow: 0; /* Don't auto-grow, use specific width */
+                        flex-grow: 0; /* Don't auto-grow, use specific width */
 
 
 
@@ -1641,7 +1640,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    width: 85%; /* 85% width to leave room for caret */
+                        width: 85%; /* 85% width to leave room for caret */
 
 
 
@@ -1657,7 +1656,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    background: transparent; /* No background needed, the bar has it */
+                        background: transparent; /* No background needed, the bar has it */
 
 
 
@@ -1673,7 +1672,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    border-radius: 1vh;
+                        border-radius: 1vh;
 
 
 
@@ -1689,7 +1688,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    height: 6vh; /* Fixed height for the bar */
+                        height: 8vh; /* Taller bar (increased from 6vh) */
 
 
 
@@ -1705,7 +1704,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    display: flex;
+                        display: flex;
 
 
 
@@ -1721,7 +1720,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    align-items: center;
+                        align-items: center;
 
 
 
@@ -1737,7 +1736,23 @@ html,body{height:100%;margin:0;}
 
 
 
-                }
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
 
 
 
@@ -2025,7 +2040,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                .info-box-left {
+                    .info-box-left {
 
 
 
@@ -2057,39 +2072,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-                    font-size: 1.8vh;
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-        
+                        font-size: 1.8vh;
 
 
 
@@ -2109,19 +2092,11 @@ html,body{height:100%;margin:0;}
 
 
 
-        font-size: 1.8vh;
 
 
 
-        white-space: normal;
 
-
-
-        line-height: 1.2;
-
-
-
-    }
+    
 
 
 
@@ -2129,7 +2104,391 @@ html,body{height:100%;margin:0;}
 
 
 
-    .date-selector-row, .time-selector-row {
+                        white-space: normal;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        line-height: 1.2;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .legend-overlay-title {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        font-size: 2.2vh; /* Increased from 1.6vh */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .legend-value {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        font-size: 1.8vh; /* Increased from 1.4vh */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .date-selector-row, .time-selector-row {
 
 
 
@@ -2149,15 +2508,23 @@ html,body{height:100%;margin:0;}
 
 
 
-    .legend-bar {
+        .legend-bar {
 
 
 
-        min-width: 20vw;
 
 
 
-    }
+
+        }
+
+
+
+
+
+
+
+    
 
 
 
