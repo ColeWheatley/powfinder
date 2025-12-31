@@ -64,7 +64,12 @@ map.addOverlay(overlay);
 const toggleBtn = document.getElementById('mode-toggle');
 
 let times = [], points = [], varName = 'sqh'; // Default to SQH layer
-let variables = [];
+let variables = [
+  'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
+  'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
+  'weather_code', 'freezing_level_height', 'surface_pressure', 
+  'dewpoint_2m', 'skiability', 'sqh'
+];
 let colorScales = {};
 
 // Weather data lazy loading
@@ -351,6 +356,164 @@ async function getPngValue(varName, tsStr, lat, lon){
   }
 }
 
+function updatePopupRow(variable, value, type) {
+  const row = document.getElementById(`row-${variable}`);
+  if (!row) return;
+
+  const cellIndex = type === 'source' ? 1 : 2; // 1 for Source, 2 for Extrapolated
+  const cell = row.cells[cellIndex];
+  
+  if (value === null || value === undefined) {
+    cell.innerHTML = 'N/A';
+    cell.dataset.value = '';
+  } else {
+    const unit = varUnits[variable] || '';
+    cell.innerHTML = typeof value === 'number' ? value.toFixed(1) + unit : value + unit;
+    cell.dataset.value = value;
+  }
+
+  // Calculate Delta if both values are present
+  const sourceCell = row.cells[1];
+  const mapCell = row.cells[2];
+  const deltaCell = row.cells[3];
+
+  const sourceVal = parseFloat(sourceCell.dataset.value);
+  const mapVal = parseFloat(mapCell.dataset.value);
+
+  if (!isNaN(sourceVal) && !isNaN(mapVal)) {
+    deltaCell.innerHTML = (mapVal - sourceVal).toFixed(1);
+  }
+}
+
+async function fetchMapData(lat, lon, tsStr) {
+  const vars = [...variables];
+  if (!vars.includes('elevation')) vars.push('elevation');
+  if (!vars.includes('aspect')) vars.push('aspect');
+  if (!vars.includes('slope')) vars.push('slope');
+
+  // Fetch all PNG values in parallel
+  const promises = vars.map(async (v) => {
+    try {
+      const val = await getPngValue(v, tsStr, lat, lon);
+      updatePopupRow(v, val, 'map');
+    } catch (e) {
+      console.warn(`Failed to fetch PNG value for ${v}`, e);
+      updatePopupRow(v, null, 'map');
+    }
+  });
+
+  await Promise.all(promises);
+}
+
+async function fetchApiData(lat, lon, tsStr) {
+  const selectedDate = new Date(tsStr);
+  const dateStr = selectedDate.toISOString().split('T')[0];
+  
+  // Variables supported by Open-Meteo
+  const apiVars = [
+    'temperature_2m','relative_humidity_2m','shortwave_radiation',
+    'cloud_cover','snow_depth','snowfall','wind_speed_10m',
+    'weather_code','freezing_level_height','surface_pressure',
+    'dewpoint_2m'
+  ];
+
+  const apiParams = new URLSearchParams({
+    latitude: lat.toFixed(6),
+    longitude: lon.toFixed(6),
+    model: 'icon-d2',
+    hourly: apiVars.join(','),
+    start_date: dateStr,
+    end_date: dateStr,
+    timezone: 'Europe/Vienna'
+  });
+
+  const apiUrl = `https://api.open-meteo.com/v1/forecast?${apiParams}`;
+
+  try {
+    const r = await fetch(apiUrl);
+    if (!r.ok) throw new Error('API request failed');
+    const apiData = await r.json();
+
+    const apiTimes = apiData.hourly.time;
+    // Find closest time index
+    let closestIndex = 0;
+    let minDiff = Math.abs(new Date(apiTimes[0]).getTime() - new Date(tsStr).getTime());
+    
+    for(let i=1; i < apiTimes.length; i++){
+      const d = Math.abs(new Date(apiTimes[i]).getTime() - new Date(tsStr).getTime());
+      if(d < minDiff){ minDiff = d; closestIndex = i; }
+    }
+
+    // Update table with API values
+    apiVars.forEach(v => {
+      if (apiData.hourly[v]) {
+        updatePopupRow(v, apiData.hourly[v][closestIndex], 'source');
+      }
+    });
+    
+    // API provides elevation too
+    if (apiData.elevation) {
+      updatePopupRow('elevation', apiData.elevation, 'source');
+    }
+
+    // Update rows that API doesn't provide (like Skiability, SQH) to N/A
+    variables.forEach(v => {
+      if (!apiVars.includes(v) && v !== 'elevation') {
+        updatePopupRow(v, null, 'source'); // Or keep spinner? No, set to N/A if API doesn't have it.
+      }
+    });
+
+  } catch (e) {
+    console.error('API Fetch Error:', e);
+    // Set all source columns to "Error" or "N/A"
+    const allVars = [...variables, 'elevation'];
+    allVars.forEach(v => updatePopupRow(v, null, 'source'));
+  }
+}
+
+function showAsyncPopup(lat, lon, tsStr, coordinate) {
+  const vars = [...variables];
+  if(!vars.includes('elevation')) vars.push('elevation');
+  if(!vars.includes('aspect')) vars.push('aspect');
+  if(!vars.includes('slope')) vars.push('slope');
+
+  // Build Table Skeleton
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+               <div style="font-weight:bold;">${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
+               <div style="font-size:0.9em;color:#666;">${tsStr.replace('T', ' ')}</div>
+             </div>`;
+  
+  html += `<table class="popup-table">
+    <thead>
+      <tr>
+        <th>Variable</th>
+        <th>API Source</th>
+        <th>Map Value</th>
+        <th>Delta</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  vars.forEach(v => {
+    html += `<tr id="row-${v}">
+      <td>${varLabels[v] || v}</td>
+      <td data-value="" class="cell-source"><div class="spinner"></div></td>
+      <td data-value="" class="cell-map"><div class="spinner"></div></td>
+      <td class="cell-delta"></td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  
+  popupContent.innerHTML = html;
+  overlay.setPosition(coordinate);
+  popup.style.display = 'block';
+
+  // Trigger parallel fetching
+  fetchApiData(lat, lon, tsStr);
+  fetchMapData(lat, lon, tsStr);
+}
+
 function haversine(lat1, lon1, lat2, lon2){
   const R=6371000;
   const rad=Math.PI/180;
@@ -360,53 +523,7 @@ function haversine(lat1, lon1, lat2, lon2){
   return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function nearestDataPoint(lat,lon){
-  let best=null,dist=Infinity;
-  for(const p of points){
-    const d=haversine(lat,lon,p.lat,p.lon);
-    if(d<dist){dist=d;best=p;}
-  }
-  return best?{point:best,distance:dist}:null;
-}
 
-async function showResidualPopup(lat, lon, srcVals, srcLabel, tsStr, nearest, coordinate){
-  const vars = [...variables];
-  if(!vars.includes('elevation')) vars.push('elevation');
-  const pngVals={};
-  for(const v of vars){
-    pngVals[v] = await getPngValue(v, tsStr, lat, lon);
-  }
-
-  let middle='';
-  if(nearest){
-    if(nearest.point.info && nearest.point.info.type==='peak'){
-      const pk=findPeak(nearest.point.lat, nearest.point.lon);
-      const name = pk?pk.name:(nearest.point.info.name||'Peak');
-      middle = `${name} - ${Math.round(nearest.distance)}m away`;
-    }else{
-      middle = `Validation Ping - ${Math.round(nearest.distance)}m away`;
-    }
-  }
-
-  let html=`<div style="display:flex;justify-content:space-between;align-items:center;">
-               <div>${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
-               <div>${middle}</div>
-             </div>`;
-  html += `<table class="popup-table"><tr><th>Variable</th><th>${srcLabel}</th><th>Extrapolated</th><th>Delta</th></tr>`;
-  vars.forEach(v=>{
-    const srcVal = srcVals[v];
-    const pngVal = pngVals[v];
-    const unit = varUnits[v]||'';
-    const srcDisp = srcVal!=null ? (typeof srcVal==='number'?srcVal.toFixed(1):srcVal)+unit : 'N/A';
-    const pngDisp = pngVal!=null ? pngVal.toFixed(1)+unit : 'N/A';
-    const delta = (srcVal!=null && pngVal!=null) ? (pngVal - srcVal).toFixed(1) : '';
-    html += `<tr><td>${varLabels[v]||v}</td><td>${srcDisp}</td><td>${pngDisp}</td><td>${delta}</td></tr>`;
-  });
-  html += '</table>';
-  popupContent.innerHTML = html;
-  overlay.setPosition(coordinate);
-  popup.style.display='block';
-}
 
 function draw(){
   const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
@@ -754,17 +871,17 @@ function findPeak(lat,lon){
   return peaks.find(p=>Math.abs(p.lat-lat)<1e-4 && Math.abs(p.lon-lon)<1e-4);
 }
 
-map.on('singleclick', async evt=>{
+map.on('singleclick', async evt => {
   if(drawerOpen){
     toggleDrawer();
     return;
   }
   overlay.setPosition(undefined);
-  const feature = map.forEachFeatureAtPixel(evt.pixel,f=>f);
 
   const clicked = ol.proj.toLonLat(evt.coordinate);
   const [lon,lat] = clicked;
   const tsStr = availableTimestamps[dayIdx*4 + hourIdx];
+  
   if(!tsStr){
     popupContent.textContent = 'Time data unavailable';
     overlay.setPosition(evt.coordinate);
@@ -772,64 +889,8 @@ map.on('singleclick', async evt=>{
     return;
   }
 
-  // Load weather data if needed for validation
-  if (!weatherDataReady) {
-    popupContent.textContent = 'Loading weather data...';
-    overlay.setPosition(evt.coordinate);
-    popup.style.display = 'block';
-    
-    await loadWeatherData();
-    if (!weatherDataReady) {
-      popupContent.textContent = 'Failed to load weather data';
-      return;
-    }
-  }
-
-  const nearest = nearestDataPoint(lat,lon);
-
-  if(!feature || !feature.get('data')){
-    // Fetch from API
-    const selectedDate = new Date(tsStr);
-    const dateStr = selectedDate.toISOString().split('T')[0];
-    const apiParams = new URLSearchParams({
-      latitude: lat.toFixed(6),
-      longitude: lon.toFixed(6),
-      model: 'icon-d2',
-      hourly: [
-        'temperature_2m','relative_humidity_2m','shortwave_radiation','cloud_cover','snow_depth','snowfall','wind_speed_10m','weather_code','freezing_level_height','surface_pressure'
-      ].join(','),
-      start_date: dateStr,
-      end_date: dateStr,
-      timezone: 'Europe/Vienna'
-    });
-
-    const apiUrl = `https://api.open-meteo.com/v1/forecast?${apiParams}`;
-    popupContent.textContent='Loading weather data...';
-    overlay.setPosition(evt.coordinate);
-    popup.style.display='block';
-    try{
-      const apiData = await fetch(apiUrl).then(r=>{if(!r.ok) throw new Error('API'); return r.json();});
-      const apiTimes = apiData.hourly.time;
-      let closestIndex=0, minDiff=Math.abs(new Date(apiTimes[0]).getTime()-new Date(tsStr).getTime());
-      for(let i=1;i<apiTimes.length;i++){
-        const d=Math.abs(new Date(apiTimes[i]).getTime()-new Date(tsStr).getTime());
-        if(d<minDiff){minDiff=d;closestIndex=i;}
-      }
-      const srcVals={};
-      variables.forEach(v=>{ if(apiData.hourly[v]) srcVals[v]=apiData.hourly[v][closestIndex]; });
-      srcVals.elevation = apiData.elevation;
-      await showResidualPopup(lat,lon,srcVals,'API',tsStr,nearest,evt.coordinate);
-    }catch(e){
-      popupContent.textContent='Failed to fetch weather data';
-    }
-    return;
-  }
-
-  const {p,timestampIdx} = feature.get('data');
-  const srcVals={};
-  variables.forEach(v=>{ srcVals[v]=p.w[v]?.[timestampIdx]; });
-  srcVals.elevation = p.info?.elevation;
-  await showResidualPopup(lat,lon,srcVals,'JSON',tsStr,nearest,evt.coordinate);
+  // Immediately show popup with spinners
+  showAsyncPopup(lat, lon, tsStr, evt.coordinate);
 });
 
 // Drawer toggle functionality
