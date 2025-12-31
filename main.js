@@ -77,7 +77,7 @@ let weatherData = null;
 let weatherDataLoading = false;
 
 // Available tile timestamps - these match the actual tile directory names
-const availableTimestamps = [
+let availableTimestamps = [
   "2025-05-24T09:00:00", "2025-05-24T12:00:00", "2025-05-24T15:00:00", "2025-05-24T18:00:00",
   "2025-05-25T09:00:00", "2025-05-25T12:00:00", "2025-05-25T15:00:00", "2025-05-25T18:00:00",
   "2025-05-26T09:00:00", "2025-05-26T12:00:00", "2025-05-26T15:00:00", "2025-05-26T18:00:00",
@@ -178,6 +178,15 @@ function loadWeatherData() {
       const sample = d.coordinates.find(c => c.weather_data_3hour);
       if (sample) {
         times = sample.weather_data_3hour.hourly.time.map(t => new Date(t));
+        
+        // Update availableTimestamps from the loaded data
+        if (sample.weather_data_3hour.hourly.time && sample.weather_data_3hour.hourly.time.length > 0) {
+          availableTimestamps = sample.weather_data_3hour.hourly.time;
+          console.log('Updated available timestamps from data:', availableTimestamps.length, 'timestamps');
+          // Update buttons to reflect potentially new dates
+          updateButtons();
+        }
+
         variables = Object.keys(sample.weather_data_3hour.hourly)
           .filter(k => k !== 'time' && k !== 'time_units');
         points = d.coordinates.filter(c => c.weather_data_3hour).map(c => ({
@@ -214,13 +223,19 @@ setTimeout(() => {
 }, 2000);
 
 function formatDay(d){
-  // Use May 24th as reference "Today" 
-  const referenceDate = new Date('2025-05-24T00:00:00');
-  const diff = Math.round((d - referenceDate) / 86400000);
-  if(diff === 0) return 'Today';
-  if(diff === 1) return 'Tomorrow';
-  if(diff === -1) return 'Yesterday';
-  return d.toLocaleDateString('en-US',{weekday:'long'});
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  
+  const dayName = days[d.getDay()];
+  const monthName = months[d.getMonth()];
+  const date = d.getDate();
+  
+  let suffix = 'th';
+  if (date === 1 || date === 21 || date === 31) suffix = 'st';
+  else if (date === 2 || date === 22) suffix = 'nd';
+  else if (date === 3 || date === 23) suffix = 'rd';
+  
+  return `${dayName}, ${monthName} ${date}${suffix}`;
 }
 
 function formatTime(d){
