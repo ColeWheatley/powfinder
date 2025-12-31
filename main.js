@@ -67,7 +67,7 @@ let times = [], points = [], varName = 'sqh'; // Default to SQH layer
 let variables = [
   'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
   'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
-  'weather_code', 'freezing_level_height', 'surface_pressure', 
+  'freezing_level_height', 'surface_pressure', 
   'dewpoint_2m', 'skiability', 'sqh'
 ];
 let colorScales = {};
@@ -99,7 +99,6 @@ const varLabels = {
   snow_depth: 'Snow Depth',
   snowfall: 'Snowfall',
   wind_speed_10m: 'Wind Speed',
-  weather_code: 'Weather Code',
   freezing_level_height: 'Freezing Level',
   surface_pressure: 'Surface Pressure',
   dewpoint_2m: 'Dewpoint',
@@ -118,7 +117,6 @@ const varUnits = {
   snow_depth: 'm',
   snowfall: 'mm',
   wind_speed_10m: 'm/s',
-  weather_code: '',
   freezing_level_height: 'm',
   surface_pressure: 'hPa',
   dewpoint_2m: '°C',
@@ -268,15 +266,6 @@ function interpColor(c1,c2,t){
 function color(val, varName){
   const spec = colorScales[varName];
   if(!spec) return '#ff00ff';
-
-  if(varName === 'weather_code') {
-    const pal = spec.palette;
-    if(val <= 3) return pal[0];
-    if(val <= 48) return pal[1];
-    if(val <= 67) return pal[2];
-    if(val <= 77) return pal[3];
-    return pal[4];
-  }
 
   const min = spec.min;
   const max = spec.max;
@@ -652,46 +641,23 @@ function showLayerInfoBox(){
 
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
-  if(varName === 'weather_code'){
-    const cats = [
-      {range:'0-3', label:'Clear/cloudy', color:spec.palette[0]},
-      {range:'45-48', label:'Fog', color:spec.palette[1]},
-      {range:'51-86', label:'Rain/showers', color:spec.palette[2]},
-      {range:'71-77', label:'Snow', color:spec.palette[3]},
-      {range:'95-99', label:'Thunder', color:spec.palette[4]}
-    ];
-    // For weather code, we just show the label on desktop, and maybe just the grid on mobile?
-    // We'll keep the left label for desktop, hide on mobile
-    info.innerHTML = `<div class="info-box-left desktop-only">${label} ${timeLabel}</div>`;
-    const row = document.createElement('div');
-    row.className = 'date-selector-row';
-    cats.forEach(c=>{
-      const div = document.createElement('div');
-      div.className = 'layer-item';
-      const flexMap = {3:30,4:20,5:15,6:12};
-      const basis = flexMap[cats.length] ?? (100/cats.length);
-      div.style.setProperty('--selector-basis', `${basis}%`);
-      div.innerHTML = `<span style="background:${c.color};width:1em;height:1em;display:inline-block;margin-right:0.5em"></span>${c.label}`;
-      row.appendChild(div);
-    });
-    info.appendChild(row);
-  }else{
-    const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
-    info.innerHTML = `
-      <div class="info-box-left desktop-only">
-        ${label} ${timeLabel}
+  
+  const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
+  info.innerHTML = `
+    <div class="info-box-left desktop-only">
+      ${label} ${timeLabel}
+    </div>
+    <div class="info-box-right">
+      <span class="desktop-only">${currentMin.toFixed(1)}${unit}</span>
+      <div class="legend-bar" style="${barStyle}">
+          <span class="legend-value left mobile-only">${currentMin.toFixed(1)}${unit}</span>
+          <span class="legend-overlay-title mobile-only">${label}</span>
+          <span class="legend-value right mobile-only">${currentMax.toFixed(1)}${unit}</span>
       </div>
-      <div class="info-box-right">
-        <span class="desktop-only">${currentMin.toFixed(1)}${unit}</span>
-        <div class="legend-bar" style="${barStyle}">
-            <span class="legend-value left mobile-only">${currentMin.toFixed(1)}${unit}</span>
-            <span class="legend-overlay-title mobile-only">${label}</span>
-            <span class="legend-value right mobile-only">${currentMax.toFixed(1)}${unit}</span>
-        </div>
-        <span class="desktop-only">${currentMax.toFixed(1)}${unit}</span>
-      </div>
-    `;
-  }
+      <span class="desktop-only">${currentMax.toFixed(1)}${unit}</span>
+    </div>
+  `;
+  
   info.style.display = 'block';
 }
 function updateTileLayer(){
@@ -1099,7 +1065,7 @@ function generateAllPngUrls() {
   // Weather and composite PNGs (time-based)
   const weatherVars = ['temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
                       'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
-                      'weather_code', 'freezing_level_height', 'surface_pressure', 
+                      'freezing_level_height', 'surface_pressure', 
                       'dewpoint_2m', 'skiability', 'sqh'];
   
   availableTimestamps.forEach(timestamp => {
