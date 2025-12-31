@@ -167,7 +167,7 @@ function loadWeatherData() {
   weatherDataLoading = true;
   console.log('Loading weather data for point validation...');
   
-  return fetch('web-resources/data/weather_data_frontend.json')
+  return fetch(`${RES}data/weather_data_frontend.json`)
     .then(r => r.json())
     .then(d => {
       const sample = d.coordinates.find(c => c.weather_data_3hour);
@@ -332,9 +332,9 @@ async function getPngValue(varName, tsStr, lat, lon){
   const layerType = getLayerType(varName);
   let imageUrl;
   if(layerType === 'terrain'){
-    imageUrl = `web-resources/images/terrain/${varName}.png`;
+    imageUrl = `${RES}images/terrain/${varName}.png`;
   }else{
-    imageUrl = `web-resources/images/weather/${tsStr}/${varName}.png`;
+    imageUrl = `${RES}images/weather/${tsStr}/${varName}.png`;
   }
   try{
     const canvas = await loadCanvas(imageUrl);
@@ -557,10 +557,10 @@ function updateTileLayer(){
   
   if (layerType === 'terrain') {
     // Static terrain layers
-    imageUrl = `web-resources/images/terrain/${varName}.png`;
+    imageUrl = `${RES}images/terrain/${varName}.png`;
   } else if (layerType === 'snow_composite' || layerType === 'weather') {
     // Time-dependent layers (weather data, skiability, SQH)
-    imageUrl = `web-resources/images/weather/${ts}/${varName}.png`;
+    imageUrl = `${RES}images/weather/${ts}/${varName}.png`;
   } else {
     console.warn(`Unknown layer type for ${varName}`);
     return;
@@ -930,7 +930,7 @@ function generateAllPngUrls() {
   // Terrain PNGs (always available)
   const terrainVars = ['elevation', 'aspect', 'slope'];
   terrainVars.forEach(varName => {
-    allUrls.push(`web-resources/images/terrain/${varName}.png`);
+    allUrls.push(`${RES}images/terrain/${varName}.png`);
   });
   
   // Weather and composite PNGs (time-based)
@@ -941,7 +941,7 @@ function generateAllPngUrls() {
   
   availableTimestamps.forEach(timestamp => {
     weatherVars.forEach(varName => {
-      allUrls.push(`web-resources/images/weather/${timestamp}/${varName}.png`);
+      allUrls.push(`${RES}images/weather/${timestamp}/${varName}.png`);
     });
   });
   
