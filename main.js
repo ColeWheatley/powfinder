@@ -682,11 +682,13 @@ function showLayerInfoBox(){
         ${label} ${timeLabel}
       </div>
       <div class="info-box-right">
-        <span>${currentMin.toFixed(1)}${unit}</span>
+        <span class="desktop-only">${currentMin.toFixed(1)}${unit}</span>
         <div class="legend-bar" style="${barStyle}">
+            <span class="legend-value left mobile-only">${currentMin.toFixed(1)}${unit}</span>
             <span class="legend-overlay-title mobile-only">${label}</span>
+            <span class="legend-value right mobile-only">${currentMax.toFixed(1)}${unit}</span>
         </div>
-        <span>${currentMax.toFixed(1)}${unit}</span>
+        <span class="desktop-only">${currentMax.toFixed(1)}${unit}</span>
       </div>
     `;
   }

@@ -81,8 +81,26 @@ html,body{height:100%;margin:0;}
     font-size: 1.6vh;
 }
 
+.legend-value {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: white;
+    font-weight: bold;
+    text-shadow: 0 0 4px black, 0 0 2px black;
+    font-size: 1.4vh;
+    pointer-events: none;
+    padding: 0 1vh;
+}
+
+.legend-value.left { left: 0; }
+.legend-value.right { right: 0; }
+
 .legend-bar {
     position: relative; /* Needed for absolute positioning of title */
+    width: 100%; /* Take full width of parent */
+    height: 100%; /* Take full height of parent */
+    border-radius: 0.5vh;
 }
 
 /* Drawer container */
@@ -1527,7 +1545,7 @@ html,body{height:100%;margin:0;}
 
 
 
-            /* Info box adjustments */
+                /* Info box adjustments */
 
 
 
@@ -1543,7 +1561,7 @@ html,body{height:100%;margin:0;}
 
 
 
-            #info-box {
+                #info-box {
 
 
 
@@ -1559,7 +1577,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                margin: 0;
+                    margin: 0;
 
 
 
@@ -1575,7 +1593,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                padding: 1.5vh 3vw;
+                    padding: 0; /* Remove padding so bar hits edges */
 
 
 
@@ -1591,7 +1609,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                max-height: none;
+                    max-height: none;
 
 
 
@@ -1607,7 +1625,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                flex-grow: 1;
+                    flex-grow: 0; /* Don't auto-grow, use specific width */
 
 
 
@@ -1623,7 +1641,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                background: rgba(var(--accent), 0.8); /* Maintain visibility */
+                    width: 85%; /* 85% width to leave room for caret */
 
 
 
@@ -1639,7 +1657,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                border-radius: 1vh;
+                    background: transparent; /* No background needed, the bar has it */
 
 
 
@@ -1655,7 +1673,7 @@ html,body{height:100%;margin:0;}
 
 
 
-            }
+                    border-radius: 1vh;
 
 
 
@@ -1671,7 +1689,151 @@ html,body{height:100%;margin:0;}
 
 
 
-        
+                    height: 6vh; /* Fixed height for the bar */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    display: flex;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    align-items: center;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                #drawer-bar {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    justify-content: space-between; /* Space out info box and caret */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    padding: 0 2vw; /* Reduced side padding */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
 
 
 
@@ -1703,39 +1865,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
                     font-size: 2vh;
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-        
 
 
 
@@ -1767,22 +1897,6 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
                 }
 
 
@@ -1799,39 +1913,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
             
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-        
 
 
 
@@ -1863,22 +1945,6 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
                     width: 100%; /* Full width for the legend bar container */
 
 
@@ -1895,7 +1961,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        
+                    height: 100%;
 
 
 
@@ -1911,23 +1977,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    justify-content: space-between; /* Space out min/max values */
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-        
+                    display: block; /* Not flex on mobile for this container, just holds the bar */
 
 
 
@@ -1959,22 +2009,6 @@ html,body{height:100%;margin:0;}
 
 
 
-        
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
             
 
 
@@ -1991,7 +2025,7 @@ html,body{height:100%;margin:0;}
 
 
 
-        
+                .info-box-left {
 
 
 
@@ -2007,7 +2041,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                .info-box-left {
+            
 
 
 
