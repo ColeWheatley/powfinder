@@ -102,7 +102,7 @@ html,body{height:100%;margin:0;}
     position: relative; /* Needed for absolute positioning of title */
     width: 100%; /* Take full width of parent */
     height: 100%; /* Take full height of parent */
-    border-radius: 0.5vh;
+    border-radius: 1vh;
     border: 1.5px solid rgba(255,255,255);
     box-sizing: border-box; /* Ensure border doesn't add to width */
     margin: 0;
@@ -1544,7 +1544,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    /* Info box adjustments */
+                        /* Info box adjustments */
 
 
 
@@ -1560,7 +1560,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                    #info-box {
+                        #info-box {
 
 
 
@@ -1576,7 +1576,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        margin: 0;
+                            margin: 0;
 
 
 
@@ -1592,7 +1592,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        padding: 0; /* Remove padding so bar hits edges */
+                            padding: 0; /* Remove padding so bar hits edges */
 
 
 
@@ -1608,7 +1608,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        max-height: none;
+                            max-height: none;
 
 
 
@@ -1624,7 +1624,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        flex-grow: 0; /* Don't auto-grow, use specific width */
+                            flex-grow: 0; /* Don't auto-grow, use specific width */
 
 
 
@@ -1640,7 +1640,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        width: 85%; /* 85% width to leave room for caret */
+                            width: 85%; /* 85% width to leave room for caret */
 
 
 
@@ -1656,7 +1656,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        background: transparent; /* No background needed, the bar has it */
+                            background: transparent; /* No background needed, the bar has it */
 
 
 
@@ -1672,7 +1672,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        border-radius: 1vh;
+                            border-radius: 1vh;
 
 
 
@@ -1688,7 +1688,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        height: 8vh; /* Taller bar (increased from 6vh) */
+                            height: 8vh; /* Taller bar (increased from 6vh) */
 
 
 
@@ -1704,7 +1704,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        display: flex;
+                            display: flex;
 
 
 
@@ -1720,7 +1720,7 @@ html,body{height:100%;margin:0;}
 
 
 
-                        align-items: center;
+                            align-items: center;
 
 
 
@@ -1736,7 +1736,39 @@ html,body{height:100%;margin:0;}
 
 
 
-                    }
+                            overflow: visible; /* Prevent clipping of the legend border */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    
 
 
 

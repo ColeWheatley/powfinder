@@ -26,8 +26,8 @@ from pathlib import Path
 # API configuration
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "icon-d2"
-START_DATE = "2025-05-14"
-END_DATE = "2025-05-28"
+START_DATE = "2025-12-31"
+END_DATE = "2026-01-14"
 TIMEZONE = "Europe/Vienna"
 
 # Weather parameters to collect
