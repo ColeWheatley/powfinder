@@ -774,7 +774,42 @@ function updateToggleButtonState() {
 }
 
 
+function isMobile() {
+  return window.innerWidth <= 768;
+}
+
 function showDaySelector(){
+  if (isMobile()) {
+    const layerGrid = document.getElementById('layer-grid');
+    const selectorGrid = document.getElementById('mobile-selector-grid');
+    if (!layerGrid || !selectorGrid) return;
+
+    selectorGrid.innerHTML = '';
+    selectorGrid.style.display = 'grid'; // Ensure grid layout
+    layerGrid.style.display = 'none';
+
+    for(let i=0; i < 5; i++){ 
+      const timestampIdx = i * 4;
+      if(timestampIdx >= availableTimestamps.length) continue;
+      const d = new Date(availableTimestamps[timestampIdx]);
+      const div = document.createElement('div');
+      div.className = 'layer-item';
+      div.textContent = formatDay(d);
+      if (i === dayIdx) div.classList.add('active');
+      div.onclick = () => {
+        dayIdx = i;
+        updateButtons();
+        draw();
+        // Return to layer view
+        selectorGrid.style.display = 'none';
+        layerGrid.style.display = 'grid';
+      };
+      selectorGrid.appendChild(div);
+    }
+    return;
+  }
+
+  // Desktop Behavior
   const info = document.getElementById('info-box');
   info.innerHTML='';
   info.classList.add('info-box-selecting');
@@ -782,8 +817,8 @@ function showDaySelector(){
   dayRow.className = 'date-selector-row';
   info.appendChild(dayRow);
 
-  for(let i=0; i < 5; i++){ // 5 days available
-    const timestampIdx = i * 4; // First timestamp of each day
+  for(let i=0; i < 5; i++){ 
+    const timestampIdx = i * 4; 
     if(timestampIdx >= availableTimestamps.length) continue;
     const d = new Date(availableTimestamps[timestampIdx]);
     const div = document.createElement('div');
@@ -803,6 +838,37 @@ function showDaySelector(){
 }
 
 function showTimeSelector(){
+  if (isMobile()) {
+    const layerGrid = document.getElementById('layer-grid');
+    const selectorGrid = document.getElementById('mobile-selector-grid');
+    if (!layerGrid || !selectorGrid) return;
+
+    selectorGrid.innerHTML = '';
+    selectorGrid.style.display = 'grid';
+    layerGrid.style.display = 'none';
+
+    for(let i=0; i<4; i++){
+      const tsStr = availableTimestamps[dayIdx*4 + i];
+      if(!tsStr) continue;
+      const d = new Date(tsStr);
+      const div = document.createElement('div');
+      div.className = 'layer-item';
+      div.textContent = formatTime(d);
+      if(i === hourIdx) div.classList.add('active');
+      div.onclick = () => {
+        hourIdx = i;
+        updateButtons();
+        draw();
+        // Return to layer view
+        selectorGrid.style.display = 'none';
+        layerGrid.style.display = 'grid';
+      };
+      selectorGrid.appendChild(div);
+    }
+    return;
+  }
+
+  // Desktop Behavior
   const info = document.getElementById('info-box');
   info.innerHTML='';
   info.classList.add('info-box-selecting');
