@@ -25,6 +25,24 @@
 html,body{height:100%;margin:0;}
 #map{width:100%;height:100%;}
 
+/* Mobile Brand - Floating Logo (Hidden by default) */
+.mobile-brand {
+    display: none;
+    position: fixed;
+    top: 2vh;
+    left: 2vw;
+    z-index: 2000; /* Above everything */
+    font-family: var(--brand-font);
+    font-size: 2.5vh;
+    color: white;
+    background: var(--bar-bg);
+    backdrop-filter: blur(10px);
+    padding: 0.8vh 1.5vh;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    pointer-events: none; /* Let clicks pass through if needed, though it's just a label */
+}
+
 /* Drawer container */
 #drawer-container{
     position:fixed;left:0;bottom:-28vh; /* Updated */
@@ -571,6 +589,913 @@ html,body{height:100%;margin:0;}
 }
 
 .cell-source, .cell-map {
+
   min-width: 4vw;
+
   text-align: center;
+
 }
+
+
+
+/* ===== Mobile Responsive Styles ===== */
+
+
+
+@media (max-width: 768px) {
+
+
+
+    /* Larger drawer for mobile */
+
+
+
+    #drawer-container {
+
+
+
+        height: 90vh;
+
+
+
+        bottom: -80vh;
+
+
+
+    }
+
+
+
+
+
+
+
+    #drawer-bar {
+
+
+
+        height: 10vh;
+
+
+
+        padding: 0 4vw;
+
+
+
+    }
+
+
+
+
+
+
+
+        #drawer-bar .brand {
+
+
+
+
+
+
+
+            display: none; /* Hide main logo on mobile */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        .mobile-brand {
+
+
+
+
+
+
+
+            display: block; /* Show floating logo on mobile */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #drawer-caret {
+
+
+
+
+
+
+
+            font-size: 5vh;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #drawer-content {
+
+
+
+
+
+
+
+    
+
+
+
+        height: 80vh;
+
+
+
+        flex-direction: column;
+
+
+
+        padding-bottom: 2vh;
+
+
+
+        overflow-y: auto;
+
+
+
+    }
+
+
+
+
+
+
+
+        /* Stack panels vertically, but put Settings (Time/Day) ON TOP */
+
+
+
+
+
+
+
+        #layer-panel, #settings-grid-panel {
+
+
+
+
+
+
+
+            width: 100%;
+
+
+
+
+
+
+
+            height: auto;
+
+
+
+
+
+
+
+            overflow-y: visible;
+
+
+
+
+
+
+
+            border-right: none;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #settings-grid-panel {
+
+
+
+
+
+
+
+            order: -1; /* Moves this panel to the top */
+
+
+
+
+
+
+
+            padding-top: 1vh;
+
+
+
+
+
+
+
+            padding-bottom: 2vh;
+
+
+
+
+
+
+
+            border-bottom: 1px solid var(--sep);
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #layer-panel {
+
+
+
+
+
+
+
+            border-bottom: 1px solid var(--sep);
+
+
+
+
+
+
+
+            padding-bottom: 15vh; /* Extra space at bottom for scrolling */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        /* 2-Column Grid */
+
+
+
+
+
+
+
+        #layer-grid {
+
+
+
+
+
+
+
+            grid-template-columns: repeat(2, 1fr);
+
+
+
+
+
+
+
+            grid-template-rows: auto;
+
+
+
+
+
+
+
+            gap: 1.5vh;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #settings-grid {
+
+
+
+
+
+
+
+            grid-template-columns: repeat(2, 1fr); /* Also 2 columns for Day/Time buttons */
+
+
+
+
+
+
+
+            grid-template-rows: auto;
+
+
+
+
+
+
+
+            gap: 1.5vh;
+
+
+
+
+
+
+
+            padding-top: 0;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+        /* Make the Toggle button span both columns */
+
+
+
+
+
+
+
+        #settings-grid .toggle-button {
+
+
+
+
+
+
+
+            grid-column: 1 / -1;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        /* Rounder corners & Centered Text */
+
+
+
+
+
+
+
+        .layer-item, .toggle-button {
+
+
+
+
+
+
+
+            padding: 1.5vh;
+
+
+
+
+
+
+
+            font-size: 2.2vh;
+
+
+
+
+
+
+
+            min-height: 50px;
+
+
+
+
+
+
+
+            white-space: nowrap; /* Prevent wrapping since we shortened text */
+
+
+
+
+
+
+
+            text-align: center;
+
+
+
+
+
+
+
+            justify-content: center;
+
+
+
+
+
+
+
+            border-radius: 25px; /* Far rounder corners */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            /* Info box adjustments */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #info-box {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                margin: 0;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                padding: 1.5vh 3vw;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                max-height: none;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                flex-grow: 1;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                background: rgba(var(--accent), 0.8); /* Maintain visibility */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                border-radius: 1vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #info-box.info-box-selecting .layer-item {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+    
+
+
+
+        font-size: 2vh;
+
+
+
+        padding: 1.5vh 2vw;
+
+
+
+    }
+
+
+
+
+
+
+
+    .info-box-left {
+
+
+
+        font-size: 1.8vh;
+
+
+
+        white-space: normal;
+
+
+
+        line-height: 1.2;
+
+
+
+    }
+
+
+
+
+
+
+
+    .date-selector-row, .time-selector-row {
+
+
+
+        flex-wrap: wrap;
+
+
+
+        justify-content: center;
+
+
+
+    }
+
+
+
+
+
+
+
+    .legend-bar {
+
+
+
+        min-width: 20vw;
+
+
+
+    }
+
+
+
+
+
+
+
+    /* Popup adjustments for mobile */
+
+
+
+    .popup {
+
+
+
+        width: 85vw;
+
+
+
+        font-size: 1.8vh;
+
+
+
+    }
+
+
+
+
+
+
+
+    .popup-table th, .popup-table td {
+
+
+
+        padding: 1vh;
+
+
+
+        font-size: 1.6vh;
+
+
+
+    }
+
+
+
+}
+
+
+
+
