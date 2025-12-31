@@ -420,14 +420,29 @@ async function fetchApiData(lat, lon, tsStr) {
   const apiParams = new URLSearchParams({
     latitude: lat.toFixed(6),
     longitude: lon.toFixed(6),
-    model: 'icon-d2',
     hourly: apiVars.join(','),
     start_date: dateStr,
     end_date: dateStr,
     timezone: 'Europe/Vienna'
   });
 
-  const apiUrl = `https://api.open-meteo.com/v1/forecast?${apiParams}`;
+  // Determine if we need Forecast or Archive API
+  // Forecast API usually covers recent past (3-5 days) and future.
+  // Archive API covers everything else.
+  // Simple check: if date is older than 5 days ago, use Archive.
+  const diffTime = new Date() - selectedDate;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+  
+  let baseUrl = 'https://api.open-meteo.com/v1/forecast';
+  if (diffDays > 5) {
+    baseUrl = 'https://archive-api.open-meteo.com/v1/archive';
+    // Archive API doesn't use specific high-res models like icon-d2 generally, 
+    // or handles them differently. We'll omit 'model' to let it use best match/reanalysis.
+  } else {
+    apiParams.append('model', 'icon-d2'); // Use high-res for recent/future
+  }
+
+  const apiUrl = `${baseUrl}?${apiParams}`;
 
   try {
     const r = await fetch(apiUrl);
@@ -456,17 +471,18 @@ async function fetchApiData(lat, lon, tsStr) {
       updatePopupRow('elevation', apiData.elevation, 'source');
     }
 
-    // Update rows that API doesn't provide (like Skiability, SQH) to N/A
-    variables.forEach(v => {
+    // Update all rows to N/A if API doesn't provide them
+    const allPopupVars = [...variables, 'elevation', 'aspect', 'slope'];
+    allPopupVars.forEach(v => {
       if (!apiVars.includes(v) && v !== 'elevation') {
-        updatePopupRow(v, null, 'source'); // Or keep spinner? No, set to N/A if API doesn't have it.
+        updatePopupRow(v, null, 'source');
       }
     });
 
   } catch (e) {
     console.error('API Fetch Error:', e);
-    // Set all source columns to "Error" or "N/A"
-    const allVars = [...variables, 'elevation'];
+    // Set all source columns to "N/A" on error
+    const allVars = [...variables, 'elevation', 'aspect', 'slope'];
     allVars.forEach(v => updatePopupRow(v, null, 'source'));
   }
 }
