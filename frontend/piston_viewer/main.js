@@ -16,7 +16,7 @@ class PistonViewer {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x050505);
 
-        // Initial Camera Setup - Will be reset in initWorld
+        // Initial Camera Setup
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
         this.camera.position.set(0, 5000, 0);
 
@@ -30,7 +30,7 @@ class PistonViewer {
         this.controls.dampingFactor = 0.08;
         this.controls.screenSpacePanning = false;
         this.controls.minDistance = 100;
-        this.controls.maxDistance = 50000; // Increased max distance
+        this.controls.maxDistance = 50000;
         this.controls.maxPolarAngle = Math.PI / 2.1;
 
         const ambient = new THREE.AmbientLight(0xffffff, 0.4);
@@ -150,13 +150,12 @@ class PistonViewer {
             const centerX = mapWidth / 2;
             const centerZ = -mapHeight / 2;
 
-            // FIX: Start HIGH UP (Birds Eye) looking straight down
-            // This ensures `angle = 0` -> `factor = 0` -> Pistons Flat
+            // Start zoomed in to help progressive loading visibility
             this.camera.position.set(centerX, 800, centerZ);
             this.controls.target.set(centerX, 0, centerZ);
             this.controls.update();
 
-            // Load All Tiles
+            // Load All Tiles (Low Res Only)
             for (const tile of this.manifest.tiles) {
                 this.loadSingleTile(tile).catch(e => console.error(`Error loading tile ${tile.x}_${tile.y}:`, e));
             }
@@ -179,9 +178,6 @@ class PistonViewer {
     async loadSingleTile(tileDef) {
         const { x, y } = tileDef;
 
-        // World Position:
-        // X grows East (Right). Y grows North (Up).
-        // In 3D: X is +X, Y is -Z.
         const posX = x - this.worldOrigin.x;
         const posZ = -(y - this.worldOrigin.y);
 
@@ -190,25 +186,29 @@ class PistonViewer {
         const medTexUrl = `tiles_sat/med_res/tile_${x}_${y}.webp`;
         const highTexUrl = `tiles_sat/high_res/tile_${x}_${y}.tif`;
 
+        // 1. Load Low Res Texture
         const texLoader = new THREE.TextureLoader();
         const texture = await texLoader.loadAsync(lowTexUrl);
         texture.colorSpace = THREE.SRGBColorSpace;
-        // Optimization: Don't flipY in texture loader, handle in shader
         texture.flipY = false;
 
+        // 2. Create Material
         const material = new THREE.MeshBasicMaterial({
             map: texture,
             side: THREE.FrontSide
         });
-
         this.setupMaterialShader(material);
         this.materialsToUpdate.push(material);
 
+        // 3. Fetch Binary Data
         const response = await fetch(binUrl);
         const buffer = await response.arrayBuffer();
         const hexData = this.parseBinary(buffer);
 
+        // 4. Create Instanced Mesh (with Cloned Geometry!)
         const mesh = this.createInstancedMesh(hexData, material);
+
+        // 5. Position Mesh
         mesh.position.set(posX, 0, posZ);
         mesh.updateMatrixWorld();
 
@@ -220,19 +220,13 @@ class PistonViewer {
             material,
             highResLoaded: false,
             highResLoading: false,
+            medResLoaded: false,
+            medResLoading: false,
             urls: { med: medTexUrl, high: highTexUrl }
         };
         this.tiles.push(tileObj);
 
-        // Lazy Load Med Res
-        texLoader.load(medTexUrl, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.flipY = false;
-            if (!tileObj.highResLoaded) {
-                material.map = tex;
-                material.needsUpdate = true;
-            }
-        });
+        // NO AUTO-LOAD for Med Res anymore!
     }
 
     parseBinary(buffer) {
@@ -256,6 +250,7 @@ class PistonViewer {
 
     createInstancedMesh(hexes, material) {
         const numHexes = hexes.length;
+
         // FIX: Clone geometry so each tile has unique instance attributes
         const mesh = new THREE.InstancedMesh(this.hexGeometry.clone(), material, numHexes);
 
@@ -275,6 +270,7 @@ class PistonViewer {
                 const realY = y + yShift;
                 const h = hexes[idx];
 
+                // Position within the tile
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(idx, matrix);
 
@@ -305,9 +301,8 @@ class PistonViewer {
         material.onBeforeCompile = (shader) => {
             material.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
-            shader.uniforms.uTextureFlipY = { value: 0.0 }; // Default 0 (Standard 1-y)
+            shader.uniforms.uTextureFlipY = { value: 0.0 };
 
-            // User Lighting Vars
             shader.uniforms.uAoFloor = { value: this.lightingSettings.aoFloor };
             shader.uniforms.uAoPower = { value: this.lightingSettings.aoPower };
             shader.uniforms.uLambertStrength = { value: this.lightingSettings.lambert };
@@ -365,7 +360,7 @@ class PistonViewer {
                     transformed.y = animMyZ; // Top Cap
                 }
 
-                // UV Calc: Relative to Instanced Mesh (Tile) Origin (0,0) to (1250, -1000)
+                // UV Calculation
                 vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 
@@ -405,12 +400,7 @@ class PistonViewer {
                 // UV Mapping
                 float u = vLocalPos.x / 1250.0;
                 float v = -vLocalPos.z / 1000.0;
-                
-                // Texture Y logic: 
-                // Default (uTextureFlipY=0.0): 1.0 - v (Standard GL)
-                // Flipped (uTextureFlipY=1.0): v 
                 float texY = (uTextureFlipY > 0.5) ? v : (1.0 - v);
-                
                 vec2 myUV = vec2(clamp(u, 0.001, 0.999), clamp(texY, 0.001, 0.999));
                 
                 vec4 texColor = texture2D(map, myUV);
@@ -468,7 +458,7 @@ class PistonViewer {
             }
         }
 
-        this.updateTextureLOD();
+        this.updateLOD();
         this.renderer.render(this.scene, this.camera);
     }
 
@@ -479,41 +469,58 @@ class PistonViewer {
         const elapsed = now - this.fpsState.lastSample;
         if (elapsed < 500) return;
         const fps = (this.fpsState.frames * 1000) / elapsed;
-        this.fpsEl.textContent = fps.toFixed(0);
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        this.fpsEl.textContent = `FPS: ${fps.toFixed(0)} | Zoom: ${dist.toFixed(0)}`;
         this.fpsState.frames = 0;
         this.fpsState.lastSample = now;
     }
 
-    updateTextureLOD() {
+    updateLOD() {
+        // Only run logic every 10 frames or so if performance is still issue, but 80 iter is fast.
         const target = this.controls.target;
-        const dist = this.camera.position.distanceTo(target);
-        if (dist > 1500) return;
+        const CAM_HIGH_RES_DIST = 600;  // Up close and personal
+        const CAM_MED_RES_DIST = 1500; // Medium range (approx 1 tile width)
 
-        let closest = null;
-        let minDist = Infinity;
+        // Optimize: could throttle this
+        const texLoader = new THREE.TextureLoader();
+        const tiffLoader = new TIFFLoader();
 
         for (const tile of this.tiles) {
             const cx = (tile.x - this.worldOrigin.x) + 625;
             const cz = -(tile.y - this.worldOrigin.y) - 500;
-            const d = (target.x - cx) ** 2 + (target.z - cz) ** 2;
-            if (d < minDist) {
-                minDist = d;
-                closest = tile;
-            }
-        }
+            const distSq = (target.x - cx) ** 2 + (target.z - cz) ** 2;
 
-        if (closest && !closest.highResLoaded && !closest.highResLoading) {
-            console.log(`Loading High-Res for ${closest.x}, ${closest.y}`);
-            closest.highResLoading = true;
-            const tiffLoader = new TIFFLoader();
-            tiffLoader.load(closest.urls.high, (tex) => {
-                tex.colorSpace = THREE.SRGBColorSpace;
-                tex.flipY = false; // Shader handles flip
-                closest.material.map = tex;
-                closest.material.needsUpdate = true;
-                closest.highResLoaded = true;
-                closest.highResLoading = false;
-            });
+            if (distSq < CAM_HIGH_RES_DIST ** 2) {
+                if (!tile.highResLoaded && !tile.highResLoading) {
+                    tile.highResLoading = true;
+                    // console.log(`LOD HIGH: ${tile.x}`);
+                    tiffLoader.load(tile.urls.high, (tex) => {
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.flipY = false;
+                        tile.material.map = tex;
+                        tile.material.needsUpdate = true;
+                        tile.highResLoaded = true;
+                        tile.highResLoading = false;
+                    });
+                }
+            } else if (distSq < CAM_MED_RES_DIST ** 2) {
+                // If High Res is already there, KEEP IT (don't downgrade, memory leak prevention is advanced topic)
+                // If no High Res, ensure Med Res
+                if (!tile.highResLoaded && !tile.medResLoaded && !tile.medResLoading) {
+                    tile.medResLoading = true;
+                    // console.log(`LOD MED: ${tile.x}`);
+                    texLoader.load(tile.urls.med, (tex) => {
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.flipY = false;
+                        if (!tile.highResLoaded) {
+                            tile.material.map = tex;
+                            tile.material.needsUpdate = true;
+                        }
+                        tile.medResLoaded = true;
+                        tile.medResLoading = false;
+                    });
+                }
+            }
         }
     }
 
