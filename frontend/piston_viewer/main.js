@@ -381,7 +381,7 @@ class PistonViewer {
                     vec3 nrm = normalize(vObjNormal);
                     float lambert = clamp(dot(nrm, lightDir), 0.0, 1.0);
                     float rim = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 2.2);
-                    float ao = mix(0.58, 1.0, pow(vGrad, 0.9));
+                    float ao = mix(0.1, 1.0, pow(vGrad, 0.9));
                     float faceShade = 0.35 + 0.55 * lambert + 0.18 * rim;
                     sideBase *= clamp(faceShade, 0.3, 1.1) * ao;
 
@@ -394,6 +394,7 @@ class PistonViewer {
                     if (vFaceSlope >= 35.0 && vFaceSlope < 40.0) slopeColor = cBlue;
                     else if (vFaceSlope >= 40.0 && vFaceSlope < 45.0) slopeColor = cYellow;
                     else if (vFaceSlope >= 45.0) slopeColor = cRed;
+                    slopeColor *= ao;
                     
                     if (vFaceSlope >= 30.0) diffuseColor.rgb = slopeColor;
                     else diffuseColor.rgb = sideBase;
