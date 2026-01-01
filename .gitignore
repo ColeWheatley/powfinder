@@ -14,7 +14,12 @@ pistons_local_beta/data/
 tiles/
 
 # Specific large weather JSON files
+backend/meteo_api/*.json
 resources/meteo_api/weather_data_3hour_backup.json
+
+# ML and Local Data
+backend/ml_interpolator/cache/
+pistons_local_beta/data/
 
 # Node modules and package manager files
 node_modules/

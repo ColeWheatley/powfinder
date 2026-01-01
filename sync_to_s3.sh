@@ -6,15 +6,28 @@ PROJECT_PATH="powfinder"
 
 # Colors for output
 GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo -e "${GREEN}Syncing PowFinder to s3://${BUCKET_NAME}/${PROJECT_PATH}/...${NC}"
+# Password Protection
+REQUIRED_PASS="dumbass"
 
-# Sync the frontend folder directly to the project path
-# This mirrors the local frontend/ structure to wheatley.cloud/powfinder/
-aws s3 sync ./frontend "s3://${BUCKET_NAME}/${PROJECT_PATH}/" \
+echo -e "$RED WARNING: This script uses --delete. It will WIPE anything in s3://$BUCKET_NAME/$PROJECT_PATH/ that is not in the local ./frontend/ folder. $NC"
+read -p "Enter validation password: " USER_PASS
+
+if [ "$USER_PASS" != "$REQUIRED_PASS" ]; then
+    echo -e "$RED Incorrect password. Aborting. $NC"
+    exit 1
+fi
+
+echo -e "$GREEN Password accepted. Syncing PowFinder to s3://$BUCKET_NAME/$PROJECT_PATH/... $NC"
+
+# Sync the frontend folder
+# Braincells engaged: We only sync the ./frontend dir. 
+# If a file exists on S3/powfinder/ but NOT in ./frontend/, it WILL BE DELETED.
+aws s3 sync ./frontend "s3://$BUCKET_NAME/$PROJECT_PATH/" \
     --delete \
     --exclude "*/.DS_Store" \
     --exclude ".DS_Store"
 
-echo -e "${GREEN}Sync complete!${NC}"
+echo -e "$GREEN Sync complete! $NC"
