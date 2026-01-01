@@ -1,4 +1,3 @@
-
 {
   "name": "powfinder",
   "type": "module",
@@ -6,12 +5,13 @@
   "main": "frontend.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
-    },
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "geotiff": "^2.1.4-beta.1",
     "node-fetch": "^3.3.2"
   }
 }

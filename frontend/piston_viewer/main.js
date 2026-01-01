@@ -51,7 +51,7 @@ class PistonViewer {
         this.controls.dampingFactor = 0.08;
         this.controls.screenSpacePanning = false;
         this.controls.minDistance = 100;
-        this.controls.maxDistance = 3000;
+        this.controls.maxDistance = 5000; // Increased to allow viewing large maps
         this.controls.maxPolarAngle = Math.PI / 2.1;
         this.controls.update();
 
@@ -66,7 +66,7 @@ class PistonViewer {
         this.pistonMesh = null;
         this.flatPlane = null;
         this.currentHeightFactor = 0.0;
-        
+
         // Instant placeholder plane
         const width = 1290;
         const height = 1040;
@@ -100,10 +100,10 @@ class PistonViewer {
     async loadTile(x, y) {
         console.log(`Loading tile: ${x}, ${y}...`);
         const binUrl = `tiles_bin/tile_${x}_${y}.bin`;
-        
+
         // Progressive Texture Loading
         const texLoader = new THREE.TextureLoader();
-        
+
         // 1. Instant Low Res
         const lowUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
         const lowTexture = await texLoader.loadAsync(lowUrl);
@@ -134,31 +134,41 @@ class PistonViewer {
         const baseElevation = view.getFloat32(0, true);
         const hexData = [];
         let offset = 4;
-        
-        // ... (hex parsing logic remains same)
+        const BYTES_PER_HEX = 29;
+
+        console.log("Parsing V3 Binary (South-Push + Slope)...");
+
         while (offset < buffer.byteLength) {
+            // 1. Geometry (4 x half-float) = 8 bytes
             const zRaw = view.getUint16(offset, true);
             const z = this.decodeFloat16(zRaw);
-
             const nz_s = this.decodeFloat16(view.getUint16(offset + 2, true));
             const nz_se = this.decodeFloat16(view.getUint16(offset + 4, true));
             const nz_sw = this.decodeFloat16(view.getUint16(offset + 6, true));
 
-            const rgb_s_top = [view.getUint8(offset + 8) / 255, view.getUint8(offset + 9) / 255, view.getUint8(offset + 10) / 255];
-            const rgb_s_bot = [view.getUint8(offset + 11) / 255, view.getUint8(offset + 12) / 255, view.getUint8(offset + 13) / 255];
-            const rgb_se_top = [view.getUint8(offset + 14) / 255, view.getUint8(offset + 15) / 255, view.getUint8(offset + 16) / 255];
-            const rgb_se_bot = [view.getUint8(offset + 17) / 255, view.getUint8(offset + 18) / 255, view.getUint8(offset + 19) / 255];
-            const rgb_sw_top = [view.getUint8(offset + 20) / 255, view.getUint8(offset + 21) / 255, view.getUint8(offset + 22) / 255];
-            const rgb_sw_bot = [view.getUint8(offset + 23) / 255, view.getUint8(offset + 24) / 255, view.getUint8(offset + 25) / 255];
+            offset += 8;
+
+            // 2. South Attributes (RGBA_Top, RGB_Bot) = 7 bytes
+            const rgb_s_top = [view.getUint8(offset) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset + 2) / 255, view.getUint8(offset + 3)]; // .w is Slope
+            const rgb_s_bot = [view.getUint8(offset + 4) / 255, view.getUint8(offset + 5) / 255, view.getUint8(offset + 6) / 255];
+            offset += 7;
+
+            // 3. SE Attributes = 7 bytes
+            const rgb_se_top = [view.getUint8(offset) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset + 2) / 255, view.getUint8(offset + 3)];
+            const rgb_se_bot = [view.getUint8(offset + 4) / 255, view.getUint8(offset + 5) / 255, view.getUint8(offset + 6) / 255];
+            offset += 7;
+
+            // 4. SW Attributes = 7 bytes
+            const rgb_sw_top = [view.getUint8(offset) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset + 2) / 255, view.getUint8(offset + 3)];
+            const rgb_sw_bot = [view.getUint8(offset + 4) / 255, view.getUint8(offset + 5) / 255, view.getUint8(offset + 6) / 255];
+            offset += 7;
 
             hexData.push({
                 z, nz_s, nz_se, nz_sw,
                 rgb_s_top, rgb_s_bot,
                 rgb_se_top, rgb_se_bot,
-                rgb_sw_top, rgb_sw_bot,
-                s_s: 90.0, s_se: 90.0, s_sw: 90.0
+                rgb_sw_top, rgb_sw_bot
             });
-            offset += 26;
         }
 
         this.createInstancedMesh(hexData, lowTexture, baseElevation);
@@ -182,10 +192,10 @@ class PistonViewer {
         if (this.controls.getDistance() < 400) {
             this.highResLoaded = true; // Mark as loading to prevent double trigger
             console.log("Zoom threshold reached. Fetching High-Res TIF...");
-            
+
             const { x, y } = this.currentTileCoords;
             const highUrl = `tiles_sat/high_res/tile_${x}_${y}.tif`;
-            
+
             // Note: Browsers can't native-load TIF as texture easily without a lib.
             // Since we generated high_res as TIF, we'll need to handle it.
             // For now, let's assume high_res are also webp for the texture map, 
@@ -219,27 +229,26 @@ class PistonViewer {
             });
         }
 
+        // SOUTH-PUSH OPTIMIZATION: Only generate S, SW, SE faces (and Caps)
         const faceDefinitions = [
             { c1: 0, c2: 1, id: 0 }, // SE (Face between 0 and 60 deg)
             { c1: 1, c2: 2, id: 1 }, // S  (Face between 60 and 120 deg)
             { c1: 2, c2: 3, id: 2 }, // SW (Face between 120 and 180 deg)
-            { c1: 3, c2: 4, id: 3 }, // NW
-            { c1: 4, c2: 5, id: 4 }, // N
-            { c1: 5, c2: 0, id: 5 }  // NE
+            // NW, N, NE are REMOVED. Use neighbors.
         ];
 
         faceDefinitions.forEach(face => {
             const p1 = corners[face.c1];
             const p2 = corners[face.c2];
 
-            // Midpoint normal pointing OUTWARD
+            // Midpoint normal pointing OUTWARD (South-ish)
             const midAngle = Math.atan2((p1.z + p2.z) / 2, (p1.x + p2.x) / 2);
             const nx = Math.cos(midAngle);
             const nz = Math.sin(midAngle);
 
-            // Triangle 1: p1_bottom, p2_top, p2_bottom (CCW from outside)
+            // Triangle 1: p1_bottom, p2_top, p2_bottom
             positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p2.x, 0, p2.z);
-            // Triangle 2: p1_bottom, p1_top, p2_top (CCW from outside)
+            // Triangle 2: p1_bottom, p1_top, p2_top
             positions.push(p1.x, 0, p1.z, p1.x, 1, p1.z, p2.x, 1, p2.z);
 
             for (let j = 0; j < 6; j++) {
@@ -248,7 +257,7 @@ class PistonViewer {
             }
         });
 
-        // Caps
+        // Caps (Top and Bottom)
         for (let i = 0; i < 6; i++) {
             const p1 = corners[i];
             const p2 = corners[(i + 1) % 6];
@@ -256,7 +265,8 @@ class PistonViewer {
             positions.push(0, 1, 0, p2.x, 1, p2.z, p1.x, 1, p1.z);
             normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0);
             faceIndices.push(6, 6, 6);
-            // Bottom
+            // Bottom (Optimization: Remove bottom cap if never seen? 
+            // Keep for now in case of flying underneath)
             positions.push(0, 0, 0, p1.x, 0, p1.z, p2.x, 0, p2.z);
             normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0);
             faceIndices.push(7, 7, 7);
@@ -277,7 +287,8 @@ class PistonViewer {
         const geometry = this.createHexGeometry(side);
 
         const material = new THREE.MeshBasicMaterial({
-            map: texture
+            map: texture,
+            side: THREE.DoubleSide // Crucial for "South Push" walls that might face North
         });
 
         this.pistonMaterial = material;
@@ -308,47 +319,53 @@ class PistonViewer {
                 varying vec3 vColorTop;
                 varying vec3 vColorBot;
                 varying float vFaceSlope;
-                varying float vLocalY;
                 varying float vGrad;
+                varying float vIsHidden;
                 `
             ).replace(
                 '#include <begin_vertex>',
                 `
                 #include <begin_vertex>
+                vIsHidden = 0.0;
 
-                // --- CRUST GEOMETRY: Explicit Compass Alignment ---
                 int face = int(faceIndex + 0.5);
-                float neighborZ = 0.0;
-                bool isSouthFace = false;
+                float neighborZ = instanceNZ.w; // Default to self if not a wall
+                bool isWall = false;
 
-                // Locked Compass IDs: 0:SE, 1:S, 2:SW
-                if (face == 0) { neighborZ = instanceNZ.x; isSouthFace = true; }      // SE
-                else if (face == 1) { neighborZ = instanceNZ.y; isSouthFace = true; } // S
-                else if (face == 2) { neighborZ = instanceNZ.z; isSouthFace = true; } // SW
+                // 0:SE, 1:S, 2:SW. w holds instance Top Z.
+                float myZ = instanceNZ.w;
 
-                // Transform heights based on uHeightFactor
-                float finalZ = instanceNZ.w * uHeightFactor;
-                float finalNeighborZ = neighborZ * uHeightFactor;
+                if (face == 0) { neighborZ = instanceNZ.x; isWall = true; } // SE
+                else if (face == 1) { neighborZ = instanceNZ.y; isWall = true; } // S
+                else if (face == 2) { neighborZ = instanceNZ.z; isWall = true; } // SW
 
-                // Apply height transformation
-                if (position.y > 0.5) {
-                    transformed.y = finalZ;
+                float animMyZ = myZ * uHeightFactor;
+                float animNeighborZ = neighborZ * uHeightFactor;
+
+                // Optimization: Collapse wall if height diff is tiny to save rasterizer
+                if (isWall && abs(animMyZ - animNeighborZ) < 0.01) {
+                     vIsHidden = 1.0;
+                     transformed = vec3(0.0); // Collapse to point
                 } else {
-                    if (isSouthFace) {
-                        transformed.y = finalNeighborZ;
+                    if (position.y > 0.5) {
+                        transformed.y = animMyZ;
                     } else {
-                        transformed.y = finalZ; // North faces collapse
+                        if (isWall) {
+                            transformed.y = animNeighborZ;
+                        } else {
+                            transformed.y = animMyZ; // Top caps (face 6) stay at Top
+                        }
                     }
                 }
 
                 vWorldPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 vObjNormal = normal;
 
-                // --- FACE COLORING ---
-                vFaceSlope = 90.0;
+                // --- COLORS ---
+                vFaceSlope = 0.0;
                 vColorTop = vec3(0.0);
                 vColorBot = vec3(0.0);
-                vLocalY = transformed.y;
+                vGrad = 1.0; // Default Top
 
                 if (face == 0) {
                     vColorTop = instanceRGB_SE_Top.rgb; vColorBot = instanceRGB_SE_Bot; vFaceSlope = instanceRGB_SE_Top.w;
@@ -358,9 +375,8 @@ class PistonViewer {
                     vColorTop = instanceRGB_SW_Top.rgb; vColorBot = instanceRGB_SW_Bot; vFaceSlope = instanceRGB_SW_Top.w;
                 }
                 
-                vGrad = 1.0;
-                if (isSouthFace && position.y < 0.5) {
-                    vGrad = 0.0;
+                if (isWall && position.y < 0.5) {
+                    vGrad = 0.0; // Bottom Vertex
                 }
                 `
             );
@@ -376,40 +392,56 @@ class PistonViewer {
                 varying vec3 vColorBot;
                 varying float vFaceSlope;
                 varying float vGrad;
-
-                vec3 getSlopeColor(float sRaw) {
-                    float deg = abs(sRaw - 90.0);
-                    if (deg < 25.0) return vec3(0.5, 0.5, 0.5); 
-                    if (deg < 35.0) return vec3(0.0, 1.0, 0.0); 
-                    if (deg < 40.0) return vec3(0.0, 0.0, 1.0); 
-                    if (deg < 45.0) return vec3(0.5, 0.0, 0.5); 
-                    if (deg < 50.0) return vec3(1.0, 0.5, 0.0); 
-                    return vec3(1.0, 0.0, 0.0);                 
-                }
+                varying float vIsHidden;
                 `
             ).replace(
                 '#include <map_fragment>',
                 `
+                if (vIsHidden > 0.5) discard;
                 #include <map_fragment>
                 
+                // Check if Normal is vertical (Top Cap)
                 if (abs(vObjNormal.y) < 0.9) {
-                    vec3 finalColor = mix(vColorBot, vColorTop, vGrad);
-                    float deg = abs(vFaceSlope - 90.0);
-                    if (deg >= 25.0) {
-                        finalColor = getSlopeColor(vFaceSlope);
+                    // It's a Wall
+                    vec3 cinColor = mix(vColorBot, vColorTop, vGrad);
+                    
+                    // Safety Slope Colors
+                    if (vFaceSlope > 30.0) {
+                        vec3 safeColor = vec3(0.0, 1.0, 0.0); // 30-35 Green
+                        if (vFaceSlope >= 35.0) safeColor = vec3(1.0, 1.0, 0.0); // Yellow
+                        if (vFaceSlope >= 40.0) safeColor = vec3(0.0, 0.0, 1.0); // Blue
+                        if (vFaceSlope >= 45.0) safeColor = vec3(0.5, 0.0, 0.5); // Purple
+                        if (vFaceSlope >= 50.0) safeColor = vec3(1.0, 0.0, 0.0); // Red
+                        
+                        diffuseColor.rgb = safeColor;
+                    } else {
+                        // Cinematic Gradient (Tree -> Rock)
+                        diffuseColor.rgb = cinColor;
                     }
-                    diffuseColor.rgb = finalColor;
+                    
+                    // Lighting Fix for DoubleSide
+                    if (!gl_FrontFacing) {
+                        // If we see the back, normal should flip for lighting math
+                        // (ThreeJS standard materials usually handle this if side=DoubleSide, 
+                        // but custom shader tweaks might need care. For MeshBasicMaterial, lighting is irrelevant, 
+                        // but if we add lights later, this matters. Currently Basic = Unlit.)
+                    }
+
                 } else {
-                    float padding = 20.0;
-                    float totalW = uTileSize.x + 2.0 * padding;
-                    float totalH = uTileSize.y + 2.0 * padding;
+                    // Top Cap: Sample Satellite WebP
+                    // UV Calculation - NO PADDING logic now (1:1 mapping)
+                    // WorldPos: X (0 to 1250), Z (0 to -1000)
+                    // UV: u = X/1250, v = -Z/1000
                     
-                    // X is 1250 wide (0 to 1250), Z is 1000 high (0 to -1000)
-                    float u = (vWorldPos.x + padding) / totalW;
-                    float v = (padding - vWorldPos.z) / totalH;
+                    float u = vWorldPos.x / 1250.0;
+                    float v = -vWorldPos.z / 1000.0;
                     
-                    vec2 uvSat = vec2(u, 1.0 - v);
-                    diffuseColor = texture2D(map, uvSat);
+                    // Clamp to prevent wraparound artifacts at edges
+                    u = clamp(u, 0.001, 0.999);
+                    v = clamp(v, 0.001, 0.999);
+                    
+                    vec4 texColor = texture2D(map, vec2(u, 1.0 - v)); // Flip V for Texture
+                    diffuseColor = texColor;
                 }
                 `
             );
@@ -418,13 +450,17 @@ class PistonViewer {
         const mesh = new THREE.InstancedMesh(geometry, material, numHexes);
         const matrix = new THREE.Matrix4();
 
-        let minZ = 0;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
         data.forEach(h => {
             if (h.z < minZ) minZ = h.z;
             if (h.nz_se < minZ) minZ = h.nz_se;
             if (h.nz_s < minZ) minZ = h.nz_s;
             if (h.nz_sw < minZ) minZ = h.nz_sw;
+
+            if (h.z > maxZ) maxZ = h.z;
         });
+        console.log(`Piston Range: ${minZ}m to ${maxZ}m`);
         console.log(`Piston Floor Offset: ${minZ}m`);
 
         const instanceNZ = new Float32Array(numHexes * 4);
@@ -454,16 +490,13 @@ class PistonViewer {
                 mesh.setMatrixAt(idx, matrix);
 
                 // Set Colors + Slopes in .w
-                instanceRGB_S_Top.set(h.rgb_s_top, idx * 4);
-                instanceRGB_S_Top[idx * 4 + 3] = h.s_s;
+                instanceRGB_S_Top.set(h.rgb_s_top, idx * 4); // .w already contains slope
                 instanceRGB_S_Bot.set(h.rgb_s_bot, idx * 3);
 
                 instanceRGB_SE_Top.set(h.rgb_se_top, idx * 4);
-                instanceRGB_SE_Top[idx * 4 + 3] = h.s_se;
                 instanceRGB_SE_Bot.set(h.rgb_se_bot, idx * 3);
 
                 instanceRGB_SW_Top.set(h.rgb_sw_top, idx * 4);
-                instanceRGB_SW_Top[idx * 4 + 3] = h.s_sw;
                 instanceRGB_SW_Bot.set(h.rgb_sw_bot, idx * 3);
 
                 instanceNZ[idx * 4] = (h.nz_se - minZ) * SCALE_Z;
@@ -488,10 +521,16 @@ class PistonViewer {
         this.pistonMesh = mesh;
         this.pistonMesh.visible = false; // Start hidden (flat mode)
 
-        console.log("Mesh added to scene.");
-        this.controls.target.set(625, 0, -500);
+        const localMaxHeight = (maxZ - minZ) * SCALE_Z;
+        console.log(`Max Local Height from Floor: ${localMaxHeight}`);
+
+        // Position Camera: Center X/Z, Height = Max Peak + 2000m
+        this.camera.position.set(625, localMaxHeight + 2000, -500);
+        this.controls.target.set(625, 0, -500); // 0 is the floor (minZ)
+        this.controls.maxDistance = 20000; // Allow huge zoom out
         this.controls.update();
-        console.log("Camera target set.");
+
+        console.log(`Camera Set: Pos [625, ${this.camera.position.y}, -500], Target [625, 0, -500]`);
     }
 
     onResize() {
