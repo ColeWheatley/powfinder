@@ -146,15 +146,83 @@ class PistonViewer {
         return (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024);
     }
 
+    createHexGeometry(radius) {
+        // Custom flat-shaded hex prism with faceIndex attribute
+        // Eliminates color bleed from interpolated normals
+        const geometry = new THREE.BufferGeometry();
+        const positions = [];
+        const normals = [];
+        const faceIndices = [];
+
+        // 6 side faces, each with 2 triangles (6 vertices per face)
+        for (let i = 0; i < 6; i++) {
+            const angle1 = (i * Math.PI / 3);
+            const angle2 = ((i + 1) % 6) * Math.PI / 3;
+
+            const x1 = Math.cos(angle1) * radius;
+            const z1 = Math.sin(angle1) * radius;
+            const x2 = Math.cos(angle2) * radius;
+            const z2 = Math.sin(angle2) * radius;
+
+            // Flat normal pointing outward at face midpoint
+            const midAngle = angle1 + Math.PI / 6;
+            const nx = Math.cos(midAngle);
+            const nz = Math.sin(midAngle);
+
+            // Triangle 1: bottom-left, top-right, bottom-right (CCW from outside)
+            positions.push(x1, 0, z1, x2, 1, z2, x2, 0, z2);
+            // Triangle 2: bottom-left, top-left, top-right (CCW from outside)
+            positions.push(x1, 0, z1, x1, 1, z1, x2, 1, z2);
+
+            for (let j = 0; j < 6; j++) {
+                normals.push(nx, 0, nz);
+                faceIndices.push(i);
+            }
+        }
+
+        // Top cap (6 triangles from center) - CCW when viewed from above
+        for (let i = 0; i < 6; i++) {
+            const angle1 = (i * Math.PI / 3);
+            const angle2 = ((i + 1) % 6) * Math.PI / 3;
+            const x1 = Math.cos(angle1) * radius;
+            const z1 = Math.sin(angle1) * radius;
+            const x2 = Math.cos(angle2) * radius;
+            const z2 = Math.sin(angle2) * radius;
+
+            positions.push(0, 1, 0, x2, 1, z2, x1, 1, z1);
+            normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0);
+            faceIndices.push(6, 6, 6); // 6 = top cap
+        }
+
+        // Bottom cap (CW when viewed from above = CCW from below)
+        for (let i = 0; i < 6; i++) {
+            const angle1 = (i * Math.PI / 3);
+            const angle2 = ((i + 1) % 6) * Math.PI / 3;
+            const x1 = Math.cos(angle1) * radius;
+            const z1 = Math.sin(angle1) * radius;
+            const x2 = Math.cos(angle2) * radius;
+            const z2 = Math.sin(angle2) * radius;
+
+            positions.push(0, 0, 0, x1, 0, z1, x2, 0, z2);
+            normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0);
+            faceIndices.push(7, 7, 7); // 7 = bottom cap
+        }
+
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geometry.setAttribute('faceIndex', new THREE.Float32BufferAttribute(faceIndices, 1));
+
+        // Don't rotate here - rotation varies per column for proper tiling
+        return geometry;
+    }
+
     createInstancedMesh(data, texture, baseZ) {
         const numHexes = data.length;
         console.log(`Creating instanced mesh for ${numHexes} hexes...`);
         document.getElementById('piston-count').innerText = numHexes.toLocaleString();
 
         const side = HEX_WIDTH / Math.sqrt(3);
-        const geometry = new THREE.CylinderGeometry(side, side, 1, 6);
-        geometry.translate(0, 0.5, 0);
-        geometry.rotateY(Math.PI / 2);
+        const geometry = this.createHexGeometry(side);
 
         const material = new THREE.MeshStandardMaterial({
             map: texture,
@@ -166,6 +234,8 @@ class PistonViewer {
             shader.uniforms.uTileSize = { value: new THREE.Vector2(1250, 1000) };
             shader.vertexShader = `
                 attribute float instanceZ;
+                attribute float faceIndex;
+                attribute float instanceColType;
                 attribute vec3 instanceSlope;
                 attribute vec3 instanceRGB1;
                 attribute vec3 instanceRGB2;
@@ -175,6 +245,7 @@ class PistonViewer {
                 varying vec3 vObjNormal;
                 varying vec3 vSideColor;
                 varying float vFaceSlope;
+                varying float vColType;
                 ${shader.vertexShader}
             `.replace(
                 '#include <begin_vertex>',
@@ -184,20 +255,25 @@ class PistonViewer {
                 vSlope = instanceSlope;
                 vWorldPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 vObjNormal = normal;
+                vColType = instanceColType;
 
-                // Pick the correct baked color and slope based on face normal
-                float ang = atan(normal.z, normal.x);
-                if (ang > -0.5 && ang < 1.5) { 
-                    vSideColor = instanceRGB1; 
-                    vFaceSlope = instanceSlope.x; 
-                }
-                else if (ang > 1.5 || ang < -2.5) { 
-                    vSideColor = instanceRGB2; 
-                    vFaceSlope = instanceSlope.y; 
-                }
-                else { 
-                    vSideColor = instanceRGB3; 
-                    vFaceSlope = instanceSlope.z; 
+                // --- FACE MAPPING via faceIndex (no more atan bleed!) ---
+                // After rotateY(π/2), face directions are:
+                //   Face 0 → 120° (NW)    Face 3 → 300° (SE)
+                //   Face 1 → 180° (W)     Face 4 → 0°   (E)
+                //   Face 2 → 240° (SW)    Face 5 → 60°  (NE)
+                // South-facing walls: 2 (SW), 3 (SE), and 1 (W) or 4 (E)
+                // ---------------------------------------------------------
+                vFaceSlope = 90.0; // Default: Flat
+                vSideColor = vec3(0.08, 0.08, 0.08); // Default: Dark (North faces)
+
+                int face = int(faceIndex + 0.5);
+                if (face == 3) {
+                    vSideColor = instanceRGB1; vFaceSlope = instanceSlope.x; // SE
+                } else if (face == 2) {
+                    vSideColor = instanceRGB2; vFaceSlope = instanceSlope.y; // SW
+                } else if (face == 1) {
+                    vSideColor = instanceRGB3; vFaceSlope = instanceSlope.z; // W
                 }
                 `
             );
@@ -209,6 +285,7 @@ class PistonViewer {
                 varying vec3 vObjNormal;
                 varying vec3 vSideColor;
                 varying float vFaceSlope;
+                varying float vColType;
 
                 vec3 getSlopeColor(float sRaw) {
                     float deg = abs(sRaw - 90.0);
@@ -227,20 +304,13 @@ class PistonViewer {
                 #include <map_fragment>
                 
                 if (abs(vObjNormal.y) < 0.9) {
-                    // Start with the baked satellite color
-                    vec3 finalColor = vSideColor;
-                    
-                    // Override if slope is steep (>= 25 degrees)
-                    float deg = abs(vFaceSlope - 90.0);
-                    if (deg >= 25.0) {
-                        finalColor = getSlopeColor(vFaceSlope);
-                    }
-                    
-                    diffuseColor.rgb = finalColor;
+                    // DEBUG: Color by column type - EVEN=Red, ODD=Blue
+                    vec3 debugTint = (vColType < 0.5) ? vec3(1.0, 0.3, 0.3) : vec3(0.3, 0.3, 1.0);
+                    diffuseColor.rgb = debugTint;
                 } else {
-                    // Top cap - use WebP Texture
-                    vec2 uvSat = vec2(vWorldPos.x / uTileSize.x, 1.0 + (vWorldPos.z / uTileSize.y));
-                    diffuseColor = texture2D(map, uvSat);
+                    // Top cap - DEBUG tint too
+                    vec3 debugTint = (vColType < 0.5) ? vec3(1.0, 0.5, 0.5) : vec3(0.5, 0.5, 1.0);
+                    diffuseColor.rgb = debugTint;
                 }
                 `
             );
@@ -248,6 +318,8 @@ class PistonViewer {
 
         const mesh = new THREE.InstancedMesh(geometry, material, numHexes);
         const matrix = new THREE.Matrix4();
+        const rotationEven = new THREE.Matrix4().makeRotationY(Math.PI / 2 + Math.PI / 6); // 120°
+        const rotationOdd = new THREE.Matrix4().makeRotationY(Math.PI / 2 - Math.PI / 6); // 60° (30° clockwise from 90°)
         // Determine a safe floor (min height)
         let minZ = 0;
         data.forEach(h => { if (h.z < minZ) minZ = h.z; });
@@ -257,6 +329,7 @@ class PistonViewer {
         const instanceRGB1 = new Float32Array(numHexes * 3);
         const instanceRGB2 = new Float32Array(numHexes * 3);
         const instanceRGB3 = new Float32Array(numHexes * 3);
+        const instanceColType = new Float32Array(numHexes); // 0=even, 1=odd (for debug)
 
         let idx = 0;
         const right = 1250;
@@ -266,12 +339,14 @@ class PistonViewer {
         for (let x = 0; x <= right + 1; x += HEX_DX) {
             const colIdx = Math.round(x / HEX_DX);
             const yShift = (colIdx % 2 === 1) ? 5 : 0;
+            const rotation = (colIdx % 2 === 0) ? rotationEven : rotationOdd;
             for (let y = 0; y <= top + 1; y += 10) {
                 const realY = y + yShift;
                 if (idx >= numHexes) break;
                 const h = data[idx];
 
-                // Position the piston at Y=0 (the floor)
+                // Apply rotation then position
+                matrix.copy(rotation);
                 matrix.setPosition(x, 0, -realY);
                 mesh.setMatrixAt(idx, matrix);
 
@@ -286,6 +361,7 @@ class PistonViewer {
                 instanceRGB1.set(h.rgb1, idx * 3);
                 instanceRGB2.set(h.rgb2, idx * 3);
                 instanceRGB3.set(h.rgb3, idx * 3);
+                instanceColType[idx] = (colIdx % 2 === 0) ? 0.0 : 1.0;
                 idx++;
             }
         }
@@ -296,6 +372,7 @@ class PistonViewer {
         geometry.setAttribute('instanceRGB1', new THREE.InstancedBufferAttribute(instanceRGB1, 3));
         geometry.setAttribute('instanceRGB2', new THREE.InstancedBufferAttribute(instanceRGB2, 3));
         geometry.setAttribute('instanceRGB3', new THREE.InstancedBufferAttribute(instanceRGB3, 3));
+        geometry.setAttribute('instanceColType', new THREE.InstancedBufferAttribute(instanceColType, 1));
 
         this.scene.add(mesh);
         console.log("Mesh added to scene.");
