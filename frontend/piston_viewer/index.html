@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PowFinder | Bestagon Viewer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="loader">
+        <div class="spinner"></div>
+        <p>Fetching High-Res Bestagons...</p>
+    </div>
+
+    <div id="ui">
+        <div class="glass-panel">
+            <h1>POWFINDER 3D</h1>
+            <div class="subtitle">Binary Hex Piston Engine</div>
+
+            <div class="stats">
+                <div class="hud-item">
+                    <span>LOCATION</span>
+                    <span class="value" id="loc-val">SULZENAU, TIROL</span>
+                </div>
+                <div class="hud-item">
+                    <span>PISTONS</span>
+                    <span class="value" id="piston-count">CALCULATING...</span>
+                </div>
+                <div class="hud-item">
+                    <span>PRECISION</span>
+                    <span class="value">FLOAT16 (CM)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="legend glass-panel">
+        <div class="legend-item">
+            <div class="swatch" style="background:#555;"></div>
+            < 10° PLAIN</div>
+                <div class="legend-item">
+                    <div class="swatch" style="background:#2ecc71;"></div> 10-25° EASY
+                </div>
+                <div class="legend-item">
+                    <div class="swatch" style="background:#3498db;"></div> 25-30° MODERATE
+                </div>
+                <div class="legend-item">
+                    <div class="swatch" style="background:#e74c3c;"></div> > 30° DANGER
+                </div>
+        </div>
+
+        <div id="canvas-container"></div>
+
+        <script type="module" src="main.js"></script>
+</body>
+
+</html>

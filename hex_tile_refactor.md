@@ -22,6 +22,8 @@ Key Class: THREE.InstancedMesh (Crucial for rendering 100k+ hexes).
 
 Satellite Source: Tiris (Tirol GIS) gdi_winter WMTS layer.
 
+Source Link: https://tiris.maps.arcgis.com/apps/webappviewer/index.html?id=5849fe1df5994dc8a3c1e4675682d2fd
+
 Note: Do NOT scrape Reality Maps or Strava. Use the official government winter feed.
 
 2. Data Pipeline & Math

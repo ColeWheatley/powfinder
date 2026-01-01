@@ -12,6 +12,8 @@ pistons_local_beta/tiles_dem/
 pistons_local_beta/tiles_sat/
 pistons_local_beta/data/
 tiles/
+frontend/hexes_beta/
+frontend/piston_viewer/fuckups.md
 
 # Specific large weather JSON files
 backend/meteo_api/*.json
