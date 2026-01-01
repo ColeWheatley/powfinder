@@ -173,32 +173,69 @@ class PistonViewer {
             });
         }
 
-        const faceDefinitions = [
-            { c1: 4, c2: 5, id: 0 }, // N 
-            { c1: 5, c2: 0, id: 1 }, // NE
-            { c1: 0, c2: 1, id: 2 }, // SE
-            { c1: 1, c2: 2, id: 3 }, // S
-            { c1: 2, c2: 3, id: 4 }, // SW
-            { c1: 3, c2: 4, id: 5 }, // NW
+        const faceDirs = [
+            { x: 0.0, z: 1.0 },   // N
+            { x: 0.866, z: 0.5 }, // NE
+            { x: 0.866, z: -0.5 },// SE
+            { x: 0.0, z: -1.0 },  // S
+            { x: -0.866, z: -0.5 },// SW
+            { x: -0.866, z: 0.5 }, // NW
         ];
 
-        faceDefinitions.forEach(face => {
-            const p1 = corners[face.c1];
-            const p2 = corners[face.c2];
+        const resolveFaceId = (out) => {
+            let best = 0;
+            let bestDot = -Infinity;
+            for (let i = 0; i < faceDirs.length; i++) {
+                const d = faceDirs[i];
+                const dot = out.x * d.x + out.z * d.z;
+                if (dot > bestDot) {
+                    bestDot = dot;
+                    best = i;
+                }
+            }
+            return best;
+        };
+
+        const pushWall = (p1, p2) => {
+            const v0 = { x: p1.x, y: 0, z: p1.z };
+            const v1 = { x: p2.x, y: 1, z: p2.z };
+            const v2 = { x: p2.x, y: 0, z: p2.z };
+            const e1 = [v1.x - v0.x, v1.y - v0.y, v1.z - v0.z];
+            const e2 = [v2.x - v0.x, v2.y - v0.y, v2.z - v0.z];
+            const n = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            const out = { x: p1.x + p2.x, z: p1.z + p2.z };
+            const faceId = resolveFaceId(out);
+            const flip = (n[0] * out.x + n[2] * out.z) < 0;
+
+            if (!flip) {
+                positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p2.x, 0, p2.z);
+                positions.push(p1.x, 0, p1.z, p1.x, 1, p1.z, p2.x, 1, p2.z);
+            } else {
+                positions.push(p1.x, 0, p1.z, p2.x, 0, p2.z, p2.x, 1, p2.z);
+                positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p1.x, 1, p1.z);
+            }
+
+            for (let j = 0; j < 6; j++) {
+                faceIndices.push(faceId);
+            }
+        };
+
+        for (let i = 0; i < 6; i++) {
+            const p1 = corners[i];
+            const p2 = corners[(i + 1) % 6];
 
             // Midpoint normal (approx)
             const midAngle = Math.atan2((p1.z + p2.z) / 2, (p1.x + p2.x) / 2);
             const nx = Math.cos(midAngle);
             const nz = Math.sin(midAngle);
 
-            positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p2.x, 0, p2.z);
-            positions.push(p1.x, 0, p1.z, p1.x, 1, p1.z, p2.x, 1, p2.z);
-
-            for (let j = 0; j < 6; j++) {
-                normals.push(nx, 0, nz);
-                faceIndices.push(face.id);
-            }
-        });
+            pushWall(p1, p2);
+            for (let j = 0; j < 6; j++) normals.push(nx, 0, nz);
+        }
 
         // Caps
         for (let i = 0; i < 6; i++) {
