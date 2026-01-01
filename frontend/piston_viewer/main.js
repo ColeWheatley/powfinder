@@ -151,6 +151,7 @@ class PistonViewer {
                 attribute vec3 instanceSlope;
                 varying vec3 vSlope;
                 varying vec3 vWorldPos;
+                varying vec3 vObjNormal;
                 ${shader.vertexShader}
             `.replace(
                 '#include <begin_vertex>',
@@ -159,6 +160,7 @@ class PistonViewer {
                 transformed.y *= instanceZ;
                 vSlope = instanceSlope;
                 vWorldPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                vObjNormal = normal;
                 `
             );
 
@@ -166,14 +168,16 @@ class PistonViewer {
                 uniform vec2 uTileSize;
                 varying vec3 vSlope;
                 varying vec3 vWorldPos;
+                varying vec3 vObjNormal;
                 
                 vec3 getSlopeColor(float sRaw) {
-                    float deg = sRaw - 90.0;
-                    float absDeg = abs(deg);
-                    if (absDeg < 10.0) return vec3(0.2, 0.2, 0.2); // Steel Gray
-                    if (absDeg < 25.0) return vec3(0.0, 1.0, 0.5); // Neon Mint
-                    if (absDeg < 30.0) return vec3(0.0, 0.8, 1.0); // Neon Electric Blue
-                    return vec3(1.0, 0.0, 0.5); // Neon Pink (Powfinder Pink)
+                    float deg = abs(sRaw - 90.0);
+                    if (deg < 25.0) return vec3(0.5, 0.5, 0.5); // Gray
+                    if (deg < 35.0) return vec3(0.0, 1.0, 0.0); // Green
+                    if (deg < 40.0) return vec3(0.0, 0.0, 1.0); // Blue
+                    if (deg < 45.0) return vec3(0.5, 0.0, 0.5); // Purple
+                    if (deg < 50.0) return vec3(1.0, 0.5, 0.0); // Orange
+                    return vec3(1.0, 0.0, 0.0);                 // Red
                 }
 
                 ${shader.fragmentShader}
@@ -181,16 +185,21 @@ class PistonViewer {
                 '#include <map_fragment>',
                 `
                 #include <map_fragment>
-                if (abs(vNormal.y) < 0.9) {
-                    float angle = atan(vNormal.z, vNormal.x);
+                
+                // Stable object-space check: Top cap is always normal (0, 1, 0)
+                if (abs(vObjNormal.y) < 0.9) {
+                    // Use world normal or object normal for face direction
+                    // Since hexes aren't world-rotated, vObjNormal works for A,B,C
+                    float angle = atan(vObjNormal.z, vObjNormal.x);
                     vec3 finalSlopeColor;
+                    
                     if (angle > -0.5 && angle < 1.5) finalSlopeColor = getSlopeColor(vSlope.x);
                     else if (angle > 1.5 || angle < -2.5) finalSlopeColor = getSlopeColor(vSlope.y);
                     else finalSlopeColor = getSlopeColor(vSlope.z);
+                    
                     diffuseColor.rgb = finalSlopeColor;
                 } else {
                     // Top cap - use WebP Texture
-                    // vWorldPos.z is 0 to -1000. Texture Y 1.0 is North (vWorldPos.z = 0)
                     vec2 uvSat = vec2(vWorldPos.x / uTileSize.x, 1.0 + (vWorldPos.z / uTileSize.y));
                     diffuseColor = texture2D(map, uvSat);
                 }
