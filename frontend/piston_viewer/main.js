@@ -53,10 +53,10 @@ class PistonViewer {
         this.materialsToUpdate = [];
         this.worldOrigin = { x: 0, y: 0 };
         this.lightingSettings = {
-            aoFloor: 0.1,
-            aoPower: 0.9,
-            lambert: 0.7,
-            rim: 0.18,
+            aoFloor: 0.0,
+            aoPower: 1.0,
+            lambert: 0.0,
+            rim: 0.0,
             rimPower: 2.2,
             spec: 0.0,
             specPower: 30.0,
