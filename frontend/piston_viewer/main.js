@@ -95,7 +95,8 @@ class PistonViewer {
     async loadTile(x, y) {
         console.log(`Loading tile: ${x}, ${y}...`);
         const binUrl = `tiles_bin/tile_${x}_${y}.bin`;
-        const webpUrl = `tiles_sat/tile_${x}_${y}.webp`;
+        // Default to Low Res for now
+        const webpUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
 
         // Load Texture
         console.log("Fetching texture...");
@@ -108,8 +109,8 @@ class PistonViewer {
         // Center position needs to be roughly matching the hex grid center
         // Grid goes from x=0 to 1250, z=0 to -1000 approximately
         // Plane geometry is centered at origin.
-        const width = 1250;
-        const height = 1000;
+        const width = 1290; // 1250 + 20px padding * 2
+        const height = 1040; // 1000 + 20px padding * 2
         const planeGeo = new THREE.PlaneGeometry(width, height);
         // Flip UVs if necessary or rotate mesh. MapControls +Z is South (downwards on regular map? No usually up-down)
         // In this app:
@@ -120,7 +121,7 @@ class PistonViewer {
         // 0,0 is Top-Left (NW). 1250, -1000 is Bottom-Right (SE).
         // Center of grid is 625, -500.
 
-        const planeMat = new THREE.MeshBasicMaterial({ map: texture });
+        const planeMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
         this.flatPlane = new THREE.Mesh(planeGeo, planeMat);
         this.flatPlane.rotation.x = -Math.PI / 2; // Flat on XZ
         this.flatPlane.position.set(625, 0, -500); // Center it
@@ -141,30 +142,46 @@ class PistonViewer {
         const hexData = [];
         let offset = 4;
 
-        // Header is 4 bytes, each hex is 17 bytes (Z=2, Neig=6, Colors=9)
+
+        // Header is 4 bytes, each hex is 26 bytes
+        // Z(2), Neigh(6), Colors(18)
         while (offset < buffer.byteLength) {
             const zRaw = view.getUint16(offset, true);
             const z = this.decodeFloat16(zRaw);
 
-            // Neighbors (Z_S, Z_SE, Z_SW) - f16 each
+            // Neighbors
             const nz_s = this.decodeFloat16(view.getUint16(offset + 2, true));
             const nz_se = this.decodeFloat16(view.getUint16(offset + 4, true));
             const nz_sw = this.decodeFloat16(view.getUint16(offset + 6, true));
 
-            // RGBs (S, SE, SW) - 3 bytes each
-            // Order in baker: RGB_S, RGB_SE, RGB_SW
-            const rgb_s = [view.getUint8(offset + 8) / 255, view.getUint8(offset + 9) / 255, view.getUint8(offset + 10) / 255];
-            const rgb_se = [view.getUint8(offset + 11) / 255, view.getUint8(offset + 12) / 255, view.getUint8(offset + 13) / 255];
-            const rgb_sw = [view.getUint8(offset + 14) / 255, view.getUint8(offset + 15) / 255, view.getUint8(offset + 16) / 255];
+            // Colors (Top/Bot pairs)
+            // Offset starts at +8
+            // S
+            const rgb_s_top = [view.getUint8(offset + 8) / 255, view.getUint8(offset + 9) / 255, view.getUint8(offset + 10) / 255];
+            const rgb_s_bot = [view.getUint8(offset + 11) / 255, view.getUint8(offset + 12) / 255, view.getUint8(offset + 13) / 255];
+            // SE
+            const rgb_se_top = [view.getUint8(offset + 14) / 255, view.getUint8(offset + 15) / 255, view.getUint8(offset + 16) / 255];
+            const rgb_se_bot = [view.getUint8(offset + 17) / 255, view.getUint8(offset + 18) / 255, view.getUint8(offset + 19) / 255];
+            // SW
+            const rgb_sw_top = [view.getUint8(offset + 20) / 255, view.getUint8(offset + 21) / 255, view.getUint8(offset + 22) / 255];
+            const rgb_sw_bot = [view.getUint8(offset + 23) / 255, view.getUint8(offset + 24) / 255, view.getUint8(offset + 25) / 255];
 
-            // Default Vertical Slope for pistons (90 degrees)
+            // Calc slopes (simple version, assuming distance ~5m + neighbors)
+            // Actual deltaZ / 5.0?
             const s_se = 90.0;
             const s_s = 90.0;
             const s_sw = 90.0;
 
-            hexData.push({ z, s_se, s_s, s_sw, rgb_se, rgb_s, rgb_sw, nz_se, nz_s, nz_sw });
-            offset += 17;
+            hexData.push({
+                z, nz_s, nz_se, nz_sw,
+                rgb_s_top, rgb_s_bot,
+                rgb_se_top, rgb_se_bot,
+                rgb_sw_top, rgb_sw_bot,
+                s_s, s_se, s_sw
+            });
+            offset += 26;
         }
+
         console.log(`Total HexData Parsed: ${hexData.length}`);
 
         this.createInstancedMesh(hexData, texture, baseElevation);
@@ -270,17 +287,23 @@ class PistonViewer {
                 `
                 #include <common>
                 uniform float uHeightFactor;
-                attribute float instanceZ;
-                attribute vec3 instanceNZ; // x=SE, y=S, z=SW
+                attribute vec4 instanceNZ; // x=SE, y=S, z=SW, w=instanceZ
                 attribute float faceIndex;
-                attribute vec3 instanceSlope; // x=SE, y=S, z=SW
-                attribute vec3 instanceRGB_SE;
-                attribute vec3 instanceRGB_S;
-                attribute vec3 instanceRGB_SW;
+                
+                attribute vec4 instanceRGB_SE_Top;
+                attribute vec3 instanceRGB_SE_Bot;
+                attribute vec4 instanceRGB_S_Top;
+                attribute vec3 instanceRGB_S_Bot;
+                attribute vec4 instanceRGB_SW_Top;
+                attribute vec3 instanceRGB_SW_Bot;
+                
                 varying vec3 vWorldPos;
                 varying vec3 vObjNormal;
-                varying vec3 vSideColor;
+                varying vec3 vColorTop;
+                varying vec3 vColorBot;
                 varying float vFaceSlope;
+                varying float vLocalY;
+                varying float vGrad;
                 `
             ).replace(
                 '#include <begin_vertex>',
@@ -298,7 +321,7 @@ class PistonViewer {
                 else if (face == 2) { neighborZ = instanceNZ.z; isSouthFace = true; } // SW
 
                 // Transform heights based on uHeightFactor
-                float finalZ = instanceZ * uHeightFactor;
+                float finalZ = instanceNZ.w * uHeightFactor;
                 float finalNeighborZ = neighborZ * uHeightFactor;
 
                 // Apply height transformation
@@ -317,14 +340,21 @@ class PistonViewer {
 
                 // --- FACE COLORING ---
                 vFaceSlope = 90.0;
-                vSideColor = vec3(0.08, 0.08, 0.08);
+                vColorTop = vec3(0.0);
+                vColorBot = vec3(0.0);
+                vLocalY = transformed.y;
 
                 if (face == 0) {
-                    vSideColor = instanceRGB_SE; vFaceSlope = instanceSlope.x;
+                    vColorTop = instanceRGB_SE_Top.rgb; vColorBot = instanceRGB_SE_Bot; vFaceSlope = instanceRGB_SE_Top.w;
                 } else if (face == 1) {
-                    vSideColor = instanceRGB_S; vFaceSlope = instanceSlope.y;
+                    vColorTop = instanceRGB_S_Top.rgb; vColorBot = instanceRGB_S_Bot; vFaceSlope = instanceRGB_S_Top.w;
                 } else if (face == 2) {
-                    vSideColor = instanceRGB_SW; vFaceSlope = instanceSlope.z;
+                    vColorTop = instanceRGB_SW_Top.rgb; vColorBot = instanceRGB_SW_Bot; vFaceSlope = instanceRGB_SW_Top.w;
+                }
+                
+                vGrad = 1.0;
+                if (isSouthFace && position.y < 0.5) {
+                    vGrad = 0.0;
                 }
                 `
             );
@@ -336,8 +366,10 @@ class PistonViewer {
                 uniform vec2 uTileSize;
                 varying vec3 vWorldPos;
                 varying vec3 vObjNormal;
-                varying vec3 vSideColor;
+                varying vec3 vColorTop;
+                varying vec3 vColorBot;
                 varying float vFaceSlope;
+                varying float vGrad;
 
                 vec3 getSlopeColor(float sRaw) {
                     float deg = abs(sRaw - 90.0);
@@ -355,14 +387,21 @@ class PistonViewer {
                 #include <map_fragment>
                 
                 if (abs(vObjNormal.y) < 0.9) {
-                    vec3 finalColor = vSideColor;
+                    vec3 finalColor = mix(vColorBot, vColorTop, vGrad);
                     float deg = abs(vFaceSlope - 90.0);
                     if (deg >= 25.0) {
                         finalColor = getSlopeColor(vFaceSlope);
                     }
                     diffuseColor.rgb = finalColor;
                 } else {
-                    vec2 uvSat = vec2(vWorldPos.x / uTileSize.x, 1.0 + (vWorldPos.z / uTileSize.y));
+                    float padding = 20.0;
+                    float totalW = uTileSize.x + 2.0 * padding;
+                    float totalH = uTileSize.y + 2.0 * padding;
+                    
+                    float u = (vWorldPos.x + padding) / totalW;
+                    float v = (20.0 - vWorldPos.z) / totalH;
+                    
+                    vec2 uvSat = vec2(u, 1.0 - v);
                     diffuseColor = texture2D(map, uvSat);
                 }
                 `
@@ -380,12 +419,16 @@ class PistonViewer {
             if (h.nz_sw < minZ) minZ = h.nz_sw;
         });
         console.log(`Piston Floor Offset: ${minZ}m`);
-        const instanceZ = new Float32Array(numHexes);
-        const instanceNZ = new Float32Array(numHexes * 3); // x=SE, y=S, z=SW
-        const instanceSlope = new Float32Array(numHexes * 3); // x=SE, y=S, z=SW
-        const instanceRGB_SE = new Float32Array(numHexes * 3);
-        const instanceRGB_S = new Float32Array(numHexes * 3);
-        const instanceRGB_SW = new Float32Array(numHexes * 3);
+
+        const instanceNZ = new Float32Array(numHexes * 4);
+
+        // Color Pairs (Top is vec4 to hold slope in .w)
+        const instanceRGB_S_Top = new Float32Array(numHexes * 4);
+        const instanceRGB_S_Bot = new Float32Array(numHexes * 3);
+        const instanceRGB_SE_Top = new Float32Array(numHexes * 4);
+        const instanceRGB_SE_Bot = new Float32Array(numHexes * 3);
+        const instanceRGB_SW_Top = new Float32Array(numHexes * 4);
+        const instanceRGB_SW_Bot = new Float32Array(numHexes * 3);
 
         let idx = 0;
         const right = 1250;
@@ -400,34 +443,39 @@ class PistonViewer {
                 if (idx >= numHexes) break;
                 const h = data[idx];
 
-                // Remove rotation - geometry is already oriented for flat-topped
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(idx, matrix);
 
-                instanceZ[idx] = (h.z - minZ + 5.0) * SCALE_Z;
+                // Set Colors + Slopes in .w
+                instanceRGB_S_Top.set(h.rgb_s_top, idx * 4);
+                instanceRGB_S_Top[idx * 4 + 3] = h.s_s;
+                instanceRGB_S_Bot.set(h.rgb_s_bot, idx * 3);
 
-                instanceSlope[idx * 3] = h.s_se;
-                instanceSlope[idx * 3 + 1] = h.s_s;
-                instanceSlope[idx * 3 + 2] = h.s_sw;
+                instanceRGB_SE_Top.set(h.rgb_se_top, idx * 4);
+                instanceRGB_SE_Top[idx * 4 + 3] = h.s_se;
+                instanceRGB_SE_Bot.set(h.rgb_se_bot, idx * 3);
 
-                instanceRGB_SE.set(h.rgb_se, idx * 3);
-                instanceRGB_S.set(h.rgb_s, idx * 3);
-                instanceRGB_SW.set(h.rgb_sw, idx * 3);
+                instanceRGB_SW_Top.set(h.rgb_sw_top, idx * 4);
+                instanceRGB_SW_Top[idx * 4 + 3] = h.s_sw;
+                instanceRGB_SW_Bot.set(h.rgb_sw_bot, idx * 3);
 
-                instanceNZ[idx * 3] = (h.nz_se - minZ) * SCALE_Z;
-                instanceNZ[idx * 3 + 1] = (h.nz_s - minZ) * SCALE_Z;
-                instanceNZ[idx * 3 + 2] = (h.nz_sw - minZ) * SCALE_Z;
+                instanceNZ[idx * 4] = (h.nz_se - minZ) * SCALE_Z;
+                instanceNZ[idx * 4 + 1] = (h.nz_s - minZ) * SCALE_Z;
+                instanceNZ[idx * 4 + 2] = (h.nz_sw - minZ) * SCALE_Z;
+                instanceNZ[idx * 4 + 3] = (h.z - minZ + 5.0) * SCALE_Z; // Packed instanceZ
                 idx++;
             }
         }
         console.log(`Assigned matrices for ${idx} instances.`);
 
-        geometry.setAttribute('instanceZ', new THREE.InstancedBufferAttribute(instanceZ, 1));
-        geometry.setAttribute('instanceNZ', new THREE.InstancedBufferAttribute(instanceNZ, 3));
-        geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(instanceSlope, 3));
-        geometry.setAttribute('instanceRGB_SE', new THREE.InstancedBufferAttribute(instanceRGB_SE, 3));
-        geometry.setAttribute('instanceRGB_S', new THREE.InstancedBufferAttribute(instanceRGB_S, 3));
-        geometry.setAttribute('instanceRGB_SW', new THREE.InstancedBufferAttribute(instanceRGB_SW, 3));
+        geometry.setAttribute('instanceNZ', new THREE.InstancedBufferAttribute(instanceNZ, 4));
+        geometry.setAttribute('instanceRGB_S_Top', new THREE.InstancedBufferAttribute(instanceRGB_S_Top, 4));
+        geometry.setAttribute('instanceRGB_S_Bot', new THREE.InstancedBufferAttribute(instanceRGB_S_Bot, 3));
+        geometry.setAttribute('instanceRGB_SE_Top', new THREE.InstancedBufferAttribute(instanceRGB_SE_Top, 4));
+        geometry.setAttribute('instanceRGB_SE_Bot', new THREE.InstancedBufferAttribute(instanceRGB_SE_Bot, 3));
+        geometry.setAttribute('instanceRGB_SW_Top', new THREE.InstancedBufferAttribute(instanceRGB_SW_Top, 4));
+        geometry.setAttribute('instanceRGB_SW_Bot', new THREE.InstancedBufferAttribute(instanceRGB_SW_Bot, 3));
+
 
         this.scene.add(mesh);
         this.pistonMesh = mesh;
