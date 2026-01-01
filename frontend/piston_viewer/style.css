@@ -121,6 +121,22 @@ h1 {
     margin-bottom: 20px;
 }
 
+.debug-select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 4px;
+    border-radius: 4px;
+    width: 100%;
+    outline: none;
+    cursor: pointer;
+}
+
+.debug-select:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
