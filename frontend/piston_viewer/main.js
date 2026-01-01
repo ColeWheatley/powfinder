@@ -35,7 +35,7 @@ class PistonViewer {
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x050505);
-        this.scene.fog = new THREE.Fog(0x050505, 500, 2500);
+        // this.scene.fog = new THREE.Fog(0x050505, 500, 2500); // Disabling fog to prevent darkening on zoom out
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
         this.camera.position.set(625, 800, 800);
@@ -253,10 +253,8 @@ class PistonViewer {
         const side = HEX_WIDTH / Math.sqrt(3);
         const geometry = this.createHexGeometry(side);
 
-        const material = new THREE.MeshStandardMaterial({
-            map: texture,
-            metalness: 0,
-            roughness: 0.8
+        const material = new THREE.MeshBasicMaterial({
+            map: texture
         });
 
         this.pistonMaterial = material;
