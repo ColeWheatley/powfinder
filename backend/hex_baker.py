@@ -96,94 +96,128 @@ def process_tile(tif_path):
              return val
         return np.nan
 
-    # 3. Grid Generation (Odd-Q)
-    c_min = int((bounds.left - 50) / X_SPACING)
-    c_max = int((bounds.right + 50) / X_SPACING)
-    r_min = int((bounds.bottom - 50) / Y_SPACING)
-    r_max = int((bounds.top + 50) / Y_SPACING)
-
+    # 3. Grid Generation (Matching Main.js exactly)
+    # x loop: 0 to 1250 step HEX_DX (8.66025)
+    # y loop: 0 to 1000 step 10.0
+    
     hexes = []
     base_z = None
 
-    for c in range(c_min, c_max + 1):
-        x_center = c * X_SPACING
+    # We use a small epsilon for the float range to match the <= right + 1 logic
+    right = 1250
+    top = 1000
+    
+    # Calculate how many steps we expect
+    x_steps = []
+    curr_x = 0.0
+    while curr_x <= right + 1.1: # 1.1 is safety to catch the last step
+        x_steps.append(curr_x)
+        curr_x += X_SPACING
         
-        # Verify X
-        if x_center < bounds.left - 10 or x_center > bounds.right + 10:
-            continue
-            
-        y_shift = (Y_SPACING / 2.0) if (c % 2 != 0) else 0.0
-        
-        for r in range(r_min, r_max + 1):
-            y_center = r * Y_SPACING + y_shift
-            
-            # Verify Y
-            if y_center < bounds.bottom - 10 or y_center > bounds.top + 10:
-                continue
-                
-            z = get_z(x_center, y_center)
-            if np.isnan(z): continue
-            
-            if base_z is None: base_z = z
+    y_steps = []
+    curr_y = 0.0
+    while curr_y <= top + 1.1:
+        y_steps.append(curr_y)
+        curr_y += 10.0
 
-            # Neighbors (Odd-Q logic matching Main.js)
-            # S: (c, r-1)
-            # SE: Even(c+1, r-1), Odd(c+1, r)
-            # SW: Even(c-1, r-1), Odd(c-1, r)
+    print(f"Generating dense grid: {len(x_steps)} columns, {len(y_steps)} rows. Total: {len(x_steps)*len(y_steps)}")
+
+    for col_idx, dx in enumerate(x_steps):
+        x_center = bounds.left + dx
+        y_shift = 5.0 if (col_idx % 2 == 1) else 0.0
+        
+        for dy in y_steps:
+            y_center = (bounds.bottom + dy) + y_shift # Start from bottom to match 0 to 1000 in main.js
+            # Actually, main.js uses -realY, so it goes from 0 to -1000. 
+            # In world space, that's top down.
+            # If main.js loop is y=0 to 1000 and it places at -y, then y=0 is TOP (bounds.top).
+            # So y_center should be bounds.top - dy - y_shift.
             
-            # South Coord
+            y_center = (bounds.top - dy) - y_shift
+            
+            z = get_z(x_center, y_center)
+            
+            if base_z is None and not np.isnan(z): 
+                base_z = z
+
+            # Neighbor coords (Relative to current x_center, y_center)
+            # S: same x, y-10
+            # SE: x + 8.66, y-5 (if even-to-odd) or y+5 (if odd-to-even) ? 
+            # Let's just use the same logic as baker had but with these centers.
+            
+            # S Coord
             cx_s = x_center
-            cy_s = (r - 1) * Y_SPACING + y_shift
+            cy_s = y_center - 10.0
+            
+            # SE/SW depend on odd/even column.
+            # In Main.js: colIdx % 2 === 1 ? 5 : 0
+            # If current col is even (y_shift=0), neighbor (c+1) is odd (y_shift=5).
+            # Neighbor SE is at (c+1, r) which has center (x+8.66, y+5). 
+            # Wait, Main.js doesn't explicitly calculate neighbor coordinates, it just assumes indices?
+            # No, the shader handles the neighbor offsets. The baker just needs to provide the heights.
+            
+            # Re-calculating neighbors for the current y_center
+            # This logic needs to be robust.
             
             # SE Coord
-            r_se = r - 1 if (c % 2 == 0) else r
-            cx_se = (c + 1) * X_SPACING
-            cy_se = r_se * Y_SPACING + ((Y_SPACING / 2.0) if ((c + 1) % 2 != 0) else 0.0)
-
-            # SW Coord
-            r_sw = r - 1 if (c % 2 == 0) else r
-            cx_sw = (c - 1) * X_SPACING
-            cy_sw = r_sw * Y_SPACING + ((Y_SPACING / 2.0) if ((c - 1) % 2 != 0) else 0.0)
+            cx_se = x_center + X_SPACING
+            # If we are even (shift 0), neighbor is odd (shift 5). 
+            # y_center was bounds.top - dy - 0. 
+            # Neighbor y_center_se would be bounds.top - dy - 5.
+            # So cy_se = y_center - 5.0
+            
+            # If we are odd (shift 5), neighbor is even (shift 0).
+            # y_center was bounds.top - dy - 5.
+            # Neighbor y_center_se would be bounds.top - dy - 0.
+            # So cy_se = y_center + 5.0
+            
+            if col_idx % 2 == 0:
+                cy_se = y_center - 5.0
+                cy_sw = y_center - 5.0
+            else:
+                cy_se = y_center + 5.0
+                cy_sw = y_center + 5.0
+            
+            cx_sw = x_center - X_SPACING
 
             # Sample Heights
             z_s = get_z(cx_s, cy_s)
             z_se = get_z(cx_se, cy_se)
             z_sw = get_z(cx_sw, cy_sw)
             
-            def fill_nan(val, reference):
-                return val if not np.isnan(val) else (reference - 50.0)
+            # Safe heights for NaN
+            reference_z = z if not np.isnan(z) else (base_z if base_z is not None else 0.0)
             
-            z_s_safe = fill_nan(z_s, z)
-            z_se_safe = fill_nan(z_se, z)
-            z_sw_safe = fill_nan(z_sw, z)
+            z_safe = z if not np.isnan(z) else reference_z
+            z_s_safe = z_s if not np.isnan(z_s) else (z_safe - 5.0)
+            z_se_safe = z_se if not np.isnan(z_se) else (z_safe - 5.0)
+            z_sw_safe = z_sw if not np.isnan(z_sw) else (z_safe - 5.0)
 
             # Colors (Top/Bot pairs)
-            def get_color_pair(target_cx, target_cy):
+            def get_color_pair(target_cx, target_cy, current_z, neighbor_z):
+                if np.isnan(current_z): return [0,0,0], [0,0,0]
+                
                 dx = target_cx - x_center
                 dy = target_cy - y_center
                 dist = math.sqrt(dx*dx + dy*dy)
                 if dist < 0.001: return [0,0,0], [0,0,0]
                 nx, ny = dx/dist, dy/dist
                 
-                # Sample 4m (Top edge) and 6m (Bot edge / Neighbor Top)
                 c1 = sampler.sample(x_center + nx * 4.0, y_center + ny * 4.0)
                 c2 = sampler.sample(x_center + nx * 6.0, y_center + ny * 6.0)
+                
+                if np.isnan(neighbor_z): c2 = [0,0,0]
                 return c1, c2
 
-            rgb_s_top, rgb_s_bot = get_color_pair(cx_s, cy_s)
-            rgb_se_top, rgb_se_bot = get_color_pair(cx_se, cy_se)
-            rgb_sw_top, rgb_sw_bot = get_color_pair(cx_sw, cy_sw)
-            
-            # Black void check
-            if np.isnan(z_s): rgb_s_bot = [0,0,0]
-            if np.isnan(z_se): rgb_se_bot = [0,0,0]
-            if np.isnan(z_sw): rgb_sw_bot = [0,0,0]
+            rgb_s_top, rgb_s_bot = get_color_pair(cx_s, cy_s, z, z_s)
+            rgb_se_top, rgb_se_bot = get_color_pair(cx_se, cy_se, z, z_se)
+            rgb_sw_top, rgb_sw_bot = get_color_pair(cx_sw, cy_sw, z, z_sw)
             
             hexes.append({
-                'z': float(z - base_z),
-                'z_s': float(z_s_safe - base_z),
-                'z_se': float(z_se_safe - base_z),
-                'z_sw': float(z_sw_safe - base_z),
+                'z': float(z_safe - (base_z or 0.0)),
+                'z_s': float(z_s_safe - (base_z or 0.0)),
+                'z_se': float(z_se_safe - (base_z or 0.0)),
+                'z_sw': float(z_sw_safe - (base_z or 0.0)),
                 'c_s': (rgb_s_top, rgb_s_bot),
                 'c_se': (rgb_se_top, rgb_se_bot),
                 'c_sw': (rgb_sw_top, rgb_sw_bot)

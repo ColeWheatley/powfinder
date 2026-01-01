@@ -236,10 +236,10 @@ class PistonViewer {
             const nx = Math.cos(midAngle);
             const nz = Math.sin(midAngle);
 
-            // Triangle 1: p1_bottom, p2_bottom, p2_top (CCW from outside)
-            positions.push(p1.x, 0, p1.z, p2.x, 0, p2.z, p2.x, 1, p2.z);
-            // Triangle 2: p1_bottom, p2_top, p1_top (CCW from outside)
-            positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p1.x, 1, p1.z);
+            // Triangle 1: p1_bottom, p2_top, p2_bottom (CCW from outside)
+            positions.push(p1.x, 0, p1.z, p2.x, 1, p2.z, p2.x, 0, p2.z);
+            // Triangle 2: p1_bottom, p1_top, p2_top (CCW from outside)
+            positions.push(p1.x, 0, p1.z, p1.x, 1, p1.z, p2.x, 1, p2.z);
 
             for (let j = 0; j < 6; j++) {
                 normals.push(nx, 0, nz);
@@ -403,8 +403,9 @@ class PistonViewer {
                     float totalW = uTileSize.x + 2.0 * padding;
                     float totalH = uTileSize.y + 2.0 * padding;
                     
+                    // X is 1250 wide (0 to 1250), Z is 1000 high (0 to -1000)
                     float u = (vWorldPos.x + padding) / totalW;
-                    float v = (20.0 - vWorldPos.z) / totalH;
+                    float v = (padding - vWorldPos.z) / totalH;
                     
                     vec2 uvSat = vec2(u, 1.0 - v);
                     diffuseColor = texture2D(map, uvSat);
