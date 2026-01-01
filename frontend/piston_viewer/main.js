@@ -95,10 +95,10 @@ class PistonViewer {
         const view = new DataView(buffer);
 
         const baseElevation = view.getFloat32(0, true);
-        console.log(`Base Elevation: ${baseElevation}m`);
         const hexData = [];
         let offset = 4;
 
+        // Header is 4 bytes, each hex is 14 bytes now
         while (offset < buffer.byteLength) {
             const zRaw = view.getUint16(offset, true);
             const z = this.decodeFloat16(zRaw);
@@ -107,12 +107,16 @@ class PistonViewer {
             const s2 = view.getUint8(offset + 3);
             const s3 = view.getUint8(offset + 4);
 
+            const rgb1 = [view.getUint8(offset + 5) / 255, view.getUint8(offset + 6) / 255, view.getUint8(offset + 7) / 255];
+            const rgb2 = [view.getUint8(offset + 8) / 255, view.getUint8(offset + 9) / 255, view.getUint8(offset + 10) / 255];
+            const rgb3 = [view.getUint8(offset + 11) / 255, view.getUint8(offset + 12) / 255, view.getUint8(offset + 13) / 255];
+
             if (hexData.length < 5) {
                 console.log(`First Hex Sample: Z=${z.toFixed(2)}, S1=${s1}, S2=${s2}, S3=${s3}`);
             }
 
-            hexData.push({ z, s1, s2, s3 });
-            offset += 5;
+            hexData.push({ z, s1, s2, s3, rgb1, rgb2, rgb3 });
+            offset += 14;
         }
         console.log(`Total HexData Parsed: ${hexData.length}`);
 
@@ -149,9 +153,14 @@ class PistonViewer {
             shader.vertexShader = `
                 attribute float instanceZ;
                 attribute vec3 instanceSlope;
+                attribute vec3 instanceRGB1;
+                attribute vec3 instanceRGB2;
+                attribute vec3 instanceRGB3;
                 varying vec3 vSlope;
                 varying vec3 vWorldPos;
                 varying vec3 vObjNormal;
+                varying vec3 vSideColor;
+                varying float vFaceSlope;
                 ${shader.vertexShader}
             `.replace(
                 '#include <begin_vertex>',
@@ -161,6 +170,21 @@ class PistonViewer {
                 vSlope = instanceSlope;
                 vWorldPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 vObjNormal = normal;
+
+                // Pick the correct baked color and slope based on face normal
+                float ang = atan(normal.z, normal.x);
+                if (ang > -0.5 && ang < 1.5) { 
+                    vSideColor = instanceRGB1; 
+                    vFaceSlope = instanceSlope.x; 
+                }
+                else if (ang > 1.5 || ang < -2.5) { 
+                    vSideColor = instanceRGB2; 
+                    vFaceSlope = instanceSlope.y; 
+                }
+                else { 
+                    vSideColor = instanceRGB3; 
+                    vFaceSlope = instanceSlope.z; 
+                }
                 `
             );
 
@@ -169,35 +193,36 @@ class PistonViewer {
                 varying vec3 vSlope;
                 varying vec3 vWorldPos;
                 varying vec3 vObjNormal;
-                
+                varying vec3 vSideColor;
+                varying float vFaceSlope;
+
                 vec3 getSlopeColor(float sRaw) {
                     float deg = abs(sRaw - 90.0);
-                    if (deg < 25.0) return vec3(0.5, 0.5, 0.5); // Gray
+                    if (deg < 25.0) return vec3(0.5, 0.5, 0.5); // Should be ignored by override
                     if (deg < 35.0) return vec3(0.0, 1.0, 0.0); // Green
                     if (deg < 40.0) return vec3(0.0, 0.0, 1.0); // Blue
                     if (deg < 45.0) return vec3(0.5, 0.0, 0.5); // Purple
                     if (deg < 50.0) return vec3(1.0, 0.5, 0.0); // Orange
                     return vec3(1.0, 0.0, 0.0);                 // Red
                 }
-
+                
                 ${shader.fragmentShader}
             `.replace(
                 '#include <map_fragment>',
                 `
                 #include <map_fragment>
                 
-                // Stable object-space check: Top cap is always normal (0, 1, 0)
                 if (abs(vObjNormal.y) < 0.9) {
-                    // Use world normal or object normal for face direction
-                    // Since hexes aren't world-rotated, vObjNormal works for A,B,C
-                    float angle = atan(vObjNormal.z, vObjNormal.x);
-                    vec3 finalSlopeColor;
+                    // Start with the baked satellite color
+                    vec3 finalColor = vSideColor;
                     
-                    if (angle > -0.5 && angle < 1.5) finalSlopeColor = getSlopeColor(vSlope.x);
-                    else if (angle > 1.5 || angle < -2.5) finalSlopeColor = getSlopeColor(vSlope.y);
-                    else finalSlopeColor = getSlopeColor(vSlope.z);
+                    // Override if slope is steep (>= 25 degrees)
+                    float deg = abs(vFaceSlope - 90.0);
+                    if (deg >= 25.0) {
+                        finalColor = getSlopeColor(vFaceSlope);
+                    }
                     
-                    diffuseColor.rgb = finalSlopeColor;
+                    diffuseColor.rgb = finalColor;
                 } else {
                     // Top cap - use WebP Texture
                     vec2 uvSat = vec2(vWorldPos.x / uTileSize.x, 1.0 + (vWorldPos.z / uTileSize.y));
@@ -215,6 +240,9 @@ class PistonViewer {
         console.log(`Piston Floor Offset: ${minZ}m`);
         const instanceZ = new Float32Array(numHexes);
         const instanceSlope = new Float32Array(numHexes * 3);
+        const instanceRGB1 = new Float32Array(numHexes * 3);
+        const instanceRGB2 = new Float32Array(numHexes * 3);
+        const instanceRGB3 = new Float32Array(numHexes * 3);
 
         let idx = 0;
         const right = 1250;
@@ -240,6 +268,10 @@ class PistonViewer {
                 instanceSlope[idx * 3] = h.s1;
                 instanceSlope[idx * 3 + 1] = h.s2;
                 instanceSlope[idx * 3 + 2] = h.s3;
+
+                instanceRGB1.set(h.rgb1, idx * 3);
+                instanceRGB2.set(h.rgb2, idx * 3);
+                instanceRGB3.set(h.rgb3, idx * 3);
                 idx++;
             }
         }
@@ -247,6 +279,9 @@ class PistonViewer {
 
         geometry.setAttribute('instanceZ', new THREE.InstancedBufferAttribute(instanceZ, 1));
         geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(instanceSlope, 3));
+        geometry.setAttribute('instanceRGB1', new THREE.InstancedBufferAttribute(instanceRGB1, 3));
+        geometry.setAttribute('instanceRGB2', new THREE.InstancedBufferAttribute(instanceRGB2, 3));
+        geometry.setAttribute('instanceRGB3', new THREE.InstancedBufferAttribute(instanceRGB3, 3));
 
         this.scene.add(mesh);
         console.log("Mesh added to scene.");
