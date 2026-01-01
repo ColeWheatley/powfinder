@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MapControls } from 'three/addons/controls/MapControls.js';
 
 // --- AI TELEMETRY BRIDGE ---
 const LOG_URL = 'http://localhost:8888/log';
@@ -45,9 +45,23 @@ class PistonViewer {
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.container.appendChild(this.renderer.domElement);
 
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls = new MapControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.08;
+        this.controls.screenSpacePanning = false;
+        this.controls.minDistance = 100;
+        this.controls.maxDistance = 3000;
         this.controls.maxPolarAngle = Math.PI / 2.1;
+
+        // Boost speeds for better responsiveness
+        this.controls.zoomSpeed = 1.5;
+        this.controls.panSpeed = 1.2;
+
+        // Map behavior: 1 finger pan, 2 finger rotate/zoom
+        this.controls.touches = {
+            ONE: THREE.TOUCH.PAN,
+            TWO: THREE.TOUCH.DOLLY_ROTATE
+        };
 
         const ambient = new THREE.AmbientLight(0xffffff, 0.4);
         this.scene.add(ambient);
