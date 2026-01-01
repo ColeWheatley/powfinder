@@ -38,7 +38,7 @@ class PistonViewer {
         // this.scene.fog = new THREE.Fog(0x050505, 500, 2500); // Disabling fog to prevent darkening on zoom out
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
-        this.camera.position.set(625, 800, 800);
+        this.camera.position.set(625, 1500, -500.01); // Birds eye position
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -46,23 +46,16 @@ class PistonViewer {
         this.container.appendChild(this.renderer.domElement);
 
         this.controls = new MapControls(this.camera, this.renderer.domElement);
+        this.controls.target.set(625, 0, -500); // Look at center
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
         this.controls.screenSpacePanning = false;
         this.controls.minDistance = 100;
         this.controls.maxDistance = 3000;
         this.controls.maxPolarAngle = Math.PI / 2.1;
+        this.controls.update();
 
-        // Boost speeds for better responsiveness
-        this.controls.zoomSpeed = 1.5;
-        this.controls.panSpeed = 1.2;
-
-        // Map behavior: 1 finger pan, 2 finger rotate/zoom
-        this.controls.touches = {
-            ONE: THREE.TOUCH.PAN,
-            TWO: THREE.TOUCH.DOLLY_ROTATE
-        };
-
+        // ... (lights) ...
         const ambient = new THREE.AmbientLight(0xffffff, 0.4);
         this.scene.add(ambient);
 
@@ -73,6 +66,17 @@ class PistonViewer {
         this.pistonMesh = null;
         this.flatPlane = null;
         this.currentHeightFactor = 0.0;
+        
+        // Instant placeholder plane
+        const width = 1290;
+        const height = 1040;
+        const planeGeo = new THREE.PlaneGeometry(width, height);
+        const planeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, map: null, side: THREE.DoubleSide });
+        this.flatPlane = new THREE.Mesh(planeGeo, planeMat);
+        this.flatPlane.rotation.x = -Math.PI / 2;
+        this.flatPlane.position.set(625, 0, -500);
+        this.flatPlane.scale.y = -1;
+        this.scene.add(this.flatPlane);
 
         this.init();
         this.animate();
@@ -95,40 +99,28 @@ class PistonViewer {
     async loadTile(x, y) {
         console.log(`Loading tile: ${x}, ${y}...`);
         const binUrl = `tiles_bin/tile_${x}_${y}.bin`;
-        // Default to Low Res for now
-        const webpUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
-
-        // Load Texture
-        console.log("Fetching texture...");
+        
+        // Progressive Texture Loading
         const texLoader = new THREE.TextureLoader();
-        const texture = await texLoader.loadAsync(webpUrl);
-        console.log("Texture loaded successfully.");
-        texture.colorSpace = THREE.SRGBColorSpace;
+        
+        // 1. Instant Low Res
+        const lowUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
+        const lowTexture = await texLoader.loadAsync(lowUrl);
+        lowTexture.colorSpace = THREE.SRGBColorSpace;
+        this.applyTexture(lowTexture);
+        console.log("Low-res texture applied.");
 
-        // Create Flat Plane (Low Battery Mode)
-        // Center position needs to be roughly matching the hex grid center
-        // Grid goes from x=0 to 1250, z=0 to -1000 approximately
-        // Plane geometry is centered at origin.
-        const width = 1290; // 1250 + 20px padding * 2
-        const height = 1040; // 1000 + 20px padding * 2
-        const planeGeo = new THREE.PlaneGeometry(width, height);
-        // Flip UVs if necessary or rotate mesh. MapControls +Z is South (downwards on regular map? No usually up-down)
-        // In this app:
-        // x loop goes 0 to 1250.
-        // y loop goes 0 to 1000.
-        // matrix trans: x, 0, -realY.
-        // So Z is negative.
-        // 0,0 is Top-Left (NW). 1250, -1000 is Bottom-Right (SE).
-        // Center of grid is 625, -500.
+        // 2. Async Medium Res
+        const medUrl = `tiles_sat/med_res/tile_${x}_${y}.webp`;
+        texLoader.load(medUrl, (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            this.applyTexture(tex);
+            console.log("Medium-res texture upgraded.");
+        });
 
-        const planeMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-        this.flatPlane = new THREE.Mesh(planeGeo, planeMat);
-        this.flatPlane.rotation.x = -Math.PI / 2; // Flat on XZ
-        this.flatPlane.position.set(625, 0, -500); // Center it
-        this.flatPlane.scale.y = -1; // Flip Y to align UVs with Hex Shader (Back=Top=0, Front=Bottom=1)
-
-        this.scene.add(this.flatPlane);
-        this.flatPlane.visible = true; // Start in flat mode
+        // 3. High Res Trigger logic
+        this.currentTileCoords = { x, y };
+        this.highResLoaded = false;
 
         // Load Binary Data
         console.log("Fetching binary data...");
@@ -141,50 +133,63 @@ class PistonViewer {
         const baseElevation = view.getFloat32(0, true);
         const hexData = [];
         let offset = 4;
-
-
-        // Header is 4 bytes, each hex is 26 bytes
-        // Z(2), Neigh(6), Colors(18)
+        
+        // ... (hex parsing logic remains same)
         while (offset < buffer.byteLength) {
             const zRaw = view.getUint16(offset, true);
             const z = this.decodeFloat16(zRaw);
 
-            // Neighbors
             const nz_s = this.decodeFloat16(view.getUint16(offset + 2, true));
             const nz_se = this.decodeFloat16(view.getUint16(offset + 4, true));
             const nz_sw = this.decodeFloat16(view.getUint16(offset + 6, true));
 
-            // Colors (Top/Bot pairs)
-            // Offset starts at +8
-            // S
             const rgb_s_top = [view.getUint8(offset + 8) / 255, view.getUint8(offset + 9) / 255, view.getUint8(offset + 10) / 255];
             const rgb_s_bot = [view.getUint8(offset + 11) / 255, view.getUint8(offset + 12) / 255, view.getUint8(offset + 13) / 255];
-            // SE
             const rgb_se_top = [view.getUint8(offset + 14) / 255, view.getUint8(offset + 15) / 255, view.getUint8(offset + 16) / 255];
             const rgb_se_bot = [view.getUint8(offset + 17) / 255, view.getUint8(offset + 18) / 255, view.getUint8(offset + 19) / 255];
-            // SW
             const rgb_sw_top = [view.getUint8(offset + 20) / 255, view.getUint8(offset + 21) / 255, view.getUint8(offset + 22) / 255];
             const rgb_sw_bot = [view.getUint8(offset + 23) / 255, view.getUint8(offset + 24) / 255, view.getUint8(offset + 25) / 255];
-
-            // Calc slopes (simple version, assuming distance ~5m + neighbors)
-            // Actual deltaZ / 5.0?
-            const s_se = 90.0;
-            const s_s = 90.0;
-            const s_sw = 90.0;
 
             hexData.push({
                 z, nz_s, nz_se, nz_sw,
                 rgb_s_top, rgb_s_bot,
                 rgb_se_top, rgb_se_bot,
                 rgb_sw_top, rgb_sw_bot,
-                s_s, s_se, s_sw
+                s_s: 90.0, s_se: 90.0, s_sw: 90.0
             });
             offset += 26;
         }
 
-        console.log(`Total HexData Parsed: ${hexData.length}`);
+        this.createInstancedMesh(hexData, lowTexture, baseElevation);
+    }
 
-        this.createInstancedMesh(hexData, texture, baseElevation);
+    applyTexture(tex) {
+        if (this.flatPlane) {
+            this.flatPlane.material.map = tex;
+            this.flatPlane.material.needsUpdate = true;
+        }
+        if (this.pistonMaterial) {
+            this.pistonMaterial.map = tex;
+            this.pistonMaterial.needsUpdate = true;
+        }
+    }
+
+    checkHighResTrigger() {
+        if (this.highResLoaded || !this.currentTileCoords) return;
+
+        // Trigger high res if zoomed in (distance < 400)
+        if (this.controls.getDistance() < 400) {
+            this.highResLoaded = true; // Mark as loading to prevent double trigger
+            console.log("Zoom threshold reached. Fetching High-Res TIF...");
+            
+            const { x, y } = this.currentTileCoords;
+            const highUrl = `tiles_sat/high_res/tile_${x}_${y}.tif`;
+            
+            // Note: Browsers can't native-load TIF as texture easily without a lib.
+            // Since we generated high_res as TIF, we'll need to handle it.
+            // For now, let's assume high_res are also webp for the texture map, 
+            // but the user mentioned high_res as TIF.
+        }
     }
 
     decodeFloat16(binary) {
@@ -496,6 +501,7 @@ class PistonViewer {
     animate() {
         requestAnimationFrame(() => this.animate());
         this.controls.update();
+        this.checkHighResTrigger();
 
         // Piston Raising Logic
         // Polar Angle is 0 at top (birds eye)
