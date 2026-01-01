@@ -57,16 +57,18 @@ class PistonViewer {
         const lowUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
         const lowTexture = await texLoader.loadAsync(lowUrl);
         lowTexture.colorSpace = THREE.SRGBColorSpace;
-        this.applyTexture(lowTexture);
 
         const medUrl = `tiles_sat/med_res/tile_${x}_${y}.webp`;
+        // Don't await med-res, let it load in background
         texLoader.load(medUrl, (tex) => {
             tex.colorSpace = THREE.SRGBColorSpace;
+            this.medTexture = tex;
             this.applyTexture(tex);
         });
 
         this.currentTileCoords = { x, y };
         this.highResLoaded = false;
+        this.highResLoading = false;
 
         console.log("Fetching binary data...");
         const response = await fetch(binUrl);
@@ -80,14 +82,14 @@ class PistonViewer {
         let offset = 4;
         const BYTES_PER_HEX = 14;
 
-        console.log("Parsing V4 Binary (6-Face Heights)...");
+        console.log("Parsing V4 Binary (6-Face Heights)... Base Elevation:", baseElevation);
+
+        let minLocalZ = Infinity;
+        let maxLocalZ = -Infinity;
 
         while (offset < buffer.byteLength) {
             // Z (2 bytes) + 6 Neighbors (12 bytes)
-            const zRaw = view.getUint16(offset, true);
-            const z = this.decodeFloat16(zRaw);
-
-            // Neighbors: N, NE, SE, S, SW, NW
+            const z = this.decodeFloat16(view.getUint16(offset, true));
             const n_n = this.decodeFloat16(view.getUint16(offset + 2, true));
             const n_ne = this.decodeFloat16(view.getUint16(offset + 4, true));
             const n_se = this.decodeFloat16(view.getUint16(offset + 6, true));
@@ -95,28 +97,33 @@ class PistonViewer {
             const n_sw = this.decodeFloat16(view.getUint16(offset + 10, true));
             const n_nw = this.decodeFloat16(view.getUint16(offset + 12, true));
 
+            if (z < minLocalZ) minLocalZ = z;
+            if (z > maxLocalZ) maxLocalZ = z;
+
             hexData.push({
                 z, n_n, n_ne, n_se, n_s, n_sw, n_nw
             });
             offset += 14;
         }
 
-        this.createInstancedMesh(hexData, lowTexture, baseElevation);
+        console.log(`Parsed ${hexData.length} hexes. Local Range: ${minLocalZ.toFixed(2)} to ${maxLocalZ.toFixed(2)}`);
+        this.createInstancedMesh(hexData, lowTexture, baseElevation, minLocalZ, maxLocalZ);
     }
 
     applyTexture(tex) {
         if (this.pistonMaterial) {
+            console.log("Applying texture to material...");
             this.pistonMaterial.map = tex;
             this.pistonMaterial.needsUpdate = true;
         }
     }
 
     async checkHighResTrigger() {
-        if (this.highResLoaded || !this.pistonMesh) return;
+        if (this.highResLoaded || this.highResLoading || !this.pistonMesh) return;
 
         const dist = this.camera.position.distanceTo(this.controls.target);
         if (dist < 600) {
-            this.highResLoaded = true;
+            this.highResLoading = true;
             console.log("Zoom threshold reached. Upgrading to High-Res...");
 
             const { x, y } = this.currentTileCoords;
@@ -126,7 +133,12 @@ class PistonViewer {
             tiffLoader.load(highUrl, (tex) => {
                 tex.colorSpace = THREE.SRGBColorSpace;
                 this.applyTexture(tex);
+                this.highResLoaded = true;
+                this.highResLoading = false;
                 console.log("High-res textures active.");
+            }, undefined, (err) => {
+                console.error("Error loading high-res TIFF:", err);
+                this.highResLoading = false;
             });
         }
     }
@@ -207,7 +219,7 @@ class PistonViewer {
         return geometry;
     }
 
-    createInstancedMesh(data, texture, baseZ) {
+    createInstancedMesh(data, texture, baseZ, minZ, maxZ) {
         const numHexes = data.length;
         console.log(`Creating instanced mesh for ${numHexes} hexes...`);
         document.getElementById('piston-count').innerText = numHexes.toLocaleString();
@@ -306,12 +318,7 @@ class PistonViewer {
                 varying float vGrad;
                 varying float vIsHidden;
                 varying float vFaceIndex;
-                `
-            ).replace(
-                '#include <map_fragment>',
-                `
-                if (vIsHidden > 0.5) discard;
-                
+
                 vec2 getUV(vec3 pos) {
                     float u = pos.x / 1250.0;
                     float v = -pos.z / 1000.0;
@@ -340,7 +347,12 @@ class PistonViewer {
                     if (t < 0.75) return mix(c2, c3, (t - 0.50) / 0.25);
                     return mix(c3, c4, (t - 0.75) / 0.25);
                 }
-
+                `
+            ).replace(
+                '#include <map_fragment>',
+                `
+                if (vIsHidden > 0.5) discard;
+                
                 #include <map_fragment>
                 
                 if (abs(vObjNormal.y) < 0.9) {
@@ -376,21 +388,8 @@ class PistonViewer {
         const mesh = new THREE.InstancedMesh(geometry, material, numHexes);
         const matrix = new THREE.Matrix4();
 
-        let minZ = Infinity;
-        let maxZ = -Infinity;
-        data.forEach(h => {
-            if (h.z < minZ) minZ = h.z;
-            if (h.n_n < minZ) minZ = h.n_n;
-            if (h.n_ne < minZ) minZ = h.n_ne;
-            if (h.n_se < minZ) minZ = h.n_se;
-            if (h.n_s < minZ) minZ = h.n_s;
-            if (h.n_sw < minZ) minZ = h.n_sw;
-            if (h.n_nw < minZ) minZ = h.n_nw;
-
-            if (h.z > maxZ) maxZ = h.z;
-        });
-        console.log(`Piston Range: ${minZ}m to ${maxZ}m`);
-        console.log(`Piston Floor Offset: ${minZ}m`);
+        // Use local normalization for piston heights
+        const floorOffset = minZ;
 
         const instanceNZ_1 = new Float32Array(numHexes * 4);
         const instanceNZ_2 = new Float32Array(numHexes * 4);
@@ -411,16 +410,16 @@ class PistonViewer {
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(idx, matrix);
 
-                // NZ_1: N, NE, SE, S
-                instanceNZ_1[idx * 4] = (h.n_n - minZ) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 1] = (h.n_ne - minZ) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 2] = (h.n_se - minZ) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 3] = (h.n_s - minZ) * SCALE_Z;
+                // NZ_1: N, NE, SE, S (offset by minZ)
+                instanceNZ_1[idx * 4] = (h.n_n - floorOffset) * SCALE_Z;
+                instanceNZ_1[idx * 4 + 1] = (h.n_ne - floorOffset) * SCALE_Z;
+                instanceNZ_1[idx * 4 + 2] = (h.n_se - floorOffset) * SCALE_Z;
+                instanceNZ_1[idx * 4 + 3] = (h.n_s - floorOffset) * SCALE_Z;
 
-                // NZ_2: SW, NW, Z, padding
-                instanceNZ_2[idx * 4] = (h.n_sw - minZ) * SCALE_Z;
-                instanceNZ_2[idx * 4 + 1] = (h.n_nw - minZ) * SCALE_Z;
-                instanceNZ_2[idx * 4 + 2] = (h.z - minZ) * SCALE_Z;
+                // NZ_2: SW, NW, Z, padding (offset by minZ)
+                instanceNZ_2[idx * 4] = (h.n_sw - floorOffset) * SCALE_Z;
+                instanceNZ_2[idx * 4 + 1] = (h.n_nw - floorOffset) * SCALE_Z;
+                instanceNZ_2[idx * 4 + 2] = (h.z - floorOffset) * SCALE_Z;
                 instanceNZ_2[idx * 4 + 3] = 0.0;
 
                 idx++;
@@ -433,17 +432,20 @@ class PistonViewer {
 
         this.scene.add(mesh);
         this.pistonMesh = mesh;
-        this.pistonMesh.visible = false;
+        this.pistonMesh.visible = true;
+        this.pistonMesh.frustumCulled = false;
+
+        // Ensure matrices are sent to GPU
+        mesh.instanceMatrix.needsUpdate = true;
 
         const localMaxHeight = (maxZ - minZ) * SCALE_Z;
         console.log(`Max Local Height from Floor: ${localMaxHeight}`);
 
-        this.camera.position.set(625, localMaxHeight + 2000, -500);
+        this.camera.position.set(625, localMaxHeight + 1000, -500);
         this.controls.target.set(625, 0, -500);
-        this.controls.maxDistance = 20000;
         this.controls.update();
 
-        console.log(`Camera Set.`);
+        console.log(`Camera and Controls Set.`);
 
         // Hide Loader
         const loader = document.getElementById('loader');
@@ -464,34 +466,19 @@ class PistonViewer {
         // Piston Animation Logic
         if (this.pistonMesh) {
             const angle = this.controls.getPolarAngle();
-            const threshold = Math.PI / 8; // ~22 degrees
-            const flatAngle = 0; // Top down
-
-            // If camera is tilted (angle > 0), raise pistons
-            // MapControls: PI/2 is horizontal? No, 0 is Top-Down usually?
-            // Actually MapControls: 0 is Top-Down. NO.
-            // OrbitControls: 0 is Green Axis (Y) Top.
-            // MapControls is OrbitControls.
-            // polarAngle 0 is Top (Y+). PI is Bottom (Y-).
-            // Default 0.
-
+            
+            // MapControls: 0 is Top-Down.
             // We want: 0 deg (Top) -> Flat.
             // 20 deg -> Full Height.
+            let factor = angle / (20 * Math.PI / 180); 
+            factor = Math.min(1.0, Math.max(0.01, factor)); // Minimum 0.01 to keep tops visible
 
-            let factor = 0.0;
-            if (angle > 0.01) {
-                factor = (angle) / (20 * Math.PI / 180); // Linear ramp 0 to 20 deg
-                if (factor > 1.0) factor = 1.0;
-            }
-
-            // Smooth transition
-            // shader uniform
+            // Smooth transition - update shader uniform
             if (this.pistonMaterial && this.pistonMaterial.userData.shader) {
                 this.pistonMaterial.userData.shader.uniforms.uHeightFactor.value = factor;
             }
 
-            if (factor > 0.01) this.pistonMesh.visible = true;
-            else this.pistonMesh.visible = false;
+            this.pistonMesh.visible = true;
         }
 
         this.renderer.render(this.scene, this.camera);
