@@ -17,40 +17,6 @@ DEM_PATH = "/Users/cole/dev/PowFinder/backend/terrains/DGM_Tirol_5m_epsg31254_20
 SAT_DIR = "/Users/cole/dev/PowFinder/backend/aerial_tifs"
 OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/piston_viewer/tiles_bin"
 
-# NEIGHBOR OFFSETS (Odd-Q / Vertical Staggered)
-# N: (0, 10)
-# S: (0, -10)
-# Even Col (Shift 0): NE(+8.66, +5), SE(+8.66, -5), NW(-8.66, +5), SW(-8.66, -5)
-# Odd Col  (Shift 5): NE(+8.66, +5), SE(+8.66, -5), NW(-8.66, +5), SW(-8.66, -5)
-# Wait, let's verify Odd/Even shifts.
-# Grid Generation: 
-# x += 8.66. 
-# y_shift = 5 if col%2==1 else 0. 
-# y_center = (Top - dy) - y_shift.
-#
-# Neighbor N: Same Col. dy decreases by 10. -> y_center increases by 10. Correct.
-# Neighbor S: Same Col. dy increases by 10. -> y_center decreases by 10. Correct.
-#
-# Neighbor NE (Col+1, Row?):
-# If Even (y_shift=0): Me(y). Neighbor(Odd, y_shift=5).
-#   To match y+5? 
-#   If I am Even at Y=100.
-#   Neighbor Odd is at X+8.66. Its grid Ys are ... 95, 105...
-#   NE should be Y=105.
-#   So NE is (x+8.66, y+5).
-#   SE is (x+8.66, y-5).
-# If Odd (y_shift=5): Me at Y=105.
-#   Neighbor Even is at X+8.66. Its grid Ys are ... 100, 110...
-#   NE should be Y=110. (y+5).
-#   SE should be Y=100. (y-5).
-# CONCLUSION: Offsets are constant regardless of column parity because the grid y-shift handles the staggering.
-# N: (0, 10)
-# NE: (8.66, 5)
-# SE: (8.66, -5)
-# S: (0, -10)
-# SW: (-8.66, -5)
-# NW: (-8.66, 5)
-
 OFFSETS = [
     (0, 10),      # 0: N
     (8.66025, 5), # 1: NE
@@ -94,7 +60,7 @@ def process_tile(tif_path):
     hexes = []
     base_z = None
 
-    # Grid Gen (Matches Main.js logic)
+    # Grid Gen
     right = 1250
     top = 1000
     
@@ -110,13 +76,11 @@ def process_tile(tif_path):
         y_steps.append(curr_y)
         curr_y += 10.0
 
-    count = 0
     for col_idx, dx in enumerate(x_steps):
         x_center = bounds.left + dx
         y_shift = 5.0 if (col_idx % 2 == 1) else 0.0
         
         for dy in y_steps:
-            # Main.js logic: y goes 0 to 1000. RealY = 0 is Top.
             y_center = (bounds.top - dy) - y_shift
             
             z = get_z(x_center, y_center)
@@ -125,44 +89,56 @@ def process_tile(tif_path):
             ref_z = z if not np.isnan(z) else (base_z or 0.0)
             z_safe = z if not np.isnan(z) else ref_z
 
-            # Sample 6 Neighbors
             neighbors_z = []
             for off in OFFSETS:
                 nx = x_center + off[0]
                 ny = y_center + off[1]
                 nz = get_z(nx, ny)
-                # If neighbor is missing, assume it is very low (so I render a wall down to it? 
-                # Or assume it is same height?
-                # If edge of map, assuming same height prevents ugly walls.
-                # Assuming low creates cliffs.
-                # Let's assume SAME HEIGHT - 5m to create a small edge but not infinite.
                 neighbors_z.append(nz if not np.isnan(nz) else (z_safe - 5.0))
             
             hexes.append({
                 'z': z_safe - (base_z or 0.0),
                 'n': [n - (base_z or 0.0) for n in neighbors_z]
             })
-            count += 1
+
+    # --- BORDER PROTECTION ---
+    # Detect if we hit the Italy border (Z values dropping to zero)
+    # We flatten it to the average of the valid parts.
+    abs_zs = [h['z'] + (base_z or 0.0) for h in hexes]
+    has_zeros = any(z <= 1.0 for z in abs_zs)
+    
+    if has_zeros:
+        valid_zs = [z for z in abs_zs if z > 1.0]
+        if valid_zs:
+            avg_z = sum(valid_zs) / len(valid_zs)
+            print(f"  !!! BORDER DETECTED (Italy) !!! Flattening tile to {avg_z:.1f}m")
+            base_z = avg_z
+            for h in hexes:
+                h['z'] = 0.0
+                h['n'] = [0.0] * 6
+        else:
+            print(f"  !!! DEAD TILE (Italy) !!! Flattening to 0m")
+            base_z = 0.0
+            for h in hexes:
+                h['z'] = 0.0
+                h['n'] = [0.0] * 6
 
     if not hexes: return f"SKIP: {tif_path}"
 
-    # --- PACKING BINARY V4 ---
-    # Z (half) + 6 * NeighborZ (half) = 7 * 2 = 14 bytes per hex.
-    
     with open(out_path, 'wb') as f:
         f.write(struct.pack('f', base_z or 0.0))
         for h in hexes:
-            data = [h['z']] + h['n'] # [z, n0, n1, n2, n3, n4, n5]
+            data = [h['z']] + h['n']
             f.write(np.array(data, dtype=np.half).tobytes())
 
-    return f"SUCCESS: {out_name} ({len(hexes)} hexes)"
+    return f"SUCCESS: {out_name}"
 
 def main():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
     
     tifs = sorted(glob.glob(os.path.join(SAT_DIR, "*.tif")))
-    print(f"Baking PISTON V4 (6-Face Downward): {len(tifs)} targets...")
+    print(f"Baking PISTON V4 (Border Protection): {len(tifs)} targets...")
     for tif in tifs:
         print(process_tile(tif))
 

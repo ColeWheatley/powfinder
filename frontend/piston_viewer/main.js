@@ -225,12 +225,12 @@ class PistonViewer {
             urls: { med: medTexUrl, high: highTexUrl }
         };
         this.tiles.push(tileObj);
-
-        // NO AUTO-LOAD for Med Res anymore!
     }
 
     parseBinary(buffer) {
         const view = new DataView(buffer);
+        // CRITICAL FIX: Read Base Elevation and ADD to relative Z values
+        const baseElevation = view.getFloat32(0, true);
         const hexData = [];
         let offset = 4;
 
@@ -242,7 +242,16 @@ class PistonViewer {
             const n_s = this.decodeFloat16(view.getUint16(offset + 8, true));
             const n_sw = this.decodeFloat16(view.getUint16(offset + 10, true));
             const n_nw = this.decodeFloat16(view.getUint16(offset + 12, true));
-            hexData.push({ z, n_n, n_ne, n_se, n_s, n_sw, n_nw });
+
+            hexData.push({
+                z: z + baseElevation,
+                n_n: n_n + baseElevation,
+                n_ne: n_ne + baseElevation,
+                n_se: n_se + baseElevation,
+                n_s: n_s + baseElevation,
+                n_sw: n_sw + baseElevation,
+                n_nw: n_nw + baseElevation
+            });
             offset += 14;
         }
         return hexData;
@@ -476,12 +485,10 @@ class PistonViewer {
     }
 
     updateLOD() {
-        // Only run logic every 10 frames or so if performance is still issue, but 80 iter is fast.
         const target = this.controls.target;
-        const CAM_HIGH_RES_DIST = 600;  // Up close and personal
-        const CAM_MED_RES_DIST = 1500; // Medium range (approx 1 tile width)
+        const CAM_HIGH_RES_DIST = 600;
+        const CAM_MED_RES_DIST = 1500;
 
-        // Optimize: could throttle this
         const texLoader = new THREE.TextureLoader();
         const tiffLoader = new TIFFLoader();
 
@@ -493,7 +500,6 @@ class PistonViewer {
             if (distSq < CAM_HIGH_RES_DIST ** 2) {
                 if (!tile.highResLoaded && !tile.highResLoading) {
                     tile.highResLoading = true;
-                    // console.log(`LOD HIGH: ${tile.x}`);
                     tiffLoader.load(tile.urls.high, (tex) => {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.flipY = false;
@@ -504,11 +510,8 @@ class PistonViewer {
                     });
                 }
             } else if (distSq < CAM_MED_RES_DIST ** 2) {
-                // If High Res is already there, KEEP IT (don't downgrade, memory leak prevention is advanced topic)
-                // If no High Res, ensure Med Res
                 if (!tile.highResLoaded && !tile.medResLoaded && !tile.medResLoading) {
                     tile.medResLoading = true;
-                    // console.log(`LOD MED: ${tile.x}`);
                     texLoader.load(tile.urls.med, (tex) => {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.flipY = false;
