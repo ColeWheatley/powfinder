@@ -645,7 +645,7 @@ function showLayerInfoBox(){
   const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
   info.innerHTML = `
     <div class="info-box-left desktop-only">
-      ${label} ${timeLabel}
+      ${label} on ${timeLabel}
     </div>
     <div class="info-box-right">
       <span class="desktop-only">${currentMin.toFixed(1)}${unit}</span>

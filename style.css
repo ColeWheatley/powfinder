@@ -1,8 +1,9 @@
-/* ===== Font (paintbrush style) ===== */
-@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
+/* ===== Fonts ===== */
+@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Montserrat:wght@400;700&display=swap');
 
 :root{
     --brand-font:'Permanent Marker', cursive;
+    --body-font: 'Montserrat', sans-serif;
     --bar-bg:rgba(0,0,0,0.60); /* Match sheet-bg for consistent opacity */
     --bar-bg-hover:#ff4081;
     --sep:rgba(255,255,255,0.20);
@@ -22,7 +23,11 @@
 }
 
 /* Map takes full screen */
-html,body{height:100%;margin:0;}
+html,body{
+    height:100%;
+    margin:0;
+    font-family: var(--body-font);
+}
 #map{width:100%;height:100%;}
 
 /* Mobile Brand - Floating Logo (Hidden by default) */
@@ -51,7 +56,6 @@ html,body{height:100%;margin:0;}
     top: 2vh;
     right: 2vw;
     z-index: 2000;
-    font-family: var(--brand-font);
     font-size: 1.8vh;
     color: white;
     background: var(--bar-bg);
@@ -115,7 +119,6 @@ html,body{height:100%;margin:0;}
     width:100%;height:38vh; /* Updated */
     z-index:1000;
     transition:bottom .35s ease;
-    font-family:var(--brand-font);
     background:var(--bar-bg);backdrop-filter:blur(10px);
     border-top: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5);
@@ -135,6 +138,7 @@ html,body{height:100%;margin:0;}
     transition:background .25s;
 }
 #drawer-bar .brand{
+    font-family: var(--brand-font);
     font-size:4vh; /* Increased font size */
     color:#fff;
     margin:0;
@@ -148,7 +152,6 @@ html,body{height:100%;margin:0;}
   background: rgba(var(--accent), 0.8);
   color: white;
   border-radius: 0.5vh;
-  font-family: var(--brand-font);
   display: flex;
   align-items: center;
   max-height: 8vh;
@@ -448,7 +451,6 @@ html,body{height:100%;margin:0;}
     border-radius: 0.5vh;
     pointer-events: none;
     transform: translate(-50%, -100%);
-    font-family: var(--brand-font);
     font-size: 1.5vh;
     width: 35vw; /* Wider popup for residual table */
     box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5); /* Added drop shadow */
