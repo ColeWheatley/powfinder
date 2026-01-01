@@ -27,6 +27,15 @@ body {
     pointer-events: none;
 }
 
+#shader-controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 12;
+    width: 260px;
+    pointer-events: auto;
+}
+
 .glass-panel {
     background: rgba(20, 20, 20, 0.7);
     backdrop-filter: blur(10px);
@@ -71,6 +80,51 @@ h1 {
 .value {
     color: #74b9ff;
     font-family: monospace;
+}
+
+.control-title {
+    font-size: 0.75rem;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+.fps-counter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.72rem;
+    color: #bbb;
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+}
+
+.fps-counter span {
+    color: #74b9ff;
+    font-family: monospace;
+}
+
+.control-row {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 44px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.72rem;
+    color: #bbb;
+}
+
+.control-row input[type="range"] {
+    width: 100%;
+    accent-color: #74b9ff;
+}
+
+.control-val {
+    text-align: right;
+    color: #74b9ff;
+    font-family: monospace;
+    font-size: 0.72rem;
 }
 
 .legend {

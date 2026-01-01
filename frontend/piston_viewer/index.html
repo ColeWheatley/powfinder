@@ -90,6 +90,51 @@
         </div>
     </div>
 
+    <div id="shader-controls" class="glass-panel control-panel">
+        <div class="control-title">Lighting Lab</div>
+        <div class="fps-counter">FPS <span id="fps-counter">--</span></div>
+        <div class="control-row">
+            <label for="ao-floor">AO Floor</label>
+            <input id="ao-floor" type="range" min="0" max="1" step="0.01" value="0.10">
+            <span class="control-val" id="ao-floor-val">0.10</span>
+        </div>
+        <div class="control-row">
+            <label for="ao-power">AO Power</label>
+            <input id="ao-power" type="range" min="0.2" max="2" step="0.05" value="0.90">
+            <span class="control-val" id="ao-power-val">0.90</span>
+        </div>
+        <div class="control-row">
+            <label for="lambert">Lambert</label>
+            <input id="lambert" type="range" min="0" max="1" step="0.01" value="0.70">
+            <span class="control-val" id="lambert-val">0.70</span>
+        </div>
+        <div class="control-row">
+            <label for="rim">Rim</label>
+            <input id="rim" type="range" min="0" max="0.5" step="0.01" value="0.18">
+            <span class="control-val" id="rim-val">0.18</span>
+        </div>
+        <div class="control-row">
+            <label for="rim-power">Rim Power</label>
+            <input id="rim-power" type="range" min="1" max="6" step="0.1" value="2.2">
+            <span class="control-val" id="rim-power-val">2.2</span>
+        </div>
+        <div class="control-row">
+            <label for="spec">Spec</label>
+            <input id="spec" type="range" min="0" max="0.5" step="0.01" value="0.00">
+            <span class="control-val" id="spec-val">0.00</span>
+        </div>
+        <div class="control-row">
+            <label for="spec-power">Spec Power</label>
+            <input id="spec-power" type="range" min="5" max="60" step="1" value="30">
+            <span class="control-val" id="spec-power-val">30</span>
+        </div>
+        <div class="control-row">
+            <label for="slope-light">Slope Light</label>
+            <input id="slope-light" type="range" min="0" max="1" step="0.01" value="0.00">
+            <span class="control-val" id="slope-light-val">0.00</span>
+        </div>
+    </div>
+
     <div class="legend glass-panel">
         <div class="legend-item">
             <div class="swatch" style="background:#555;"></div>

@@ -23,6 +23,11 @@ def generate_manifest():
         if match:
             x = int(match.group(1))
             y = int(match.group(2))
+            
+            # Skip the 'oddball' tile at the lower left
+            if x == 53750:
+                continue
+                
             tiles.append({'x': x, 'y': y})
             
             if x < min_x: min_x = x
