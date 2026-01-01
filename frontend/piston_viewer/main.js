@@ -8,6 +8,7 @@ const TILE_HEIGHT_WORLD = 1000;
 const HEX_WIDTH = 10;
 const HEX_DX = HEX_WIDTH * (Math.sqrt(3) / 2);
 const SCALE_Z = 1.0;
+const DEFAULT_RENDER_DISTANCE = 2000;
 
 class PistonViewer {
     constructor() {
@@ -61,11 +62,15 @@ class PistonViewer {
             specPower: 30.0,
             slopeLight: 0.0,
         };
+        this.renderSettings = {
+            renderDistance: DEFAULT_RENDER_DISTANCE,
+        };
         this.fpsState = { lastSample: performance.now(), frames: 0 };
         this.fpsEl = null;
 
         // Start
         this.initLightingControls();
+        this.updateFogAndClip();
         this.initWorld();
         this.animate();
     }
@@ -106,6 +111,21 @@ class PistonViewer {
             update();
         };
 
+        const bindRender = (id, key, format) => {
+            const input = document.getElementById(id);
+            if (!input) return;
+            const output = document.getElementById(`${id}-val`);
+            const fmt = format || ((val) => val.toFixed(0));
+            const update = () => {
+                const value = parseFloat(input.value);
+                this.renderSettings[key] = value;
+                if (output) output.textContent = fmt(value);
+                this.updateFogAndClip();
+            };
+            input.addEventListener('input', update);
+            update();
+        };
+
         bind('ao-floor', 'aoFloor');
         bind('ao-power', 'aoPower');
         bind('lambert', 'lambert');
@@ -114,6 +134,7 @@ class PistonViewer {
         bind('spec', 'spec');
         bind('spec-power', 'specPower', (val) => val.toFixed(0));
         bind('slope-light', 'slopeLight');
+        bindRender('render-distance', 'renderDistance', (val) => `${(val / 1000).toFixed(1)}km`);
     }
 
     updateLightingUniforms() {
@@ -129,6 +150,22 @@ class PistonViewer {
             shader.uniforms.uSpecPower.value = this.lightingSettings.specPower;
             shader.uniforms.uSlopeLight.value = this.lightingSettings.slopeLight;
         }
+    }
+
+    updateFogAndClip() {
+        const dist = this.renderSettings.renderDistance;
+        const fogStart = Math.max(10, dist * 0.6);
+        const fogEnd = Math.max(fogStart + 10, dist);
+
+        if (!this.scene.fog) {
+            this.scene.fog = new THREE.Fog(this.scene.background, fogStart, fogEnd);
+        }
+        this.scene.fog.color.copy(this.scene.background);
+        this.scene.fog.near = fogStart;
+        this.scene.fog.far = fogEnd;
+
+        this.camera.far = Math.max(fogEnd + 500, 2000);
+        this.camera.updateProjectionMatrix();
     }
 
     async initWorld() {
@@ -195,7 +232,8 @@ class PistonViewer {
         // 2. Create Material
         const material = new THREE.MeshBasicMaterial({
             map: texture,
-            side: THREE.FrontSide
+            side: THREE.FrontSide,
+            fog: true
         });
         this.setupMaterialShader(material);
         this.materialsToUpdate.push(material);
@@ -488,6 +526,8 @@ class PistonViewer {
         const target = this.controls.target;
         const CAM_HIGH_RES_DIST = 600;
         const CAM_MED_RES_DIST = 1500;
+        const renderDistance = this.renderSettings.renderDistance;
+        const renderDistanceSq = renderDistance * renderDistance;
 
         const texLoader = new THREE.TextureLoader();
         const tiffLoader = new TIFFLoader();
@@ -496,6 +536,12 @@ class PistonViewer {
             const cx = (tile.x - this.worldOrigin.x) + 625;
             const cz = -(tile.y - this.worldOrigin.y) - 500;
             const distSq = (target.x - cx) ** 2 + (target.z - cz) ** 2;
+
+            if (distSq > renderDistanceSq) {
+                if (tile.mesh.visible) tile.mesh.visible = false;
+                continue;
+            }
+            if (!tile.mesh.visible) tile.mesh.visible = true;
 
             if (distSq < CAM_HIGH_RES_DIST ** 2) {
                 if (!tile.highResLoaded && !tile.highResLoading) {
