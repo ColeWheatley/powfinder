@@ -361,29 +361,6 @@ class PistonViewer {
                     float v = -pos.z / 1000.0;
                     return vec2(clamp(u, 0.001, 0.999), clamp(v, 0.001, 0.999));
                 }
-
-                vec2 neighborOffset(int face) {
-                    if (face == 0) return vec2(0.0, -10.0);      // N
-                    if (face == 1) return vec2(8.66025, -5.0);   // NE
-                    if (face == 2) return vec2(8.66025, 5.0);    // SE
-                    if (face == 3) return vec2(0.0, 10.0);       // S
-                    if (face == 4) return vec2(-8.66025, 5.0);   // SW
-                    if (face == 5) return vec2(-8.66025, -5.0);  // NW
-                    return vec2(0.0);
-                }
-
-                vec3 slopeRamp(float t) {
-                    vec3 c0 = vec3(0.22, 0.38, 0.33);
-                    vec3 c1 = vec3(0.41, 0.58, 0.30);
-                    vec3 c2 = vec3(0.72, 0.62, 0.26);
-                    vec3 c3 = vec3(0.83, 0.44, 0.20);
-                    vec3 c4 = vec3(0.72, 0.18, 0.20);
-
-                    if (t < 0.25) return mix(c0, c1, t / 0.25);
-                    if (t < 0.50) return mix(c1, c2, (t - 0.25) / 0.25);
-                    if (t < 0.75) return mix(c2, c3, (t - 0.50) / 0.25);
-                    return mix(c3, c4, (t - 0.75) / 0.25);
-                }
                 `
             ).replace(
                 '#include <map_fragment>',
@@ -396,23 +373,30 @@ class PistonViewer {
                     vec2 uv = getUV(vWorldPos);
                     vec3 texColor = texture2D(map, vec2(uv.x, 1.0 - uv.y)).rgb;
 
-                    int face = int(vFaceIndex + 0.5);
-                    vec2 nOff = neighborOffset(face);
-                    vec2 uvNeighbor = getUV(vWorldPos + vec3(nOff.x, 0.0, nOff.y));
-                    vec3 neighborColor = texture2D(map, vec2(uvNeighbor.x, 1.0 - uvNeighbor.y)).rgb;
+                    float verticalShade = mix(0.32, 1.0, pow(vGrad, 1.4));
+                    vec3 sideBase = texColor * verticalShade;
 
-                    float verticalShade = mix(0.35, 1.0, pow(vGrad, 1.35));
-                    vec3 sideBase = mix(neighborColor, texColor, vGrad) * verticalShade;
+                    vec3 lightDir = normalize(vec3(0.45, 0.80, 0.35));
+                    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                    vec3 nrm = normalize(vObjNormal);
+                    float lambert = clamp(dot(nrm, lightDir), 0.0, 1.0);
+                    float rim = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 2.2);
+                    float ao = mix(0.58, 1.0, pow(vGrad, 0.9));
+                    float faceShade = 0.35 + 0.55 * lambert + 0.18 * rim;
+                    sideBase *= clamp(faceShade, 0.3, 1.1) * ao;
 
-                    vec3 lightDir = normalize(vec3(0.35, 0.85, 0.2));
-                    float faceShade = clamp(dot(normalize(vObjNormal), lightDir) * 0.6 + 0.5, 0.35, 1.0);
-                    sideBase *= faceShade;
+                    vec3 cGreen = vec3(0.0, 1.0, 0.0);
+                    vec3 cBlue = vec3(0.0009, 0.0027, 0.1119);
+                    vec3 cYellow = vec3(1.0, 0.85, 0.0);
+                    vec3 cRed = vec3(0.85, 0.0, 0.0);
 
-                    float slopeT = clamp((vFaceSlope - 22.0) / 28.0, 0.0, 1.0);
-                    float slopeMask = smoothstep(26.0, 33.0, vFaceSlope);
-                    vec3 slopeColor = slopeRamp(slopeT);
-
-                    diffuseColor.rgb = mix(sideBase, slopeColor, slopeMask);
+                    vec3 slopeColor = cGreen;
+                    if (vFaceSlope >= 35.0 && vFaceSlope < 40.0) slopeColor = cBlue;
+                    else if (vFaceSlope >= 40.0 && vFaceSlope < 45.0) slopeColor = cYellow;
+                    else if (vFaceSlope >= 45.0) slopeColor = cRed;
+                    
+                    if (vFaceSlope >= 30.0) diffuseColor.rgb = slopeColor;
+                    else diffuseColor.rgb = sideBase;
                 } else {
                     vec2 uv = getUV(vWorldPos);
                     vec4 texColor = texture2D(map, vec2(uv.x, 1.0 - uv.y));
