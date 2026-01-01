@@ -80,11 +80,12 @@ html,body{
     left: 50%;
     transform: translate(-50%, -50%);
     color: white;
-    font-weight: bold;
+    font-weight: 500;
     text-shadow: 0 0 4px black, 0 0 2px black;
     white-space: nowrap;
     pointer-events: none;
-    font-size: 1.6vh;
+    font-family: var(--body-font);
+    font-size: 2.5vh; /* Larger for the taller bar */
 }
 
 .legend-value {
@@ -92,7 +93,7 @@ html,body{
     top: 50%;
     transform: translateY(-50%);
     color: white;
-    font-weight: bold;
+    font-weight: 500;
     text-shadow: 0 0 4px black, 0 0 2px black;
     font-size: 1.4vh;
     pointer-events: none;
@@ -106,7 +107,7 @@ html,body{
     position: relative;
     flex-grow: 1; /* Desktop: take remaining space */
     min-width: 150px; /* Prevent collapse on desktop */
-    height: 3vh; /* Desktop height */
+    height: 6vh; /* Taller bar (was 3vh) */
     margin: 0 1vw; /* Desktop margin */
     border-radius: 1vh;
     border: 1.5px solid rgba(255,255,255);

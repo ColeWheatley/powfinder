@@ -644,17 +644,15 @@ function showLayerInfoBox(){
   
   const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
   info.innerHTML = `
-    <div class="info-box-left desktop-only">
-      ${label} on ${timeLabel}
-    </div>
-    <div class="info-box-right">
-      <span class="desktop-only">${currentMin.toFixed(1)}${unit}</span>
+    <div class="info-box-right" style="width: 100%;">
       <div class="legend-bar" style="${barStyle}">
-          <span class="legend-value left mobile-only">${currentMin.toFixed(1)}${unit}</span>
-          <span class="legend-overlay-title mobile-only">${label}</span>
-          <span class="legend-value right mobile-only">${currentMax.toFixed(1)}${unit}</span>
+          <span class="legend-value left">${currentMin.toFixed(1)}${unit}</span>
+          <span class="legend-overlay-title">
+            <span class="mobile-only">${label}</span>
+            <span class="desktop-only">${label} on ${timeLabel}</span>
+          </span>
+          <span class="legend-value right">${currentMax.toFixed(1)}${unit}</span>
       </div>
-      <span class="desktop-only">${currentMax.toFixed(1)}${unit}</span>
     </div>
   `;
   
