@@ -5,11 +5,11 @@ Weather Data Collection Script
 
 Collects weather data from Open-Meteo API for:
 1. First 3000 peaks from tirol_peaks.geojson
-2. All 2000 random coordinates from random_coordinates.json
+2. All 4000 random coordinates from all_points.json (3000 high altitude, 1000 low altitude)
 
 A subset of the random coordinates is used as a validation dataset and flagged as such. 
 
-Outputs comprehensive weather dataset for May 14-28, 2025 analysis.
+Outputs comprehensive weather dataset for analysis.
 """
 
 import json
@@ -26,8 +26,8 @@ from pathlib import Path
 # API configuration
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "icon-d2"
-START_DATE = "2026-01-01"
-END_DATE = "2026-01-15"
+START_DATE = "2025-12-25"
+END_DATE = "2026-01-07"
 TIMEZONE = "Europe/Vienna"
 
 # Weather parameters to collect
@@ -36,10 +36,13 @@ HOURLY_PARAMS = [
     "relative_humidity_2m", 
     "shortwave_radiation",
     "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
     "snow_depth",
     "snowfall",
     "wind_speed_10m",
-    "weather_code",
+    "wind_direction_10m",
     "freezing_level_height",
     "surface_pressure"
 ]
@@ -55,7 +58,7 @@ RETRY_DELAY = 10  # Seconds to wait before retry on error
 # Batch configuration
 BATCH_SIZE = 10  # Process in small batches for progress tracking
 PEAKS_LIMIT = 3000  # First 3000 peaks
-RANDOM_LIMIT = 2000  # All 2000 random coordinates
+RANDOM_LIMIT = 4000  # All 4000 random coordinates
 
 # File paths
 PEAKS_FILE = "tirol_peaks.geojson"
@@ -64,7 +67,7 @@ OUTPUT_FILE = "weather_data_collection.json"
 
 def load_peak_coordinates():
     """Load first 3000 peak coordinates from GeoJSON file."""
-    print(f"📍 Loading peaks from {PEAKS_FILE}...")
+    print(f"📍 Loading first {PEAKS_LIMIT} peaks from {PEAKS_FILE}...")
     
     try:
         with open(PEAKS_FILE, 'r') as f:
@@ -102,7 +105,7 @@ def load_peak_coordinates():
 
 def load_random_coordinates():
     """Load all coordinates from all_points.json (includes validation flagging)."""
-    print(f"📍 Loading coordinates from {RANDOM_FILE}...")
+    print(f"📍 Loading first {RANDOM_LIMIT} random coordinates from {RANDOM_FILE}...")
     
     try:
         with open(RANDOM_FILE, 'r') as f:

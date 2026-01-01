@@ -17,8 +17,8 @@ OUTPUT:
 Aggregation Methods:
 - Temperature/Snow Depth/Humidity/Pressure: Average over 3-hour period
 - Snowfall: Sum (total accumulation over 3 hours)
-- Weather Code: Median (most representative condition)
-- Wind Speed/Cloud Cover/Radiation: Average over 3-hour period
+- Wind Speed/Cloud Cover (All levels)/Radiation: Average over 3-hour period
+- Wind Direction: Circular Mean (proper angle averaging)
 - Freezing Level: Average over 3-hour period
 
 Time Periods:
@@ -40,6 +40,7 @@ EXAMPLE:
 
 import json
 import statistics
+import math
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
@@ -58,10 +59,13 @@ AGGREGATION_METHODS = {
     "relative_humidity_2m": "average", 
     "shortwave_radiation": "average",
     "cloud_cover": "average",
+    "cloud_cover_low": "average",
+    "cloud_cover_mid": "average",
+    "cloud_cover_high": "average",
     "snow_depth": "average",
     "snowfall": "sum",  # Accumulation over 3 hours
     "wind_speed_10m": "average",
-    "weather_code": "median",  # Most representative condition
+    "wind_direction_10m": "circular_mean", # Proper angle averaging
     "freezing_level_height": "average",
     "surface_pressure": "average"
 }
@@ -114,6 +118,18 @@ def aggregate_values(values, method):
         return sum(valid_values)
     elif method == "median":
         return statistics.median(valid_values)
+    elif method == "circular_mean":
+        # Average of angles in degrees
+        # Convert to radians
+        sin_sum = sum(math.sin(math.radians(v)) for v in valid_values)
+        cos_sum = sum(math.cos(math.radians(v)) for v in valid_values)
+        
+        # Calculate mean angle
+        mean_rad = math.atan2(sin_sum, cos_sum)
+        
+        # Convert back to degrees and normalize to [0, 360)
+        mean_deg = math.degrees(mean_rad)
+        return (mean_deg + 360) % 360
     else:
         raise ValueError(f"Unknown aggregation method: {method}")
 

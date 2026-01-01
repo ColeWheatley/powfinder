@@ -23,13 +23,16 @@ This document describes the comprehensive weather dataset collected for PowFinde
 1. `temperature_2m` (°C) - Air temperature at 2 meters
 2. `relative_humidity_2m` (%) - Relative humidity at 2 meters  
 3. `shortwave_radiation` (W/m²) - Solar radiation
-4. `cloud_cover` (%) - Total cloud coverage (sum of low/mid/high cloud layers)
-5. `snow_depth` (m) - Snow depth on ground
-6. `snowfall` (mm) - Snowfall amount
-7. `wind_speed_10m` (m/s) - Wind speed at 10 meters
-8. `weather_code` (WMO code) - Weather condition codes
-9. `freezing_level_height` (m) - Altitude of 0°C isotherm
-10. `surface_pressure` (hPa) - Atmospheric pressure at surface
+4. `cloud_cover` (%) - Total cloud coverage
+5. `cloud_cover_low` (%) - Low-level cloud coverage (0-2 km)
+6. `cloud_cover_mid` (%) - Mid-level cloud coverage (2-7 km)
+7. `cloud_cover_high` (%) - High-level cloud coverage (>7 km)
+8. `snow_depth` (m) - Snow depth on ground
+9. `snowfall` (mm) - Snowfall amount
+10. `wind_speed_10m` (m/s) - Wind speed at 10 meters
+11. `wind_direction_10m` (°) - Wind direction at 10 meters
+12. `freezing_level_height` (m) - Altitude of 0°C isotherm
+13. `surface_pressure` (hPa) - Atmospheric pressure at surface
 
 **Rate Limiting:** 0.5 seconds between requests (7,200 requests/hour target)
 
@@ -52,7 +55,7 @@ This document describes the comprehensive weather dataset collected for PowFinde
 | `snow_depth` | Average | Representative snow depth |
 | `snowfall` | **Sum** | Total accumulation over 3 hours |
 | `wind_speed_10m` | Average | Mean wind conditions |
-| `weather_code` | **Median** | Most representative weather condition |
+| `wind_direction_10m` | Average | Mean wind direction |
 | `freezing_level_height` | Average | Mean freezing level |
 | `surface_pressure` | Average | Mean atmospheric pressure |
 

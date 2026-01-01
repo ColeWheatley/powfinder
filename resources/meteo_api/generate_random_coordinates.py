@@ -38,7 +38,7 @@ from pathlib import Path
 # =====================================
 
 # DEM file to use for boundary detection and elevation validation
-DEM_FILE = "../terrains/tirol_5m_float.tif"
+DEM_FILE = "../terrains/tirol_100m_float.tif"
 
 # Minimum elevation threshold (meters) - focus on higher altitude areas
 MIN_ELEVATION = 2300.0
@@ -47,10 +47,12 @@ MIN_ELEVATION = 2300.0
 MIN_DISTANCE_M = 250.0
 
 # Number of random points to generate
-TARGET_POINTS = 2000
+TARGET_HIGH_POINTS = 3000
+TARGET_LOW_POINTS = 1000
+TARGET_POINTS = TARGET_HIGH_POINTS + TARGET_LOW_POINTS
 
 # Number of points to reserve for validation (will be flagged is_validation=True)
-VALIDATION_POINTS = 200
+VALIDATION_POINTS = 400
 
 # Random seed for reproducibility (because memes)
 RANDOM_SEED = 42069
@@ -205,21 +207,25 @@ class RandomCoordinateGenerator:
         except Exception:
             return None
     
-    def is_valid_point(self, lat, lon, existing_points):
+    def is_valid_point(self, lat, lon, existing_points, elevation_mode):
         """
         Check if a point meets all validation criteria:
         1. Has valid elevation (inside Tirol)
-        2. Above minimum elevation threshold
+        2. Matches the requested elevation_mode ('high' >= 2300 or 'low' < 2300)
         3. Not too close to existing points
         """
         # Check if point has valid elevation
         elevation = self.get_elevation_at_point(lat, lon)
-        if elevation is None:
+        if elevation is None or elevation <= -9000:
             return False, "outside_bounds"
         
-        # Check elevation threshold
-        if elevation < self.min_elevation:
-            return False, f"too_low_{elevation:.1f}m"
+        # Check elevation threshold based on mode
+        if elevation_mode == 'high':
+            if elevation < self.min_elevation:
+                return False, f"too_low_{elevation:.1f}m"
+        else: # elevation_mode == 'low'
+            if elevation >= self.min_elevation:
+                return False, f"too_high_{elevation:.1f}m"
         
         # Check distance to existing points
         if is_too_close(lat, lon, existing_points, self.min_distance_m):
@@ -228,9 +234,10 @@ class RandomCoordinateGenerator:
         return True, f"valid_{elevation:.1f}m"
     
     def generate_coordinates(self):
-        """Generate the target number of valid random coordinates."""
-        print(f"\n🎯 Generating {self.target_points} random coordinates...")
-        print(f"   📏 Min elevation: {self.min_elevation}m")
+        """Generate the target number of valid random coordinates (split high/low)."""
+        print(f"\n🎯 Generating {TARGET_POINTS} random coordinates...")
+        print(f"   🏔️  High elevation (>= {self.min_elevation}m): {TARGET_HIGH_POINTS} points")
+        print(f"   🏞️  Low elevation (< {self.min_elevation}m): {TARGET_LOW_POINTS} points")
         print(f"   📐 Min distance: {self.min_distance_m}m")
         
         valid_points = []
@@ -241,18 +248,29 @@ class RandomCoordinateGenerator:
         rejection_stats = {
             "outside_bounds": 0,
             "too_low": 0,
+            "too_high": 0,
             "too_close": 0
         }
         
+        # Elevation counts
+        high_count = 0
+        low_count = 0
+        
         # Generate points
-        while len(valid_points) < self.target_points:
+        while len(valid_points) < TARGET_POINTS:
             attempts += 1
+            
+            # Determine which mode we need
+            if high_count < TARGET_HIGH_POINTS:
+                mode = 'high'
+            else:
+                mode = 'low'
             
             # Generate random point
             lat, lon = self.generate_random_point()
             
             # Validate point
-            is_valid, reason = self.is_valid_point(lat, lon, existing_coords)
+            is_valid, reason = self.is_valid_point(lat, lon, existing_coords, mode)
             
             if is_valid:
                 # Snap to DEM grid
@@ -270,41 +288,52 @@ class RandomCoordinateGenerator:
                     "original_lat": round(lat, 6),
                     "original_lon": round(lon, 6),
                     "type": "random",
+                    "elevation_group": mode,
                     "is_validation": len(valid_points) < VALIDATION_POINTS
                 }
                 
                 valid_points.append(point)
                 existing_coords.append((snapped_lat, snapped_lon))
                 
+                if mode == 'high':
+                    high_count += 1
+                else:
+                    low_count += 1
+                
                 # Progress update
                 if len(valid_points) % 100 == 0:
                     success_rate = len(valid_points) / attempts * 100
-                    print(f"   ✅ Generated {len(valid_points)}/{self.target_points} points "
-                          f"(success rate: {success_rate:.1f}%)")
+                    print(f"   ✅ Generated {len(valid_points)}/{TARGET_POINTS} points "
+                          f"({high_count}H, {low_count}L, rate: {success_rate:.1f}%)")
             
             else:
                 # Track rejection reasons
                 if reason.startswith("too_low"):
                     rejection_stats["too_low"] += 1
+                elif reason.startswith("too_high"):
+                    rejection_stats["too_high"] += 1
                 elif reason == "outside_bounds":
                     rejection_stats["outside_bounds"] += 1
                 elif reason == "too_close":
                     rejection_stats["too_close"] += 1
             
             # Safety check to avoid infinite loops
-            if attempts > self.target_points * 100:
+            if attempts > TARGET_POINTS * 200:
                 print(f"⚠️  Reached maximum attempts ({attempts}). Generated {len(valid_points)} points.")
                 break
         
         # Final statistics
         success_rate = len(valid_points) / attempts * 100 if attempts > 0 else 0
         print(f"\n📊 Generation Statistics:")
-        print(f"   ✅ Valid points: {len(valid_points)}")
+        print(f"   ✅ Total valid points: {len(valid_points)}")
+        print(f"   🏔️  High points: {high_count}")
+        print(f"   🏞️  Low points: {low_count}")
         print(f"   🎯 Total attempts: {attempts}")
         print(f"   📈 Success rate: {success_rate:.1f}%")
         print(f"   📊 Rejections:")
         print(f"      🗺️  Outside bounds: {rejection_stats['outside_bounds']}")
-        print(f"      ⛰️  Below {self.min_elevation}m: {rejection_stats['too_low']}")
+        print(f"      ⛰️  Too low: {rejection_stats['too_low']}")
+        print(f"      ⛰️  Too high: {rejection_stats['too_high']}")
         print(f"      📐 Too close (<{self.min_distance_m}m): {rejection_stats['too_close']}")
         
         return valid_points
@@ -320,8 +349,9 @@ class RandomCoordinateGenerator:
                 "dem_file": self.dem_file,
                 "min_elevation_m": self.min_elevation,
                 "min_distance_m": self.min_distance_m,
-                "target_points": self.target_points,
-                "actual_points": len(points),
+                "target_high_elevation_points": TARGET_HIGH_POINTS,
+                "target_low_elevation_points": TARGET_LOW_POINTS,
+                "total_points": len(points),
                 "dem_bounds": {
                     "left": self.bounds.left,
                     "right": self.bounds.right,
