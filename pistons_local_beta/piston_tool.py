@@ -123,12 +123,33 @@ def crop_dem(lat, lon, output_path, radius_km):
     print(f"✓ DEM cropped ({radius_km}km).")
 
 def get_slope_color(deg):
-    if deg < 25: return [0.5, 0.5, 0.5]
-    if deg < 35: return [0, 1, 0]
-    if deg < 40: return [0, 0, 1]
-    if deg < 45: return [0.5, 0, 0.5]
-    if deg < 50: return [1, 0.5, 0]
-    return [1, 0, 0]
+    t = max(0.0, min(1.0, (deg - 22.0) / 28.0))
+    ramp = [
+        (0.22, 0.38, 0.33),
+        (0.41, 0.58, 0.30),
+        (0.72, 0.62, 0.26),
+        (0.83, 0.44, 0.20),
+        (0.72, 0.18, 0.20),
+    ]
+
+    if t < 0.25:
+        a, b = ramp[0], ramp[1]
+        u = t / 0.25
+    elif t < 0.50:
+        a, b = ramp[1], ramp[2]
+        u = (t - 0.25) / 0.25
+    elif t < 0.75:
+        a, b = ramp[2], ramp[3]
+        u = (t - 0.50) / 0.25
+    else:
+        a, b = ramp[3], ramp[4]
+        u = (t - 0.75) / 0.25
+
+    return [
+        a[0] + (b[0] - a[0]) * u,
+        a[1] + (b[1] - a[1]) * u,
+        a[2] + (b[2] - a[2]) * u,
+    ]
 
 def launch_viewer(target_dir):
     dem_path = os.path.join(target_dir, "dem.tif")

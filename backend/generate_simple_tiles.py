@@ -3,6 +3,8 @@ import os
 import glob
 import rasterio
 from PIL import Image
+import multiprocessing
+import shutil
 
 # Config
 INPUT_DIR = "/Users/cole/dev/PowFinder/backend/aerial_tifs"
@@ -12,38 +14,54 @@ def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
-def generate_simple_tiles():
-    # Define Levels
-    med_dir = os.path.join(BASE_OUTPUT_DIR, "med_res")
-    ensure_dir(med_dir)
-
-    tif_files = sorted(glob.glob(os.path.join(INPUT_DIR, "*.tif")))
-    print(f"Found {len(tif_files)} TIFs. Converting to WebP (1:1)...")
-
-    for path in tif_files:
+def process_single_tif(path):
+    try:
         filename = os.path.basename(path)
-        name_no_ext = os.path.splitext(filename)[0]
-        # Expected name format: tile_X_Y.tif or similar. 
-        # If the input names are consistent, we just swap extension.
-        
-        print(f"Processing {filename}...")
+        low_dir = os.path.join(BASE_OUTPUT_DIR, "low_res")
+        med_dir = os.path.join(BASE_OUTPUT_DIR, "med_res")
+        high_dir = os.path.join(BASE_OUTPUT_DIR, "high_res")
         
         with rasterio.open(path) as src:
-            # Read full image
-            # Transpose to (H, W, C)
-            data = src.read([1, 2, 3]).transpose(1, 2, 0)
+            bounds = src.bounds
+            tile_x = int(bounds.left)
+            tile_y = int(bounds.top)
+            out_base = f"tile_{tile_x}_{tile_y}"
             
+            # 1. HIGH: Original TIF only (No WebP)
+            high_path_tif = os.path.join(high_dir, out_base + ".tif")
+            shutil.copy(path, high_path_tif)
+            
+            # Load image for med/low
+            data = src.read([1, 2, 3]).transpose(1, 2, 0)
             img = Image.fromarray(data)
             
-            # Save MED: Native Res, WebP Q=75 (Better quality than 5)
-            # Use Q=5 if size is critical, but 5 is very low. User had 5.
-            # Let's stick to 5-20 range if low bandwidth is needed, but 75 is standard.
-            # User used Q=5. I'll use 20 for a bit better quality without huge size.
-            out_path = os.path.join(med_dir, name_no_ext + ".webp")
-            img.save(out_path, 'WEBP', quality=20)
+            # 2. MED: Native Res, WebP Quality 5
+            med_path = os.path.join(med_dir, out_base + ".webp")
+            img.save(med_path, 'WEBP', quality=5)
             
-            # We can add Low/High if needed, but Med is the core one.
+            # 3. LOW: 1m scale (1/5th), WebP Quality 5
+            low_size = (img.width // 5, img.height // 5)
+            img_low = img.resize(low_size, Image.Resampling.LANCZOS)
+            low_path = os.path.join(low_dir, out_base + ".webp")
+            img_low.save(low_path, 'WEBP', quality=5)
             
+        return f"Done: {out_base}"
+    except Exception as e:
+        return f"Error processing {path}: {str(e)}"
+
+def generate_simple_tiles():
+    ensure_dir(os.path.join(BASE_OUTPUT_DIR, "low_res"))
+    ensure_dir(os.path.join(BASE_OUTPUT_DIR, "med_res"))
+    ensure_dir(os.path.join(BASE_OUTPUT_DIR, "high_res"))
+
+    tif_files = sorted(glob.glob(os.path.join(INPUT_DIR, "*.tif")))
+    print(f"Found {len(tif_files)} TIFs. Converting (High=TIF, Med=Q5 WebP, Low=1m Q5 WebP)...")
+
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = list(pool.imap_unordered(process_single_tif, tif_files))
+        for r in results:
+            print(r)
+
     print("Conversion complete.")
 
 if __name__ == "__main__":
