@@ -38,9 +38,9 @@ def slice_png(png_path: pathlib.Path):
             # Skip fully transparent tiles
             if not tile.getbbox():
                 continue
-            tile.save(out_dir / f"{x}_{y}.webp", "WEBP", quality=80)
+            tile.save(out_dir / f"{x}_{y}.png")
 
-    print(f"✔️  {var} @ {timestamp}: {xtiles*ytiles} tiles written (WebP)")
+    print(f"✔️  {var} @ {timestamp}: {xtiles*ytiles} tiles written")
 
 def main():
     for ts_dir in PNG_BASE.iterdir():
