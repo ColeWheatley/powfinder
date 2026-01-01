@@ -89,8 +89,9 @@ class PistonViewer {
         try {
             await this.loadTile(TILE_X, TILE_Y);
             console.log("LoadTile complete, hiding loader.");
-            document.getElementById('loader').style.opacity = '0';
-            setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+            const loader = document.getElementById('loader');
+            loader.classList.add('hide');
+            setTimeout(() => loader.style.display = 'none', 500);
         } catch (e) {
             console.error("Failed to load tile:", e);
         }
