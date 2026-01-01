@@ -101,6 +101,7 @@ html,body{height:100%;margin:0;}
 .legend-bar {
     position: relative;
     flex-grow: 1; /* Desktop: take remaining space */
+    min-width: 150px; /* Prevent collapse on desktop */
     height: 3vh; /* Desktop height */
     margin: 0 1vw; /* Desktop margin */
     border-radius: 1vh;
@@ -171,7 +172,7 @@ html,body{height:100%;margin:0;}
 }
 
 .info-box-right {
-  width: 50%;
+  flex-grow: 1; /* Allow it to take up space for the legend */
   display: flex;
   align-items: center;
   justify-content: flex-end; /* Pushes legend content to the right */
