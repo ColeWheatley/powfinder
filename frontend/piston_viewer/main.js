@@ -9,6 +9,12 @@ const HEX_WIDTH = 10;
 const HEX_DX = HEX_WIDTH * (Math.sqrt(3) / 2);
 const SCALE_Z = 1.0;
 const DEFAULT_RENDER_DISTANCE = 2000;
+const FLOOR_MODE = 'view-min';
+// Options: view-min, view-avg, camera-tile-min, camera-tile-avg, camera-tile-base, global-min, global-avg, global-base
+const LOCK_FLOOR_ON_RISE = true;
+const FLOOR_LOCK_THRESHOLD = 0.02;
+const TILE_BOUNDS_MIN_Y = -10000;
+const TILE_BOUNDS_MAX_Y = 10000;
 
 class PistonViewer {
     constructor() {
@@ -52,6 +58,11 @@ class PistonViewer {
         this.manifest = null;
         this.materialsToUpdate = [];
         this.worldOrigin = { x: 0, y: 0 };
+        this.floorMode = FLOOR_MODE;
+        this.floorState = { locked: false, value: 0.0, lastFactor: 0.0 };
+        this.globalStats = { min: Infinity, avgSum: 0.0, baseSum: 0.0, count: 0 };
+        this.frustum = new THREE.Frustum();
+        this.projScreenMatrix = new THREE.Matrix4();
         this.lightingSettings = {
             aoFloor: 0.0,
             aoPower: 1.0,
@@ -152,6 +163,170 @@ class PistonViewer {
         }
     }
 
+    updateFloorUniforms() {
+        for (const mat of this.materialsToUpdate) {
+            const shader = mat.userData.shader;
+            if (!shader) continue;
+            shader.uniforms.uFloorOffset.value = this.floorState.value;
+        }
+    }
+
+    updateGlobalStats(stats) {
+        if (!stats) return;
+        if (Number.isFinite(stats.min)) {
+            this.globalStats.min = Math.min(this.globalStats.min, stats.min);
+        }
+        if (Number.isFinite(stats.avg)) {
+            this.globalStats.avgSum += stats.avg;
+        }
+        if (Number.isFinite(stats.base)) {
+            this.globalStats.baseSum += stats.base;
+        }
+        this.globalStats.count += 1;
+    }
+
+    getTilesInView() {
+        this.camera.updateMatrixWorld();
+        this.projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+        this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
+
+        const target = this.controls.target;
+        const renderDistance = this.renderSettings.renderDistance;
+        const renderDistanceSq = renderDistance * renderDistance;
+        const inView = [];
+
+        for (const tile of this.tiles) {
+            if (!tile.stats || !tile.bounds) continue;
+            const dx = target.x - tile.center.x;
+            const dz = target.z - tile.center.z;
+            if ((dx * dx + dz * dz) > renderDistanceSq) continue;
+            if (this.frustum.intersectsBox(tile.bounds)) {
+                inView.push(tile);
+            }
+        }
+        return inView;
+    }
+
+    getTileUnderTarget() {
+        const x = this.controls.target.x;
+        const z = this.controls.target.z;
+        for (const tile of this.tiles) {
+            if (!tile.bounds) continue;
+            if (x >= tile.bounds.min.x && x <= tile.bounds.max.x &&
+                z >= tile.bounds.min.z && z <= tile.bounds.max.z) {
+                return tile;
+            }
+        }
+        return null;
+    }
+
+    reduceMin(tiles, getValue) {
+        let min = Infinity;
+        for (const tile of tiles) {
+            const value = getValue(tile);
+            if (Number.isFinite(value)) min = Math.min(min, value);
+        }
+        return Number.isFinite(min) ? min : null;
+    }
+
+    reduceAvg(tiles, getValue) {
+        let sum = 0.0;
+        let count = 0;
+        for (const tile of tiles) {
+            const value = getValue(tile);
+            if (Number.isFinite(value)) {
+                sum += value;
+                count += 1;
+            }
+        }
+        return count ? (sum / count) : null;
+    }
+
+    computeFloorCandidates() {
+        const inView = this.getTilesInView();
+        const tiles = inView.length ? inView : this.tiles.filter((tile) => tile.stats);
+        const viewMin = this.reduceMin(tiles, (tile) => tile.stats.min);
+        const viewAvg = this.reduceAvg(tiles, (tile) => tile.stats.avg);
+        const cameraTile = this.getTileUnderTarget();
+        const cameraMin = cameraTile?.stats?.min ?? null;
+        const cameraAvg = cameraTile?.stats?.avg ?? null;
+        const cameraBase = cameraTile?.stats?.base ?? null;
+        const globalMin = this.globalStats.count ? this.globalStats.min : viewMin;
+        const globalAvg = this.globalStats.count ? (this.globalStats.avgSum / this.globalStats.count) : viewAvg;
+        const globalBase = this.globalStats.count ? (this.globalStats.baseSum / this.globalStats.count) : cameraBase;
+
+        return {
+            viewMin,
+            viewAvg,
+            cameraMin,
+            cameraAvg,
+            cameraBase,
+            globalMin,
+            globalAvg,
+            globalBase
+        };
+    }
+
+    pickFloorValue() {
+        const candidates = this.computeFloorCandidates();
+        let value = null;
+
+        switch (this.floorMode) {
+            case 'view-avg':
+                value = candidates.viewAvg;
+                break;
+            case 'camera-tile-min':
+                value = candidates.cameraMin;
+                break;
+            case 'camera-tile-avg':
+                value = candidates.cameraAvg;
+                break;
+            case 'camera-tile-base':
+                value = candidates.cameraBase;
+                break;
+            case 'global-min':
+                value = candidates.globalMin;
+                break;
+            case 'global-avg':
+                value = candidates.globalAvg;
+                break;
+            case 'global-base':
+                value = candidates.globalBase;
+                break;
+            case 'view-min':
+            default:
+                value = candidates.viewMin;
+                break;
+        }
+
+        if (!Number.isFinite(value)) {
+            value = candidates.viewMin ?? candidates.globalMin ?? 0.0;
+        }
+        return Number.isFinite(value) ? value : 0.0;
+    }
+
+    updateFloorState(heightFactor) {
+        const threshold = FLOOR_LOCK_THRESHOLD;
+        if (heightFactor <= threshold) {
+            this.floorState.locked = false;
+            return;
+        }
+
+        if (LOCK_FLOOR_ON_RISE) {
+            if (!this.floorState.locked && this.floorState.lastFactor <= threshold) {
+                this.floorState.value = this.pickFloorValue();
+                this.floorState.locked = true;
+                this.updateFloorUniforms();
+            }
+        } else {
+            const nextValue = this.pickFloorValue();
+            if (Number.isFinite(nextValue) && nextValue !== this.floorState.value) {
+                this.floorState.value = nextValue;
+                this.updateFloorUniforms();
+            }
+        }
+    }
+
     updateFogAndClip() {
         const dist = this.renderSettings.renderDistance;
         const fogStart = Math.max(10, dist * 0.6);
@@ -241,7 +416,9 @@ class PistonViewer {
         // 3. Fetch Binary Data
         const response = await fetch(binUrl);
         const buffer = await response.arrayBuffer();
-        const hexData = this.parseBinary(buffer);
+        const parsed = this.parseBinary(buffer);
+        const hexData = parsed.hexes;
+        const stats = parsed.stats;
 
         // 4. Create Instanced Mesh (with Cloned Geometry!)
         const mesh = this.createInstancedMesh(hexData, material);
@@ -252,10 +429,20 @@ class PistonViewer {
 
         this.scene.add(mesh);
 
+        const centerX = posX + (TILE_WIDTH_WORLD / 2);
+        const centerZ = posZ - (TILE_HEIGHT_WORLD / 2);
+        const bounds = new THREE.Box3(
+            new THREE.Vector3(posX, TILE_BOUNDS_MIN_Y, posZ - TILE_HEIGHT_WORLD),
+            new THREE.Vector3(posX + TILE_WIDTH_WORLD, TILE_BOUNDS_MAX_Y, posZ)
+        );
+
         const tileObj = {
             x, y,
             mesh,
             material,
+            stats,
+            center: { x: centerX, z: centerZ },
+            bounds,
             highResLoaded: false,
             highResLoading: false,
             medResLoaded: false,
@@ -263,14 +450,30 @@ class PistonViewer {
             urls: { med: medTexUrl, high: highTexUrl }
         };
         this.tiles.push(tileObj);
+        this.updateGlobalStats(stats);
     }
 
     parseBinary(buffer) {
         const view = new DataView(buffer);
-        // CRITICAL FIX: Read Base Elevation and ADD to relative Z values
-        const baseElevation = view.getFloat32(0, true);
+        let baseElevation = view.getFloat32(0, true);
+        let minElevation = baseElevation;
+        let avgElevation = baseElevation;
+        let headerSize = 4;
+
+        if ((buffer.byteLength - 12) % 14 === 0) {
+            baseElevation = view.getFloat32(0, true);
+            minElevation = view.getFloat32(4, true);
+            avgElevation = view.getFloat32(8, true);
+            headerSize = 12;
+        } else if ((buffer.byteLength - 4) % 14 === 0) {
+            headerSize = 4;
+        }
+
         const hexData = [];
-        let offset = 4;
+        let offset = headerSize;
+        let minAbs = Infinity;
+        let sumAbs = 0.0;
+        let count = 0;
 
         while (offset < buffer.byteLength) {
             const z = this.decodeFloat16(view.getUint16(offset, true));
@@ -281,8 +484,9 @@ class PistonViewer {
             const n_sw = this.decodeFloat16(view.getUint16(offset + 10, true));
             const n_nw = this.decodeFloat16(view.getUint16(offset + 12, true));
 
+            const zAbs = z + baseElevation;
             hexData.push({
-                z: z + baseElevation,
+                z: zAbs,
                 n_n: n_n + baseElevation,
                 n_ne: n_ne + baseElevation,
                 n_se: n_se + baseElevation,
@@ -290,9 +494,21 @@ class PistonViewer {
                 n_sw: n_sw + baseElevation,
                 n_nw: n_nw + baseElevation
             });
+
+            if (headerSize === 4) {
+                minAbs = Math.min(minAbs, zAbs);
+                sumAbs += zAbs;
+                count += 1;
+            }
             offset += 14;
         }
-        return hexData;
+
+        if (headerSize === 4) {
+            if (!Number.isFinite(minAbs)) minAbs = baseElevation;
+            const avgAbs = count ? (sumAbs / count) : baseElevation;
+            return { hexes: hexData, stats: { base: baseElevation, min: minAbs, avg: avgAbs } };
+        }
+        return { hexes: hexData, stats: { base: baseElevation, min: minElevation, avg: avgElevation } };
     }
 
     createInstancedMesh(hexes, material) {
@@ -306,7 +522,6 @@ class PistonViewer {
         const instanceNZ_2 = new Float32Array(numHexes * 4);
 
         let idx = 0;
-        const floorOffset = 0.0;
 
         for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += HEX_DX) {
             const colIdx = Math.round(x / HEX_DX);
@@ -321,14 +536,14 @@ class PistonViewer {
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(idx, matrix);
 
-                instanceNZ_1[idx * 4] = (h.n_n - floorOffset) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 1] = (h.n_ne - floorOffset) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 2] = (h.n_se - floorOffset) * SCALE_Z;
-                instanceNZ_1[idx * 4 + 3] = (h.n_s - floorOffset) * SCALE_Z;
+                instanceNZ_1[idx * 4] = h.n_n * SCALE_Z;
+                instanceNZ_1[idx * 4 + 1] = h.n_ne * SCALE_Z;
+                instanceNZ_1[idx * 4 + 2] = h.n_se * SCALE_Z;
+                instanceNZ_1[idx * 4 + 3] = h.n_s * SCALE_Z;
 
-                instanceNZ_2[idx * 4] = (h.n_sw - floorOffset) * SCALE_Z;
-                instanceNZ_2[idx * 4 + 1] = (h.n_nw - floorOffset) * SCALE_Z;
-                instanceNZ_2[idx * 4 + 2] = (h.z - floorOffset) * SCALE_Z;
+                instanceNZ_2[idx * 4] = h.n_sw * SCALE_Z;
+                instanceNZ_2[idx * 4 + 1] = h.n_nw * SCALE_Z;
+                instanceNZ_2[idx * 4 + 2] = h.z * SCALE_Z;
                 instanceNZ_2[idx * 4 + 3] = 0.0;
 
                 idx++;
@@ -348,6 +563,7 @@ class PistonViewer {
         material.onBeforeCompile = (shader) => {
             material.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
+            shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
 
             shader.uniforms.uAoFloor = { value: this.lightingSettings.aoFloor };
@@ -363,6 +579,7 @@ class PistonViewer {
                 '#include <common>',
                 `#include <common>
                 uniform float uHeightFactor;
+                uniform float uFloorOffset;
                 attribute vec4 instanceNZ_1; 
                 attribute vec4 instanceNZ_2;
                 attribute float faceIndex;
@@ -381,15 +598,15 @@ class PistonViewer {
                 
                 int face = int(faceIndex + 0.5);
                 float neighborZ = 0.0;
-                float myZ = instanceNZ_2.z;
+                float myZ = instanceNZ_2.z - uFloorOffset;
                 bool isWall = true;
 
-                if (face == 0) neighborZ = instanceNZ_1.x; // N
-                else if (face == 1) neighborZ = instanceNZ_1.y; // NE
-                else if (face == 2) neighborZ = instanceNZ_1.z; // SE
-                else if (face == 3) neighborZ = instanceNZ_1.w; // S
-                else if (face == 4) neighborZ = instanceNZ_2.x; // SW
-                else if (face == 5) neighborZ = instanceNZ_2.y; // NW
+                if (face == 0) neighborZ = instanceNZ_1.x - uFloorOffset; // N
+                else if (face == 1) neighborZ = instanceNZ_1.y - uFloorOffset; // NE
+                else if (face == 2) neighborZ = instanceNZ_1.z - uFloorOffset; // SE
+                else if (face == 3) neighborZ = instanceNZ_1.w - uFloorOffset; // S
+                else if (face == 4) neighborZ = instanceNZ_2.x - uFloorOffset; // SW
+                else if (face == 5) neighborZ = instanceNZ_2.y - uFloorOffset; // NW
                 else { isWall = false; neighborZ = myZ; }
 
                 float animMyZ = myZ * uHeightFactor;
@@ -499,6 +716,7 @@ class PistonViewer {
         let factor = angle / (20 * Math.PI / 180);
         factor = Math.min(1.0, Math.max(0.01, factor));
 
+        this.updateFloorState(factor);
         for (const mat of this.materialsToUpdate) {
             if (mat.userData.shader) {
                 mat.userData.shader.uniforms.uHeightFactor.value = factor;
@@ -507,6 +725,7 @@ class PistonViewer {
 
         this.updateLOD();
         this.renderer.render(this.scene, this.camera);
+        this.floorState.lastFactor = factor;
     }
 
     updateFps() {

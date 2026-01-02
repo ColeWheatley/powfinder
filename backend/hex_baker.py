@@ -58,7 +58,9 @@ def process_tile(tif_path):
         return np.nan
 
     hexes = []
-    base_z = None
+    # FIX: Use a CONSTANT GLOBAL BASELINE (1000m) for all 80 tiles.
+    # This ensures perfect horizontal/vertical stitching and eliminates floating strips.
+    base_z = 1000.0 
 
     # Grid Gen
     right = 1250
@@ -84,27 +86,23 @@ def process_tile(tif_path):
             y_center = (bounds.top - dy) - y_shift
             
             z = get_z(x_center, y_center)
-            if base_z is None and not np.isnan(z): base_z = z
-            
-            ref_z = z if not np.isnan(z) else (base_z or 0.0)
-            z_safe = z if not np.isnan(z) else ref_z
+            z_safe = z if not np.isnan(z) else base_z
 
             neighbors_z = []
             for off in OFFSETS:
                 nx = x_center + off[0]
                 ny = y_center + off[1]
                 nz = get_z(nx, ny)
+                # For neighbors on the edge of the DEM, tilt them slightly down
                 neighbors_z.append(nz if not np.isnan(nz) else (z_safe - 5.0))
             
             hexes.append({
-                'z': z_safe - (base_z or 0.0),
-                'n': [n - (base_z or 0.0) for n in neighbors_z]
+                'z': z_safe - base_z,
+                'n': [n - base_z for n in neighbors_z]
             })
 
     # --- BORDER PROTECTION ---
-    # Detect if we hit the Italy border (Z values dropping to zero)
-    # We flatten it to the average of the valid parts.
-    abs_zs = [h['z'] + (base_z or 0.0) for h in hexes]
+    abs_zs = [h['z'] + base_z for h in hexes]
     has_zeros = any(z <= 1.0 for z in abs_zs)
     
     if has_zeros:
@@ -112,21 +110,35 @@ def process_tile(tif_path):
         if valid_zs:
             avg_z = sum(valid_zs) / len(valid_zs)
             print(f"  !!! BORDER DETECTED (Italy) !!! Flattening tile to {avg_z:.1f}m")
-            base_z = avg_z
+            b_val = avg_z
             for h in hexes:
-                h['z'] = 0.0
+                h['z'] = 0.0 # Height relative to b_val
                 h['n'] = [0.0] * 6
         else:
             print(f"  !!! DEAD TILE (Italy) !!! Flattening to 0m")
-            base_z = 0.0
+            b_val = 0.0
             for h in hexes:
                 h['z'] = 0.0
                 h['n'] = [0.0] * 6
+        
+        # Save this tile with its specific flattened base_z instead of global 1000
+        # This prevents it from dropping into a hole since its relative z is 0.0
+        save_base = b_val
+    else:
+        save_base = base_z
 
-    if not hexes: return f"SKIP: {tif_path}"
+    final_abs_zs = [h['z'] + save_base for h in hexes]
+    if final_abs_zs:
+        min_z = min(final_abs_zs)
+        avg_z = sum(final_abs_zs) / len(final_abs_zs)
+    else:
+        min_z = save_base
+        avg_z = save_base
 
     with open(out_path, 'wb') as f:
-        f.write(struct.pack('f', base_z or 0.0))
+        f.write(struct.pack('<f', save_base))
+        f.write(struct.pack('<f', min_z))
+        f.write(struct.pack('<f', avg_z))
         for h in hexes:
             data = [h['z']] + h['n']
             f.write(np.array(data, dtype=np.half).tobytes())
@@ -138,7 +150,7 @@ def main():
         os.makedirs(OUTPUT_DIR)
     
     tifs = sorted(glob.glob(os.path.join(SAT_DIR, "*.tif")))
-    print(f"Baking PISTON V4 (Border Protection): {len(tifs)} targets...")
+    print(f"Baking PISTON V4 (GLOBAL BASELINE 1000m): {len(tifs)} targets...")
     for tif in tifs:
         print(process_tile(tif))
 
