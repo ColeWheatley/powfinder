@@ -5,6 +5,7 @@ import rasterio
 import struct
 import numpy as np
 import math
+import multiprocessing
 from rasterio.windows import from_bounds
 
 # --- CONSTANTS ---
@@ -18,13 +19,15 @@ SAT_DIR = "/Users/cole/dev/PowFinder/backend/aerial_tifs"
 OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/piston_viewer/tiles_bin"
 
 OFFSETS = [
-    (0, 10),      # 0: N
-    (8.66025, 5), # 1: NE
-    (8.66025, -5),# 2: SE
-    (0, -10),     # 3: S
+    (0, 10),       # 0: N
+    (8.66025, 5),  # 1: NE
+    (8.66025, -5), # 2: SE
+    (0, -10),      # 3: S
     (-8.66025, -5),# 4: SW
-    (-8.66025, 5) # 5: NW
+    (-8.66025, 5)  # 5: NW
 ]
+# NOTE: Viewer face indices are clockwise: 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW.
+# Neighbor array order remains [N, NE, SE, S, SW, NW]; keep in sync with shader mapping.
 
 def process_tile(tif_path):
     print(f"Processing {os.path.basename(tif_path)}...")
@@ -83,7 +86,7 @@ def process_tile(tif_path):
         y_shift = 5.0 if (col_idx % 2 == 1) else 0.0
         
         for dy in y_steps:
-            y_center = (bounds.top - dy) - y_shift
+            y_center = (bounds.bottom + dy) - y_shift
             
             z = get_z(x_center, y_center)
             z_safe = z if not np.isnan(z) else base_z
@@ -91,7 +94,7 @@ def process_tile(tif_path):
             neighbors_z = []
             for off in OFFSETS:
                 nx = x_center + off[0]
-                ny = y_center + off[1]
+                ny = y_center - off[1]
                 nz = get_z(nx, ny)
                 # For neighbors on the edge of the DEM, tilt them slightly down
                 neighbors_z.append(nz if not np.isnan(nz) else (z_safe - 5.0))
@@ -150,9 +153,15 @@ def main():
         os.makedirs(OUTPUT_DIR)
     
     tifs = sorted(glob.glob(os.path.join(SAT_DIR, "*.tif")))
-    print(f"Baking PISTON V4 (GLOBAL BASELINE 1000m): {len(tifs)} targets...")
-    for tif in tifs:
-        print(process_tile(tif))
+    print(f"Baking PISTON V4 (GLOBAL BASELINE 1000m) with {multiprocessing.cpu_count()} workers...")
+    
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = list(pool.imap_unordered(process_tile, tifs))
+        for r in results:
+            if "SUCCESS" not in r:
+                print(r)
+
+    print("Baking complete.")
 
 if __name__ == "__main__":
     main()

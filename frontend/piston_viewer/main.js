@@ -8,22 +8,40 @@ const TILE_HEIGHT_WORLD = 1000;
 const HEX_WIDTH = 10;
 const HEX_DX = HEX_WIDTH * (Math.sqrt(3) / 2);
 const SCALE_Z = 1.0;
-const DEFAULT_RENDER_DISTANCE = 2000;
+const DEFAULT_RENDER_DISTANCE = 10000;
 const FLOOR_MODE = 'view-min';
 // Options: view-min, view-avg, camera-tile-min, camera-tile-avg, camera-tile-base, global-min, global-avg, global-base
 const LOCK_FLOOR_ON_RISE = true;
 const FLOOR_LOCK_THRESHOLD = 0.02;
 const TILE_BOUNDS_MIN_Y = -10000;
 const TILE_BOUNDS_MAX_Y = 10000;
-const DEM_FLIP_NS = true;
+const DEM_FLIP_NS = false;
 const BORDER_WALLS_ALWAYS = true;
+const DEBUG_FIXED_WALLS = false;
+const DEBUG_FIXED_WALL_DEPTH = 10.0;
+const DEBUG_VIOLET_SOUTH = false;
+const DEBUG_NEIGHBOR_SLOT_TEST = false;
+const DEBUG_SLOT_INDEX = 1;
+const DEBUG_SLOT_WALL_DEPTH = 10.0;
+const DEBUG_OTHER_WALL_DEPTH = 2.0;
+const LIGHTING_DEFAULTS = {
+    aoFloor: 0.0,
+    aoPower: 1.0,
+    lambert: 0.0,
+    rim: 0.0,
+    rimPower: 2.2,
+    spec: 0.0,
+    specPower: 30.0,
+    slopeLight: 0.0,
+};
 
 class PistonViewer {
     constructor() {
         console.log("Initializing PistonViewer (Multi-Tile)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0xff2aa1);
+        // this.scene.background = new THREE.Color(0xff2aa1); // debug pink
+        this.scene.background = new THREE.Color(0x000000);
 
         // Initial Camera Setup
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
@@ -72,91 +90,18 @@ class PistonViewer {
         this.globalStats = { min: Infinity, avgSum: 0.0, baseSum: 0.0, count: 0 };
         this.frustum = new THREE.Frustum();
         this.projScreenMatrix = new THREE.Matrix4();
-        this.lightingSettings = {
-            aoFloor: 0.0,
-            aoPower: 1.0,
-            lambert: 0.0,
-            rim: 0.0,
-            rimPower: 2.2,
-            spec: 0.0,
-            specPower: 30.0,
-            slopeLight: 0.0,
-        };
         this.renderSettings = {
             renderDistance: DEFAULT_RENDER_DISTANCE,
         };
         this.fpsState = { lastSample: performance.now(), frames: 0 };
-        this.fpsEl = null;
+        this.fpsEl = document.getElementById('fps-counter');
         this.tilesLoadedCount = 0;
 
         // Start
-        this.initLightingControls();
         this.initDebugConsole();
         this.updateFogAndClip();
         this.initWorld();
         this.animate();
-    }
-
-    initLightingControls() {
-        this.textureFlipY = false;
-
-        // Debug: Texture Flip Key Listener
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'f' || e.key === 'F') {
-                this.textureFlipY = !this.textureFlipY;
-                this.log(`Texture Flip Y: ${this.textureFlipY}`, "info");
-                for (const mat of this.materialsToUpdate) {
-                    if (mat.userData.shader) {
-                        mat.userData.shader.uniforms.uTextureFlipY.value = this.textureFlipY ? 1.0 : 0.0;
-                    }
-                }
-            }
-        });
-
-        this.fpsEl = document.getElementById('fps-counter');
-
-        const panel = document.getElementById('shader-controls');
-        if (!panel) return;
-
-        const bind = (id, key, format) => {
-            const input = document.getElementById(id);
-            if (!input) return;
-            const output = document.getElementById(`${id}-val`);
-            const fmt = format || ((val) => val.toFixed(2));
-            const update = () => {
-                const value = parseFloat(input.value);
-                this.lightingSettings[key] = value;
-                if (output) output.textContent = fmt(value);
-                this.updateLightingUniforms();
-            };
-            input.addEventListener('input', update);
-            update();
-        };
-
-        const bindRender = (id, key, format) => {
-            const input = document.getElementById(id);
-            if (!input) return;
-            const output = document.getElementById(`${id}-val`);
-            const fmt = format || ((val) => val.toFixed(0));
-            const update = () => {
-                const value = parseFloat(input.value);
-                this.renderSettings[key] = value;
-                if (output) output.textContent = fmt(value);
-                this.updateFogAndClip();
-            };
-            input.addEventListener('input', update);
-            update();
-        };
-
-        bind('ao-floor', 'aoFloor');
-        bind('ao-power', 'aoPower');
-        bind('lambert', 'lambert');
-        bind('rim', 'rim');
-        bind('rim-power', 'rimPower');
-        bind('spec', 'spec');
-        bind('spec-power', 'specPower', (val) => val.toFixed(0));
-        bind('slope-light', 'slopeLight');
-        bindRender('render-distance', 'renderDistance', (val) => `${(val / 1000).toFixed(1)}km`);
     }
 
     initDebugConsole() {
@@ -193,21 +138,6 @@ class PistonViewer {
 
         this.consoleEl.appendChild(line);
         this.consoleEl.scrollTop = this.consoleEl.scrollHeight;
-    }
-
-    updateLightingUniforms() {
-        for (const mat of this.materialsToUpdate) {
-            const shader = mat.userData.shader;
-            if (!shader) continue;
-            shader.uniforms.uAoFloor.value = this.lightingSettings.aoFloor;
-            shader.uniforms.uAoPower.value = this.lightingSettings.aoPower;
-            shader.uniforms.uLambertStrength.value = this.lightingSettings.lambert;
-            shader.uniforms.uRimStrength.value = this.lightingSettings.rim;
-            shader.uniforms.uRimPower.value = this.lightingSettings.rimPower;
-            shader.uniforms.uSpecStrength.value = this.lightingSettings.spec;
-            shader.uniforms.uSpecPower.value = this.lightingSettings.specPower;
-            shader.uniforms.uSlopeLight.value = this.lightingSettings.slopeLight;
-        }
     }
 
     updateFloorUniforms() {
@@ -671,14 +601,14 @@ class PistonViewer {
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
 
-            shader.uniforms.uAoFloor = { value: this.lightingSettings.aoFloor };
-            shader.uniforms.uAoPower = { value: this.lightingSettings.aoPower };
-            shader.uniforms.uLambertStrength = { value: this.lightingSettings.lambert };
-            shader.uniforms.uRimStrength = { value: this.lightingSettings.rim };
-            shader.uniforms.uRimPower = { value: this.lightingSettings.rimPower };
-            shader.uniforms.uSpecStrength = { value: this.lightingSettings.spec };
-            shader.uniforms.uSpecPower = { value: this.lightingSettings.specPower };
-            shader.uniforms.uSlopeLight = { value: this.lightingSettings.slopeLight };
+            shader.uniforms.uAoFloor = { value: LIGHTING_DEFAULTS.aoFloor };
+            shader.uniforms.uAoPower = { value: LIGHTING_DEFAULTS.aoPower };
+            shader.uniforms.uLambertStrength = { value: LIGHTING_DEFAULTS.lambert };
+            shader.uniforms.uRimStrength = { value: LIGHTING_DEFAULTS.rim };
+            shader.uniforms.uRimPower = { value: LIGHTING_DEFAULTS.rimPower };
+            shader.uniforms.uSpecStrength = { value: LIGHTING_DEFAULTS.spec };
+            shader.uniforms.uSpecPower = { value: LIGHTING_DEFAULTS.specPower };
+            shader.uniforms.uSlopeLight = { value: LIGHTING_DEFAULTS.slopeLight };
 
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>',
@@ -696,35 +626,54 @@ class PistonViewer {
                 varying float vFaceSlope;
                 varying float vGrad;
                 varying float vIsHidden;
+                varying float vFaceId;
                 `
             ).replace(
                 '#include <begin_vertex>',
                 `#include <begin_vertex>
                 vIsHidden = 0.0;
+                vFaceId = faceIndex;
                 
+                // Face index mapping (verified in-scene):
+                // 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW (clockwise)
                 int face = int(faceIndex + 0.5);
+                int neighborSlot = -1;
                 float neighborZ = 0.0;
                 float myZ = instanceNZ_2.z - uFloorOffset;
                 bool isWall = true;
 
-                if (face == 0) neighborZ = instanceNZ_1.x - uFloorOffset; // N
-                else if (face == 1) neighborZ = instanceNZ_1.y - uFloorOffset; // NE
-                else if (face == 2) neighborZ = instanceNZ_1.z - uFloorOffset; // SE
-                else if (face == 3) neighborZ = instanceNZ_1.w - uFloorOffset; // S
-                else if (face == 4) neighborZ = instanceNZ_2.x - uFloorOffset; // SW
-                else if (face == 5) neighborZ = instanceNZ_2.y - uFloorOffset; // NW
+                if (face == 0) { neighborZ = instanceNZ_1.x - uFloorOffset; neighborSlot = 0; } // N
+                else if (face == 1) { neighborZ = instanceNZ_1.y - uFloorOffset; neighborSlot = 1; } // NE
+                else if (face == 2) { neighborZ = instanceNZ_1.z - uFloorOffset; neighborSlot = 2; } // SE
+                else if (face == 3) { neighborZ = instanceNZ_1.w - uFloorOffset; neighborSlot = 3; } // S
+                else if (face == 4) { neighborZ = instanceNZ_2.x - uFloorOffset; neighborSlot = 4; } // SW
+                else if (face == 5) { neighborZ = instanceNZ_2.y - uFloorOffset; neighborSlot = 5; } // NW
                 else { isWall = false; neighborZ = myZ; }
+
+                if (${DEBUG_NEIGHBOR_SLOT_TEST ? 'true' : 'false'}) {
+                    float depth = (neighborSlot == ${DEBUG_SLOT_INDEX}) ? ${DEBUG_SLOT_WALL_DEPTH.toFixed(1)} : ${DEBUG_OTHER_WALL_DEPTH.toFixed(1)};
+                    neighborZ = myZ - depth;
+                }
+
+                if (${DEBUG_FIXED_WALLS ? 'true' : 'false'}) {
+                    neighborZ = myZ - ${DEBUG_FIXED_WALL_DEPTH.toFixed(1)};
+                }
 
                 float animMyZ = myZ * uHeightFactor;
                 float animNeighborZ = neighborZ * uHeightFactor;
 
                 if (isWall) {
-                    if (instanceBorder < 0.5 && myZ <= neighborZ + 0.01) { 
-                        vIsHidden = 1.0;
-                        transformed = vec3(0.0);
-                    } else {
+                    if (${DEBUG_FIXED_WALLS ? 'true' : 'false'}) {
                         if (position.y > 0.5) transformed.y = animMyZ;
                         else transformed.y = animNeighborZ;
+                    } else {
+                        if (instanceBorder < 0.5 && myZ <= neighborZ + 0.01) { 
+                            vIsHidden = 1.0;
+                            transformed = vec3(0.0);
+                        } else {
+                            if (position.y > 0.5) transformed.y = animMyZ;
+                            else transformed.y = animNeighborZ;
+                        }
                     }
                 } else {
                     transformed.y = animMyZ; // Top Cap
@@ -762,6 +711,7 @@ class PistonViewer {
                 varying float vFaceSlope;
                 varying float vGrad;
                 varying float vIsHidden;
+                varying float vFaceId;
                 `
             ).replace(
                 '#include <map_fragment>',
@@ -804,12 +754,21 @@ class PistonViewer {
                     else if (vFaceSlope >= 45.0) slopeColor = cRed;
                     slopeColor *= mix(1.0, light, uSlopeLight) * ao;
                     
-                    if (vFaceSlope >= 30.0) diffuseColor.rgb = slopeColor;
-                    else diffuseColor.rgb = sideBase;
+                    if (${DEBUG_VIOLET_SOUTH ? 'true' : 'false'}) {
+                        if (vFaceId < 0.5) diffuseColor.rgb = vec3(1.0, 0.1, 0.1); // S
+                        else if (vFaceId < 1.5) diffuseColor.rgb = vec3(1.0, 0.6, 0.0); // SE
+                        else if (vFaceId < 2.5) diffuseColor.rgb = vec3(1.0, 1.0, 0.1); // NE
+                        else if (vFaceId < 3.5) diffuseColor.rgb = vec3(0.8, 0.1, 0.9); // N
+                        else if (vFaceId < 4.5) diffuseColor.rgb = vec3(0.1, 1.0, 1.0); // NW
+                        else if (vFaceId < 5.5) diffuseColor.rgb = vec3(0.1, 0.9, 0.2); // SW
+                    } else if (vFaceSlope >= 30.0) {
+                        diffuseColor.rgb = slopeColor;
+                    } else {
+                        diffuseColor.rgb = sideBase;
+                    }
                 }
                 `
             );
-            this.updateLightingUniforms();
         };
     }
 
