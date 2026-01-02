@@ -16,13 +16,14 @@ const FLOOR_LOCK_THRESHOLD = 0.02;
 const TILE_BOUNDS_MIN_Y = -10000;
 const TILE_BOUNDS_MAX_Y = 10000;
 const DEM_FLIP_NS = true;
+const BORDER_WALLS_ALWAYS = true;
 
 class PistonViewer {
     constructor() {
         console.log("Initializing PistonViewer (Multi-Tile)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050505);
+        this.scene.background = new THREE.Color(0xff2aa1);
 
         // Initial Camera Setup
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
@@ -57,6 +58,10 @@ class PistonViewer {
         // State
         this.tiles = [];
         this.manifest = null;
+        this.loadingTiles = new Set(); // Track tiles currently in flight
+        this.essentialTilesLoaded = 0;
+        this.essentialTilesTarget = 0;
+        this.loaderHidden = false;
         this.materialsToUpdate = [];
         this.worldOrigin = { x: 0, y: 0 };
         this.floorMode = FLOOR_MODE;
@@ -79,6 +84,7 @@ class PistonViewer {
         };
         this.fpsState = { lastSample: performance.now(), frames: 0 };
         this.fpsEl = null;
+        this.tilesLoadedCount = 0;
 
         // Start
         this.initLightingControls();
@@ -173,7 +179,7 @@ class PistonViewer {
         line.className = `log-line ${type}`;
 
         const now = new Date();
-        const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        const time = `${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0')}`;
 
         const span = document.createElement('span');
         span.className = 'log-time';
@@ -405,20 +411,19 @@ class PistonViewer {
             this.controls.target.set(centerX, 0, centerZ);
             this.controls.update();
 
-            // Load All Tiles (Low Res Only)
-            for (const tile of this.manifest.tiles) {
-                this.loadSingleTile(tile).catch(e => console.error(`Error loading tile ${tile.x}_${tile.y}:`, e));
-            }
+            // Determine "Essential" tiles (those in the initial viewport)
+            const initialInView = this.manifest.tiles.filter(tileDef => {
+                const tx = tileDef.x - this.worldOrigin.x + (TILE_WIDTH_WORLD / 2);
+                const tz = -(tileDef.y - this.worldOrigin.y) - (TILE_HEIGHT_WORLD / 2);
+                const distSq = (centerX - tx) ** 2 + (centerZ - tz) ** 2;
+                return distSq < (this.renderSettings.renderDistance ** 2);
+            });
 
-            // Hide Loader
-            const loader = document.getElementById('loader');
-            if (loader) {
-                setTimeout(() => {
-                    loader.style.transition = 'opacity 0.5s';
-                    loader.style.opacity = '0';
-                    setTimeout(() => { loader.style.display = 'none'; }, 500);
-                }, 1500);
-            }
+            this.essentialTilesTarget = Math.max(1, initialInView.length);
+            this.log(`Proximity Engine: ${this.essentialTilesTarget} tiles required for first paint.`, "info");
+
+            // Only trigger updateLOD to start loading what's in range
+            this.updateLOD();
 
         } catch (err) {
             console.error("Error initializing world:", err);
@@ -428,11 +433,13 @@ class PistonViewer {
 
     async loadSingleTile(tileDef) {
         const { x, y } = tileDef;
+        const tileKey = `${x}_${y}`;
+        if (this.loadingTiles.has(tileKey)) return;
+        this.loadingTiles.add(tileKey);
 
         const posX = x - this.worldOrigin.x;
         const posZ = -(y - this.worldOrigin.y);
 
-        this.log(`[Start] Tile ${x},${y} | Loading...`);
         const t0 = performance.now();
 
         const binUrl = `tiles_bin/tile_${x}_${y}.bin`;
@@ -494,7 +501,40 @@ class PistonViewer {
         this.tiles.push(tileObj);
         this.updateGlobalStats(stats);
         const t1 = performance.now();
-        this.log(`[Ready] Tile ${x},${y} | ${(t1 - t0).toFixed(1)}ms | Meshes: ${hexData.length}`, "success");
+        this.tilesLoadedCount++;
+        this.loadingTiles.delete(tileKey);
+
+        if (this.tilesLoadedCount <= 5) {
+            this.log(`[Ready] Tile ${x},${y} | ${(t1 - t0).toFixed(1)}ms | Meshes: ${hexData.length}`, "success");
+        }
+
+        // Handle dynamic loading screen
+        if (!this.loaderHidden) {
+            // Check if this tile was part of the initial "essential" set
+            this.essentialTilesLoaded++;
+            if (this.essentialTilesLoaded >= this.essentialTilesTarget) {
+                this.hideLoader();
+            }
+        }
+
+        if (this.tilesLoadedCount === this.manifest.tiles.length) {
+            this.log(`System: All ${this.tilesLoadedCount} tiles rendered.`, "success");
+            const geoms = this.renderer.info.memory.geometries;
+            const textures = this.renderer.info.memory.textures;
+            this.log(`Final State: Geoms: ${geoms} | Tex: ${textures} | Manifest: ${this.manifest.tiles.length} tiles`, "info");
+        }
+    }
+
+    hideLoader() {
+        if (this.loaderHidden) return;
+        this.loaderHidden = true;
+        const loader = document.getElementById('loader');
+        if (loader) {
+            this.log("First paint ready. Fading loader.", "success");
+            loader.style.transition = 'opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+            loader.style.opacity = '0';
+            setTimeout(() => { loader.style.display = 'none'; }, 600);
+        }
     }
 
     parseBinary(buffer) {
@@ -564,6 +604,7 @@ class PistonViewer {
         const matrix = new THREE.Matrix4();
         const instanceNZ_1 = new Float32Array(numHexes * 4);
         const instanceNZ_2 = new Float32Array(numHexes * 4);
+        const instanceBorder = new Float32Array(numHexes);
 
         const xSteps = [];
         for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += HEX_DX) xSteps.push(x);
@@ -591,6 +632,10 @@ class PistonViewer {
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(instanceIdx, matrix);
 
+                instanceBorder[instanceIdx] = (BORDER_WALLS_ALWAYS && (
+                    row === 0 || row === rowCount - 1 || col === 0 || col === colCount - 1
+                )) ? 1.0 : 0.0;
+
                 instanceNZ_1[instanceIdx * 4] = h.n_n * SCALE_Z;
                 instanceNZ_1[instanceIdx * 4 + 1] = h.n_ne * SCALE_Z;
                 instanceNZ_1[instanceIdx * 4 + 2] = h.n_se * SCALE_Z;
@@ -606,6 +651,7 @@ class PistonViewer {
         mesh.instanceMatrix.needsUpdate = true;
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(instanceNZ_1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(instanceNZ_2, 4));
+        mesh.geometry.setAttribute('instanceBorder', new THREE.InstancedBufferAttribute(instanceBorder, 1));
         mesh.frustumCulled = true;
 
         return mesh;
@@ -635,6 +681,7 @@ class PistonViewer {
                 uniform float uFloorOffset;
                 attribute vec4 instanceNZ_1; 
                 attribute vec4 instanceNZ_2;
+                attribute float instanceBorder;
                 attribute float faceIndex;
                 
                 varying vec3 vLocalPos;
@@ -666,7 +713,7 @@ class PistonViewer {
                 float animNeighborZ = neighborZ * uHeightFactor;
 
                 if (isWall) {
-                    if (myZ <= neighborZ + 0.01) { 
+                    if (instanceBorder < 0.5 && myZ <= neighborZ + 0.01) { 
                         vIsHidden = 1.0;
                         transformed = vec3(0.0);
                     } else {
@@ -792,30 +839,35 @@ class PistonViewer {
         this.fpsEl.textContent = `FPS: ${fps.toFixed(0)} | Zoom: ${dist.toFixed(0)}`;
         this.fpsState.frames = 0;
         this.fpsState.lastSample = now;
-
-        // Periodic Memory Log
-        if (!this.lastMemCheck || now - this.lastMemCheck > 5000) {
-            this.lastMemCheck = now;
-            const loadedTiles = this.tiles.length;
-            const visibleTiles = this.tiles.filter(t => t.mesh.visible).length;
-            const highRes = this.tiles.filter(t => t.highResLoaded).length;
-            const geoms = this.renderer.info.memory.geometries;
-            const textures = this.renderer.info.memory.textures;
-
-            this.log(`MEM: ${visibleTiles}/${loadedTiles} Tiles Vis | HiRes: ${highRes} | Geoms: ${geoms} | Tex: ${textures}`, "info");
-        }
     }
 
     updateLOD() {
+        if (!this.manifest) return;
         const target = this.controls.target;
         const CAM_HIGH_RES_DIST = 600;
         const CAM_MED_RES_DIST = 1500;
         const renderDistance = this.renderSettings.renderDistance;
         const renderDistanceSq = renderDistance * renderDistance;
 
+        // 1. Check manifest for tiles that need to be loaded
+        for (const tileDef of this.manifest.tiles) {
+            const cx = (tileDef.x - this.worldOrigin.x) + 625;
+            const cz = -(tileDef.y - this.worldOrigin.y) - 500;
+            const distSq = (target.x - cx) ** 2 + (target.z - cz) ** 2;
+
+            if (distSq < renderDistanceSq) {
+                // Check if already loaded
+                const isLoaded = this.tiles.some(t => t.x === tileDef.x && t.y === tileDef.y);
+                if (!isLoaded) {
+                    this.loadSingleTile(tileDef).catch(e => console.error("Lazy Load Error:", e));
+                }
+            }
+        }
+
         const texLoader = new THREE.TextureLoader();
         const tiffLoader = new TIFFLoader();
 
+        // 2. Handle LOD for already loaded tiles
         for (const tile of this.tiles) {
             const cx = (tile.x - this.worldOrigin.x) + 625;
             const cz = -(tile.y - this.worldOrigin.y) - 500;
