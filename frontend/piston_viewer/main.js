@@ -15,6 +15,7 @@ const LOCK_FLOOR_ON_RISE = true;
 const FLOOR_LOCK_THRESHOLD = 0.02;
 const TILE_BOUNDS_MIN_Y = -10000;
 const TILE_BOUNDS_MAX_Y = 10000;
+const DEM_FLIP_NS = true;
 
 class PistonViewer {
     constructor() {
@@ -81,6 +82,7 @@ class PistonViewer {
 
         // Start
         this.initLightingControls();
+        this.initDebugConsole();
         this.updateFogAndClip();
         this.initWorld();
         this.animate();
@@ -93,7 +95,7 @@ class PistonViewer {
         window.addEventListener('keydown', (e) => {
             if (e.key === 'f' || e.key === 'F') {
                 this.textureFlipY = !this.textureFlipY;
-                console.log("Toggling Texture Flip Y:", this.textureFlipY);
+                this.log(`Texture Flip Y: ${this.textureFlipY}`, "info");
                 for (const mat of this.materialsToUpdate) {
                     if (mat.userData.shader) {
                         mat.userData.shader.uniforms.uTextureFlipY.value = this.textureFlipY ? 1.0 : 0.0;
@@ -148,6 +150,42 @@ class PistonViewer {
         bindRender('render-distance', 'renderDistance', (val) => `${(val / 1000).toFixed(1)}km`);
     }
 
+    initDebugConsole() {
+        this.consoleEl = document.getElementById('console-output');
+        const btn = document.getElementById('copy-log-btn');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                if (this.consoleEl) {
+                    const text = this.consoleEl.innerText;
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.log("Log copied to clipboard", "success");
+                    });
+                }
+            });
+        }
+        this.log("System Ready. PistonViewer Initialized.", "success");
+        this.log(`Config: Render Dist: ${this.renderSettings.renderDistance}, Floor Lock: ${LOCK_FLOOR_ON_RISE}`);
+    }
+
+    log(msg, type = "info") {
+        if (!this.consoleEl) return;
+        const line = document.createElement('div');
+        line.className = `log-line ${type}`;
+
+        const now = new Date();
+        const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+
+        const span = document.createElement('span');
+        span.className = 'log-time';
+        span.textContent = `[${time}]`;
+
+        line.appendChild(span);
+        line.appendChild(document.createTextNode(msg));
+
+        this.consoleEl.appendChild(line);
+        this.consoleEl.scrollTop = this.consoleEl.scrollHeight;
+    }
+
     updateLightingUniforms() {
         for (const mat of this.materialsToUpdate) {
             const shader = mat.userData.shader;
@@ -184,7 +222,6 @@ class PistonViewer {
         }
         this.globalStats.count += 1;
     }
-
     getTilesInView() {
         this.camera.updateMatrixWorld();
         this.projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
@@ -350,6 +387,7 @@ class PistonViewer {
             this.manifest = await res.json();
 
             console.log(`Manifest loaded. Found ${this.manifest.tiles.length} tiles.`);
+            this.log(`Manifest loaded. Tiles: ${this.manifest.tiles.length} | Bounds: [${this.manifest.bounds.min_x},${this.manifest.bounds.min_y}] to [${this.manifest.bounds.max_x},${this.manifest.bounds.max_y}]`);
 
             // Calculate Global Bounds
             const { min_x, min_y, max_x, max_y } = this.manifest.bounds;
@@ -384,6 +422,7 @@ class PistonViewer {
 
         } catch (err) {
             console.error("Error initializing world:", err);
+            this.log(`Error initializing world: ${err.message}`, "error");
         }
     }
 
@@ -392,6 +431,9 @@ class PistonViewer {
 
         const posX = x - this.worldOrigin.x;
         const posZ = -(y - this.worldOrigin.y);
+
+        this.log(`[Start] Tile ${x},${y} | Loading...`);
+        const t0 = performance.now();
 
         const binUrl = `tiles_bin/tile_${x}_${y}.bin`;
         const lowTexUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
@@ -451,6 +493,8 @@ class PistonViewer {
         };
         this.tiles.push(tileObj);
         this.updateGlobalStats(stats);
+        const t1 = performance.now();
+        this.log(`[Ready] Tile ${x},${y} | ${(t1 - t0).toFixed(1)}ms | Meshes: ${hexData.length}`, "success");
     }
 
     parseBinary(buffer) {
@@ -521,32 +565,41 @@ class PistonViewer {
         const instanceNZ_1 = new Float32Array(numHexes * 4);
         const instanceNZ_2 = new Float32Array(numHexes * 4);
 
-        let idx = 0;
+        const xSteps = [];
+        for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += HEX_DX) xSteps.push(x);
+        const ySteps = [];
+        for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += 10) ySteps.push(y);
 
-        for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += HEX_DX) {
-            const colIdx = Math.round(x / HEX_DX);
-            const yShift = (colIdx % 2 === 1) ? 5 : 0;
-            for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += 10) {
-                if (idx >= numHexes) break;
+        const rowCount = ySteps.length;
+        const colCount = xSteps.length;
 
-                const realY = y + yShift;
-                const h = hexes[idx];
+        for (let col = 0; col < colCount; col++) {
+            const x = xSteps[col];
+            const yShift = (col % 2 === 1) ? 5 : 0;
+            for (let row = 0; row < rowCount; row++) {
+                const instanceIdx = (col * rowCount) + row;
+                if (instanceIdx >= numHexes) continue;
+
+                const dataRow = DEM_FLIP_NS ? (rowCount - 1 - row) : row;
+                const dataIdx = (col * rowCount) + dataRow;
+                if (dataIdx >= numHexes) continue;
+
+                const realY = ySteps[row] + yShift;
+                const h = hexes[dataIdx];
 
                 // Position within the tile
                 matrix.makeTranslation(x, 0, -realY);
-                mesh.setMatrixAt(idx, matrix);
+                mesh.setMatrixAt(instanceIdx, matrix);
 
-                instanceNZ_1[idx * 4] = h.n_n * SCALE_Z;
-                instanceNZ_1[idx * 4 + 1] = h.n_ne * SCALE_Z;
-                instanceNZ_1[idx * 4 + 2] = h.n_se * SCALE_Z;
-                instanceNZ_1[idx * 4 + 3] = h.n_s * SCALE_Z;
+                instanceNZ_1[instanceIdx * 4] = h.n_n * SCALE_Z;
+                instanceNZ_1[instanceIdx * 4 + 1] = h.n_ne * SCALE_Z;
+                instanceNZ_1[instanceIdx * 4 + 2] = h.n_se * SCALE_Z;
+                instanceNZ_1[instanceIdx * 4 + 3] = h.n_s * SCALE_Z;
 
-                instanceNZ_2[idx * 4] = h.n_sw * SCALE_Z;
-                instanceNZ_2[idx * 4 + 1] = h.n_nw * SCALE_Z;
-                instanceNZ_2[idx * 4 + 2] = h.z * SCALE_Z;
-                instanceNZ_2[idx * 4 + 3] = 0.0;
-
-                idx++;
+                instanceNZ_2[instanceIdx * 4] = h.n_sw * SCALE_Z;
+                instanceNZ_2[instanceIdx * 4 + 1] = h.n_nw * SCALE_Z;
+                instanceNZ_2[instanceIdx * 4 + 2] = h.z * SCALE_Z;
+                instanceNZ_2[instanceIdx * 4 + 3] = 0.0;
             }
         }
 
@@ -739,6 +792,18 @@ class PistonViewer {
         this.fpsEl.textContent = `FPS: ${fps.toFixed(0)} | Zoom: ${dist.toFixed(0)}`;
         this.fpsState.frames = 0;
         this.fpsState.lastSample = now;
+
+        // Periodic Memory Log
+        if (!this.lastMemCheck || now - this.lastMemCheck > 5000) {
+            this.lastMemCheck = now;
+            const loadedTiles = this.tiles.length;
+            const visibleTiles = this.tiles.filter(t => t.mesh.visible).length;
+            const highRes = this.tiles.filter(t => t.highResLoaded).length;
+            const geoms = this.renderer.info.memory.geometries;
+            const textures = this.renderer.info.memory.textures;
+
+            this.log(`MEM: ${visibleTiles}/${loadedTiles} Tiles Vis | HiRes: ${highRes} | Geoms: ${geoms} | Tex: ${textures}`, "info");
+        }
     }
 
     updateLOD() {
