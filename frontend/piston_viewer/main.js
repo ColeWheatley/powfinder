@@ -40,7 +40,6 @@ class PistonViewer {
         console.log("Initializing PistonViewer (Multi-Tile)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        // this.scene.background = new THREE.Color(0xff2aa1); // debug pink
         this.scene.background = new THREE.Color(0x000000);
 
         // Initial Camera Setup
@@ -87,7 +86,7 @@ class PistonViewer {
         this.worldOrigin = { x: 0, y: 0 };
         this.floorMode = FLOOR_MODE;
         this.floorState = { locked: false, value: 0.0, lastFactor: 0.0 };
-        this.globalStats = { min: Infinity, avgSum: 0.0, baseSum: 0.0, count: 0 };
+        this.globalStats = { min: Infinity, max: -Infinity, avgSum: 0.0, baseSum: 0.0, count: 0 };
         this.frustum = new THREE.Frustum();
         this.projScreenMatrix = new THREE.Matrix4();
         this.renderSettings = {
@@ -152,6 +151,9 @@ class PistonViewer {
         if (!stats) return;
         if (Number.isFinite(stats.min)) {
             this.globalStats.min = Math.min(this.globalStats.min, stats.min);
+        }
+        if (Number.isFinite(stats.max)) {
+            this.globalStats.max = Math.max(this.globalStats.max, stats.max || -Infinity);
         }
         if (Number.isFinite(stats.avg)) {
             this.globalStats.avgSum += stats.avg;
@@ -339,8 +341,8 @@ class PistonViewer {
             const centerX = mapWidth / 2;
             const centerZ = -mapHeight / 2;
 
-            // Start zoomed in to help progressive loading visibility
-            this.camera.position.set(centerX, 800, centerZ);
+            // Start zoomed out (approx x2 from previous 800)
+            this.camera.position.set(centerX, 1600, centerZ);
             this.controls.target.set(centerX, 0, centerZ);
             this.controls.update();
 
@@ -392,7 +394,7 @@ class PistonViewer {
         // 2. Create Material
         const material = new THREE.MeshBasicMaterial({
             map: texture,
-            side: THREE.FrontSide,
+            side: THREE.DoubleSide,
             fog: true
         });
         this.setupMaterialShader(material);
@@ -492,6 +494,7 @@ class PistonViewer {
         const hexData = [];
         let offset = headerSize;
         let minAbs = Infinity;
+        let maxAbs = -Infinity;
         let sumAbs = 0.0;
         let count = 0;
 
@@ -517,6 +520,7 @@ class PistonViewer {
 
             if (headerSize === 4) {
                 minAbs = Math.min(minAbs, zAbs);
+                maxAbs = Math.max(maxAbs, zAbs);
                 sumAbs += zAbs;
                 count += 1;
             }
@@ -525,10 +529,13 @@ class PistonViewer {
 
         if (headerSize === 4) {
             if (!Number.isFinite(minAbs)) minAbs = baseElevation;
+            if (!Number.isFinite(maxAbs)) maxAbs = baseElevation;
             const avgAbs = count ? (sumAbs / count) : baseElevation;
-            return { hexes: hexData, stats: { base: baseElevation, min: minAbs, avg: avgAbs } };
+            return { hexes: hexData, stats: { base: baseElevation, min: minAbs, max: maxAbs, avg: avgAbs } };
         }
-        return { hexes: hexData, stats: { base: baseElevation, min: minElevation, avg: avgElevation } };
+        // If header size is 12, we don't have max in the header, so we should really compute it above anyway
+        // or just return min/avg as provided. Let's assume max is useful and compute it.
+        return { hexes: hexData, stats: { base: baseElevation, min: minElevation, max: maxAbs, avg: avgElevation } };
     }
 
     createInstancedMesh(hexes, material) {
@@ -633,27 +640,28 @@ class PistonViewer {
                 `#include <begin_vertex>
                 vIsHidden = 0.0;
                 vFaceId = faceIndex;
+                int face = int(faceIndex + 0.5);
+                float myZ = instanceNZ_2.z - uFloorOffset;
+                float neighborZ = 0.0;
+                bool isWall = true;
                 
                 // Face index mapping (verified in-scene):
                 // 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW (clockwise)
-                int face = int(faceIndex + 0.5);
-                int neighborSlot = -1;
-                float neighborZ = 0.0;
-                float myZ = instanceNZ_2.z - uFloorOffset;
-                bool isWall = true;
+                // Uniform "Max Depth" Skirt Logic:
+                // Find the lowest neighbor Z among all 6 neighbors to ensure skirts cover everything.
+                float minNeighborZ = myZ;
+                minNeighborZ = min(minNeighborZ, instanceNZ_1.x - uFloorOffset); // N
+                minNeighborZ = min(minNeighborZ, instanceNZ_1.y - uFloorOffset); // NE
+                minNeighborZ = min(minNeighborZ, instanceNZ_1.z - uFloorOffset); // SE
+                minNeighborZ = min(minNeighborZ, instanceNZ_1.w - uFloorOffset); // S
+                minNeighborZ = min(minNeighborZ, instanceNZ_2.x - uFloorOffset); // SW
+                minNeighborZ = min(minNeighborZ, instanceNZ_2.y - uFloorOffset); // NW
+                
+                neighborZ = minNeighborZ;
+                isWall = (face < 6); 
 
-                if (face == 0) { neighborZ = instanceNZ_1.x - uFloorOffset; neighborSlot = 0; } // N
-                else if (face == 1) { neighborZ = instanceNZ_1.y - uFloorOffset; neighborSlot = 1; } // NE
-                else if (face == 2) { neighborZ = instanceNZ_1.z - uFloorOffset; neighborSlot = 2; } // SE
-                else if (face == 3) { neighborZ = instanceNZ_1.w - uFloorOffset; neighborSlot = 3; } // S
-                else if (face == 4) { neighborZ = instanceNZ_2.x - uFloorOffset; neighborSlot = 4; } // SW
-                else if (face == 5) { neighborZ = instanceNZ_2.y - uFloorOffset; neighborSlot = 5; } // NW
-                else { isWall = false; neighborZ = myZ; }
 
-                if (${DEBUG_NEIGHBOR_SLOT_TEST ? 'true' : 'false'}) {
-                    float depth = (neighborSlot == ${DEBUG_SLOT_INDEX}) ? ${DEBUG_SLOT_WALL_DEPTH.toFixed(1)} : ${DEBUG_OTHER_WALL_DEPTH.toFixed(1)};
-                    neighborZ = myZ - depth;
-                }
+
 
                 if (${DEBUG_FIXED_WALLS ? 'true' : 'false'}) {
                     neighborZ = myZ - ${DEBUG_FIXED_WALL_DEPTH.toFixed(1)};
@@ -744,7 +752,7 @@ class PistonViewer {
                     sideBase *= light * ao;
 
                     vec3 cGreen = vec3(0.0, 1.0, 0.0);
-                    vec3 cBlue = vec3(0.0009, 0.0027, 0.1119);
+                    vec3 cBlue = vec3(0.0, 0.15, 0.5);
                     vec3 cYellow = vec3(1.0, 0.85, 0.0);
                     vec3 cRed = vec3(0.85, 0.0, 0.0);
 
@@ -775,6 +783,12 @@ class PistonViewer {
     animate() {
         requestAnimationFrame(() => this.animate());
         this.controls.update();
+
+        const minCamY = 100.0;
+        if (this.camera.position.y < minCamY) {
+            this.camera.position.y = minCamY;
+        }
+
         this.updateFps();
 
         const angle = this.controls.getPolarAngle();
@@ -912,7 +926,7 @@ class PistonViewer {
         this.cssWorld.style.transform =
             `scale(${scale}) ` +
             `rotateX(${rotX}deg) ` +
-            `rotateZ(${-rotZ}deg) ` +
+            `rotateZ(${rotZ}deg) ` +
             `translate3d(${tx}px, ${ty}px, 0px)`;
 
         // Add more logging for debugging
@@ -1022,8 +1036,12 @@ class PistonViewer {
             });
         }
         const faceDirs = [
-            { x: 0.0, z: 1.0 }, { x: 0.866, z: 0.5 }, { x: 0.866, z: -0.5 },
-            { x: 0.0, z: -1.0 }, { x: -0.866, z: -0.5 }, { x: -0.866, z: 0.5 },
+            { x: 0.0, z: -1.0 },      // 0: N
+            { x: 0.866, z: -0.5 },    // 1: NE
+            { x: 0.866, z: 0.5 },     // 2: SE
+            { x: 0.0, z: 1.0 },       // 3: S
+            { x: -0.866, z: 0.5 },    // 4: SW
+            { x: -0.866, z: -0.5 },   // 5: NW
         ];
         const pushWall = (p1, p2) => {
             const v0 = { x: p1.x, y: 0, z: p1.z };

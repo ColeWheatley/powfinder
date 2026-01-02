@@ -94,7 +94,7 @@ def process_tile(tif_path):
             neighbors_z = []
             for off in OFFSETS:
                 nx = x_center + off[0]
-                ny = y_center - off[1]
+                ny = y_center + off[1]
                 nz = get_z(nx, ny)
                 # For neighbors on the edge of the DEM, tilt them slightly down
                 neighbors_z.append(nz if not np.isnan(nz) else (z_safe - 5.0))
