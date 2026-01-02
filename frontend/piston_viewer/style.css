@@ -450,6 +450,46 @@ h1 {
     color: #e74c3c;
 }
 
+/* CSS 2.5D Map Layer */
+#css-map-layer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background-color: #050505;
+    /* Match bg */
+    z-index: 0;
+    /* Behind UI (10) but ? */
+    perspective: 800px;
+    /* Aligns roughly with FOV 60 */
+    pointer-events: none;
+    /* Let clicks pass to canvas/controls */
+}
+
+#css-world {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
+    will-change: transform;
+}
+
+.css-tile {
+    position: absolute;
+    background-size: cover;
+    backface-visibility: hidden;
+    image-rendering: pixelated;
+    /* speed? or crispness */
+    opacity: 1;
+    transition: opacity 0.5s ease;
+    /* transform-origin: top left; is default? we center it. */
+}
+
 .log-line.success {
     color: #2ecc71;
 }

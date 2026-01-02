@@ -63,6 +63,9 @@ class PistonViewer {
         this.essentialTilesTarget = 0;
         this.loaderHidden = false;
         this.materialsToUpdate = [];
+        this.cssMapActive = true;
+        this.cssWorld = null;
+        this.webglActive = false;
         this.worldOrigin = { x: 0, y: 0 };
         this.floorMode = FLOOR_MODE;
         this.floorState = { locked: false, value: 0.0, lastFactor: 0.0 };
@@ -421,6 +424,9 @@ class PistonViewer {
 
             this.essentialTilesTarget = Math.max(1, initialInView.length);
             this.log(`Proximity Engine: ${this.essentialTilesTarget} tiles required for first paint.`, "info");
+
+            // Build CSS Map
+            this.initCSSMap();
 
             // Only trigger updateLOD to start loading what's in range
             this.updateLOD();
@@ -823,9 +829,137 @@ class PistonViewer {
             }
         }
 
+        this.updateCSSMap(angle, factor);
         this.updateLOD();
-        this.renderer.render(this.scene, this.camera);
+        if (this.webglActive) {
+            this.renderer.render(this.scene, this.camera);
+        }
         this.floorState.lastFactor = factor;
+    }
+
+    initCSSMap() {
+        this.cssWorld = document.getElementById('css-world');
+        if (!this.cssWorld) return;
+
+        this.log("Initializing CSS Map...", "info");
+
+        // Create DOM tiles
+        for (const tileDef of this.manifest.tiles) {
+            const div = document.createElement('div');
+            div.className = 'css-tile';
+            div.style.width = `${TILE_WIDTH_WORLD}px`;
+            div.style.height = `${TILE_HEIGHT_WORLD}px`;
+
+            // Texture
+            const lowTexUrl = `tiles_sat/low_res/tile_${tileDef.x}_${tileDef.y}.webp`;
+            div.style.backgroundImage = `url(${lowTexUrl})`;
+
+            // Position: Map 3D (X,Z) to CSS (X,Y)
+            // 3D: X is Right, Z is Down (towards viewer)
+            // CSS: Left is Right, Top is Down
+
+            const tx = (tileDef.x - this.worldOrigin.x);
+            // In 3D logic: posZ = -(y - originY).
+            // So if y increases (North), Z is negative (Up/Away).
+            // In CSS, Up/Away is negative Y? No, Top=0 is top.
+            // We want y-increasing (North) to be Up (Negative Top).
+            // So CSS Y = -(y - originY) matches 3D Z.
+            const ty = -(tileDef.y - this.worldOrigin.y);
+
+            // Place tile flat on the XY plane (which represents the Ground)
+            div.style.left = `${tx}px`;
+            div.style.top = `${ty}px`;
+
+            this.cssWorld.appendChild(div);
+        }
+
+        // Initial visibility
+        const layer = document.getElementById('css-map-layer');
+        if (layer) layer.style.opacity = '1';
+
+        this.renderer.domElement.style.transition = 'opacity 0.5s';
+        this.renderer.domElement.style.opacity = '0';
+    }
+
+    updateCSSMap(angle, factor) {
+        if (!this.cssWorld) return;
+
+        const pos = this.camera.position;
+        const tgt = this.controls.target;
+        const dist = pos.distanceTo(tgt);
+
+        // Perspective Match
+        // FOV 60 vertical.
+        // At distance D, the view height is 2 * D * tan(30deg) ~= 1.15 * D.
+        // In CSS, with perspective 800px, at distance 800px, 1px = 1px.
+        // We want to scale such that our world units match pixels.
+        // Scale = 800 / dist is a good approximation for 'constant size'.
+        // But we want the map to 'zoom'.
+        // Actually, if we translate the world by Z, it scales automatically in perspective.
+        // BUT, we are trying to match Three.js OrbitControls zoom which moves the camera.
+        // In CSS we move the World.
+
+        // Let's rely on Scale.
+        // Zoom 1 (Dist 1000): Scale 1.
+        // Zoom 2 (Dist 500): Scale 2.
+        const scale = 800.0 / dist;
+
+        const deg = angle * 180 / Math.PI; // 0 is Top-Down in OrbitControls? 
+
+        // Handoff Thresholds
+        // Note: OrbitControls polar angle: 0 is Top (North Pole), PI/2 is Horizon.
+        // So 2 degrees is very close to top-down.
+
+        // Debug
+        // if (Math.random() < 0.01) this.log(`Tilt: ${deg.toFixed(1)} Dist: ${dist.toFixed(0)}`, "info");
+
+        if (deg > 5.0 && !this.webglActive) {
+            this.webglActive = true;
+            this.renderer.domElement.style.opacity = '1';
+            this.cssWorld.parentElement.style.opacity = '0';
+            this.log("Transition: CSS -> 3D", "info");
+        }
+        else if (deg < 2.0 && this.webglActive) {
+            this.webglActive = false;
+            this.renderer.domElement.style.opacity = '0';
+            this.cssWorld.parentElement.style.opacity = '1';
+            this.log("Transition: 3D -> CSS", "info");
+        }
+
+        // Optimization: Don't update hidden DOM
+        // if (this.webglActive && this.renderer.domElement.style.opacity === '1') return;
+        // Actually we should keep extended sync for smooth fade out
+
+        const tx = -tgt.x;
+        const ty = -tgt.z; // 3D Z maps to CSS Y (Top)
+
+        // Rotation
+        // OrbitControls Azimuth: Angle around Y axis.
+        const azimuth = this.controls.getAzimuthalAngle();
+        const rotZ = azimuth * 180 / Math.PI;
+        // In CSS, rotating screen Z rotates the map like a wheel. correct.
+
+        // Tilt
+        // 3D: Camera tilts from Y axis.
+        // CSS: We rotate the Plane around X axis.
+        // 0 deg tilt = Flat.
+        const rotX = deg;
+
+        // Transform Composition
+        // 1. Center the target point: translate(tx, ty)
+        // 2. Rotate World around target: rotateZ (azimuth) -> rotateX (tilt)
+        // 3. Scale (Zoom)
+
+        this.cssWorld.style.transform =
+            `scale(${scale}) ` +
+            `rotateX(${rotX}deg) ` +
+            `rotateZ(${-rotZ}deg) ` +
+            `translate3d(${tx}px, ${ty}px, 0px)`;
+
+        // Add more logging for debugging
+        // if (Math.random() < 0.05) { // Log occasionally to avoid spam
+        //     this.log(`CSS Map Transform: scale=${scale.toFixed(2)}, rotX=${rotX.toFixed(1)}deg, rotZ=${rotZ.toFixed(1)}deg, translate3d(${tx.toFixed(0)}px, ${ty.toFixed(0)}px, 0px)`, "debug");
+        // }
     }
 
     updateFps() {
