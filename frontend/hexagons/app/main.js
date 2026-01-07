@@ -672,7 +672,7 @@ class PistonViewer {
 
     async initWorld() {
         try {
-            const res = await fetch('tile_manifest.json');
+            const res = await fetch(`tile_manifest.json?v=${Date.now()}`);
             if (!res.ok) throw new Error('Failed to load tile_manifest.json');
             this.manifest = await res.json();
 
@@ -740,13 +740,10 @@ class PistonViewer {
 
         // New Sector-based paths
         // If q,r missing, this will fail 404, which is expected if manifest isn't updated.
-        const binUrl = `tiles_bin/sector_${q}_${r}.bin`;
-
-        // Use 'low_res' (approx 3.2m/px) for standard loading
-        // We can dynamically swap this later based on distance
-        const lowTexUrl = `aerial_tiles/low_res/sector_${q}_${r}.webp`;
-        const medTexUrl = `aerial_tiles/med_res/sector_${q}_${r}.webp`;
-        const highTexUrl = `aerial_tiles/high_res/sector_${q}_${r}.webp`;
+        const cb = Date.now();
+        const binUrl = (q !== undefined) ? `tiles_bin/sector_${q}_${r}.bin?v=${cb}` : `tiles_bin/tile_${x}_${y}.bin?v=${cb}`;
+        const lowTexUrl = (q !== undefined) ? `aerial_tiles/low_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/low_res/tile_${x}_${y}.webp?v=${cb}`;
+        const highTexUrl = (q !== undefined) ? `aerial_tiles/high_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/high_res/tile_${x}_${y}.webp?v=${cb}`;
 
         // 1. Load Low Res Texture
         const texLoader = new THREE.TextureLoader();
@@ -758,7 +755,8 @@ class PistonViewer {
         const material = new THREE.MeshBasicMaterial({
             map: texture,
             side: THREE.DoubleSide,
-            fog: true
+            fog: true,
+            alphaTest: 0.1
         });
         this.setupMaterialShader(material);
         this.materialsToUpdate.push(material);
@@ -800,11 +798,9 @@ class PistonViewer {
             stats,
             center: { x: centerX, z: centerZ },
             bounds,
-            urls: { low: lowTexUrl, med: medTexUrl, high: highTexUrl },
+            urls: { low: lowTexUrl, high: highTexUrl },
             highResLoaded: false,
-            highResLoading: false,
-            medResLoaded: false,
-            medResLoading: false
+            highResLoading: false
         };
         this.tiles.push(tileObj);
         this.updateGlobalStats(stats);
@@ -1111,6 +1107,7 @@ class PistonViewer {
             shader.uniforms.uHeightFactor = { value: 0.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileResolution = { value: material.userData.uTileResolution || 10.0 };
+            shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
 
             shader.uniforms.uAoFloor = { value: LIGHTING_DEFAULTS.aoFloor };
@@ -1196,7 +1193,11 @@ class PistonViewer {
                 }
 
                 // UV Calculation
-                vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                #ifdef USE_INSTANCING
+                    vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                #else
+                    vLocalPos = transformed;
+                #endif
                 vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 
                 vObjNormal = normal;
@@ -1231,6 +1232,7 @@ class PistonViewer {
                 uniform float uSpecStrength;
                 uniform float uSpecPower;
                 uniform float uSlopeLight;
+                uniform float uTileSize;
                 varying vec3 vLocalPos;
                 varying vec3 vWorldPos;
                 varying vec3 vObjNormal;
@@ -1244,8 +1246,8 @@ class PistonViewer {
                 `if (vIsHidden > 0.5) discard;
                 
                 // UV Mapping
-                float u = vLocalPos.x / 1250.0;
-                float v = -vLocalPos.z / 1000.0;
+                float u = vLocalPos.x / uTileSize;
+                float v = -vLocalPos.z / uTileSize;
                 float texY = (uTextureFlipY > 0.5) ? v : (1.0 - v);
                 vec2 myUV = vec2(clamp(u, 0.001, 0.999), clamp(texY, 0.001, 0.999));
                 
@@ -1311,22 +1313,8 @@ class PistonViewer {
         this.frametimeIndex = (this.frametimeIndex + 1) % 120;
         // === END DEBUG ===
 
-        // Keep camera above surface
-        const camX = this.camera.position.x;
-        const camZ = this.camera.position.z;
-        let localMax = -10000.0;
-        for (const tile of this.tiles) {
-            if (tile.bounds && camX >= tile.bounds.min.x && camX <= tile.bounds.max.x &&
-                camZ >= tile.bounds.min.z && camZ <= tile.bounds.max.z) {
-                localMax = (tile.stats.max - this.floorState.value);
-                break;
-            }
-        }
-
-        const minCamY = Math.max(100.0, localMax + 100.0);
-        if (this.camera.position.y < minCamY) {
-            this.camera.position.y = minCamY;
-        }
+        // Camera altitude is now maintained by maintainCameraAltitudeDuringAnimation()
+        // which properly accounts for heightFactor scaling
 
         // === DEBUG: Update performance metrics ===
         this.updateRenderStats(now);
@@ -1419,20 +1407,14 @@ class PistonViewer {
             div.style.height = `${TILE_HEIGHT_WORLD}px`;
 
             // Texture
-            const lowTexUrl = `tiles_sat/low_res/tile_${tileDef.x}_${tileDef.y}.webp`;
+            const lowTexUrl = `aerial_tiles/low_res/sector_${tileDef.q}_${tileDef.r}.webp`;
             div.style.backgroundImage = `url(${lowTexUrl})`;
 
             // Position: Map 3D (X,Z) to CSS (X,Y)
-            // 3D: X is Right, Z is Down (towards viewer)
-            // CSS: Left is Right, Top is Down
-
-            const tx = (tileDef.x - this.worldOrigin.x);
-            // In 3D logic: posZ = -(y - originY).
-            // So if y increases (North), Z is negative (Up/Away).
-            // In CSS, Up/Away is negative Y? No, Top=0 is top.
-            // We want y-increasing (North) to be Up (Negative Top).
-            // So CSS Y = -(y - originY) matches 3D Z.
-            const ty = -(tileDef.y - this.worldOrigin.y);
+            // tileDef.x/y is the world center of the sector.
+            // tx/ty is the top-left offset for the CSS div.
+            const tx = (tileDef.x - this.worldOrigin.x) - (TILE_WIDTH_WORLD / 2);
+            const ty = -(tileDef.y - this.worldOrigin.y) - (TILE_HEIGHT_WORLD / 2);
 
             // Place tile flat on the XY plane (which represents the Ground)
             div.style.left = `${tx}px`;
@@ -1506,27 +1488,15 @@ class PistonViewer {
             if (distSq < CAM_HIGH_RES_DIST ** 2) {
                 if (!tile.highResLoaded && !tile.highResLoading) {
                     tile.highResLoading = true;
-                    tiffLoader.load(tile.urls.high, (tex) => {
+                    // Note: In a real production app we'd want to handle the 
+                    // switch from WebP to TIFF or High-WebP here.
+                    texLoader.load(tile.urls.high, (tex) => {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.flipY = false;
                         tile.material.map = tex;
                         tile.material.needsUpdate = true;
                         tile.highResLoaded = true;
                         tile.highResLoading = false;
-                    });
-                }
-            } else if (distSq < CAM_MED_RES_DIST ** 2) {
-                if (!tile.highResLoaded && !tile.medResLoaded && !tile.medResLoading) {
-                    tile.medResLoading = true;
-                    texLoader.load(tile.urls.med, (tex) => {
-                        tex.colorSpace = THREE.SRGBColorSpace;
-                        tex.flipY = false;
-                        if (!tile.highResLoaded) {
-                            tile.material.map = tex;
-                            tile.material.needsUpdate = true;
-                        }
-                        tile.medResLoaded = true;
-                        tile.medResLoading = false;
                     });
                 }
             }

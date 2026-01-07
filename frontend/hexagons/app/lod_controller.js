@@ -154,7 +154,6 @@ export class LODController {
 
         // Configuration
         this.nearThreshold = 200.0;
-        this.medThreshold = 500.0;
         this.farThreshold = 2000.0;
 
         // This is now purely for the 'result' return, not the benchmark
@@ -188,7 +187,6 @@ export class LODController {
 
     setThresholds(levels) {
         if (levels.lod0 !== undefined) this.nearThreshold = levels.lod0;
-        if (levels.lod1 !== undefined) this.medThreshold = levels.lod1;
         if (levels.lod3 !== undefined) this.farThreshold = levels.lod3;
     }
 
@@ -269,14 +267,7 @@ export class LODController {
             times: stats,
             results: {
                 high: highResults,
-                medium: finalSectors.filter(s => {
-                    const d = Math.sqrt((s.x - range.x) ** 2 + (s.y - range.y) ** 2);
-                    return d < this.medThreshold;
-                }),
-                low: finalSectors.filter(s => {
-                    const d = Math.sqrt((s.x - range.x) ** 2 + (s.y - range.y) ** 2);
-                    return d >= this.medThreshold;
-                })
+                low: finalSectors
             }
         };
     }
