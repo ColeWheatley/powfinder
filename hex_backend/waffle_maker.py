@@ -73,6 +73,7 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     All saved at Quality=10 (User Request).
     """
     import PIL.Image as Image
+    import PIL.ImageDraw as ImageDraw
     from rasterio.windows import from_bounds
     
     if not os.path.exists(output_dir):
@@ -98,8 +99,8 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     
     target_poly = box(win_min_x, win_min_y, win_max_x, win_max_y)
 
-    # Create Black Canvas (RGBA)
-    canvas = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 255))
+    # Create Transparent Canvas (RGBA)
+    canvas = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 0))
     
     # 2. Sample Data
     # Find intersecting TIFs
@@ -153,6 +154,60 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
             except Exception as e:
                 print(f"Error reading TIF {t['path']}: {e}")
 
+    # 3. Apply Hexagonal Mask (Crop to Shape + 32px Padding)
+    # create a grayscale image to be the alpha channel
+    mask = Image.new("L", (total_w_px, total_h_px), 0) # Black (Transparent)
+    draw = ImageDraw.Draw(mask)
+    
+    # Center of Canvas
+    cx, cy = total_w_px / 2.0, total_h_px / 2.0
+    
+    # Radius Calculation
+    # TEXTURE_SIZE_PX is Flat-to-Flat Width
+    # Hex Radius (Corner) = Width / sqrt(3)
+    # We add BUFFER_PX to the radius to keep the padding
+    hex_radius_px = (coord_util.TEXTURE_SIZE_PX / math.sqrt(3)) + BUFFER_PX
+    
+    # Vertices (Pointy Topped Hexagon implies 30, 90, 150...)
+    # (If Flat Topped, angles are 0, 60, 120...)
+    # coord_util defines 'Q' as horizontal? Usually standard Axial coordinates 
+    # use Flat Topped if +Q is East. 
+    # But usually Pointy Topped is better for packing?
+    # Let's assume Pointy Top (angles 30..). If wrong, we rotate 30 deg.
+    # Given the aspect ratio of the Sector (Width != Height), a Pointy Top hex 
+    # fits a rectangular bounding box with ratio sqrt(3)/2 ~ 0.866.
+    # Wait, Pointy Top is taller than wide.
+    # Flat Top is wider than tall.
+    # We used square canvas?
+    # WaffleMaker uses Square Canvas based on Width.
+    # If the sector is hexagonal, it fits in a square.
+    # Let's just draw the Pointy Top hex.
+    
+    verts = []
+    for i in range(6):
+        deg = 30 + (60 * i)
+        rad = math.radians(deg)
+        vx = cx + hex_radius_px * math.cos(rad)
+        vy = cy + hex_radius_px * math.sin(rad)
+        verts.append((vx, vy))
+        
+    draw.polygon(verts, fill=255) # White (Opaque)
+    
+    # Apply to Alpha
+    # The canvas is already RGBA. We want to Mask the Alpha.
+    # If a pixel is transparent in canvas, it remains transparent.
+    # If opaque, it becomes (Alpha * Mask).
+    
+    # Simple way: canvas.putalpha(mask) replaces the ENTIRE alpha channel.
+    # But our TIF pasting might have empty spots (0 alpha).
+    # If we putalpha(mask), empty spots inside the hex become Opaque Black? No.
+    # putalpha replaces the alpha channel values.
+    # We should Multiply?
+    # Or:
+    final_img = Image.new("RGBA", canvas.size)
+    final_img.paste(canvas, (0,0), mask=mask)
+    canvas = final_img
+    
     # Create Subfolders
     res_dirs = {
         "compressed": os.path.join(output_dir, "compressed"),

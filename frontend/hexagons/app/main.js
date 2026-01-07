@@ -3,17 +3,19 @@ import { MapControls } from 'three/addons/controls/MapControls.js';
 import { TIFFLoader } from 'three/addons/loaders/TIFFLoader.js';
 import { LODController } from './lod_controller.js';
 
-// --- CONFIG ---
-const TILE_WIDTH_WORLD = 1250;
-const TILE_HEIGHT_WORLD = 1000;
-const SCALE_Z = 1.0;
-
 // --- HEX COORDINATE SYSTEM (from coordinate_utility.py) ---
 const UNIT_HEX_PX = 32.0;
 const METERS_PER_PIXEL = 0.2;
 const UNIT_HEX_WIDTH_METERS = UNIT_HEX_PX * METERS_PER_PIXEL; // 6.4m
 const LEVEL_5_SCALE_FACTOR = Math.pow(7, 2.5); // ~129.6418
 const SECTOR_WIDTH_METERS = UNIT_HEX_WIDTH_METERS * LEVEL_5_SCALE_FACTOR; // ~829.7m
+
+// --- CONFIG ---
+// Used for culling and camera centering.
+// Hexagons are 829m wide. Using that for bounds.
+const TILE_WIDTH_WORLD = SECTOR_WIDTH_METERS;
+const TILE_HEIGHT_WORLD = SECTOR_WIDTH_METERS; // Approximate square for culling
+const SCALE_Z = 1.0;
 
 // Convert world meters (x, y) to approximate sector (Q, R)
 function worldToSectorApprox(worldX, worldY) {
@@ -599,52 +601,56 @@ class PistonViewer {
         const camZ = this.camera.position.z;
         const BUFFER = 25.0;
 
-        let foundTile = false;
+        // Convert camera scene position back to world meters
+        // Scene: posX = x - worldOrigin.x, posZ = -(y - worldOrigin.y)
+        // Inverse: x = posX + worldOrigin.x, y = worldOrigin.y - posZ
+        const worldX = camX + this.worldOrigin.x;
+        const worldY = this.worldOrigin.y - camZ;
 
+        // Convert world meters to sector Q, R
+        const { Q, R } = worldToSectorApprox(worldX, worldY);
+
+        // Find tile by Q, R match
+        let foundTile = null;
         for (const tile of this.tiles) {
-            if (tile.bounds && camX >= tile.bounds.min.x && camX <= tile.bounds.max.x &&
-                camZ >= tile.bounds.min.z && camZ <= tile.bounds.max.z) {
-                foundTile = true;
-
-                // Check if tile has valid stats
-                if (!tile.stats || !Number.isFinite(tile.stats.max)) {
-                    if (this.tileHeightEl) {
-                        this.tileHeightEl.textContent = 'NO STATS';
-                    }
-                    if (this.cameraHeightEl) {
-                        this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
-                    }
-                    break;
-                }
-
-                const baseElev = tile.stats.max - this.floorState.value;
-                const animatedElev = baseElev * heightFactor;
-                const minCamY = Math.max(100.0, animatedElev + BUFFER);
-
-                // DEBUG: Update tile height and camera height displays
-                if (this.tileHeightEl) {
-                    this.tileHeightEl.textContent = animatedElev.toFixed(1) + 'm';
-                }
-                if (this.cameraHeightEl) {
-                    this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
-                }
-
-                // Only push camera up if below minimum - don't override zoom controls
-                if (this.camera.position.y < minCamY) {
-                    this.camera.position.y = minCamY;
-                }
+            if (tile.q === Q && tile.r === R) {
+                foundTile = tile;
                 break;
             }
         }
 
-        // No tile found under camera
+        // Update camera height display regardless
+        if (this.cameraHeightEl) {
+            this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
+        }
+
         if (!foundTile) {
             if (this.tileHeightEl) {
-                this.tileHeightEl.textContent = 'NO TILE';
+                this.tileHeightEl.textContent = `NO TILE (Q${Q},R${R})`;
             }
-            if (this.cameraHeightEl) {
-                this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
+            return;
+        }
+
+        // Check if tile has valid stats
+        if (!foundTile.stats || !Number.isFinite(foundTile.stats.max)) {
+            if (this.tileHeightEl) {
+                this.tileHeightEl.textContent = 'NO STATS';
             }
+            return;
+        }
+
+        const baseElev = foundTile.stats.max - this.floorState.value;
+        const animatedElev = baseElev * heightFactor;
+        const minCamY = Math.max(100.0, animatedElev + BUFFER);
+
+        // DEBUG: Update tile height display
+        if (this.tileHeightEl) {
+            this.tileHeightEl.textContent = `${animatedElev.toFixed(1)}m (Q${Q},R${R})`;
+        }
+
+        // Only push camera up if below minimum - don't override zoom controls
+        if (this.camera.position.y < minCamY) {
+            this.camera.position.y = minCamY;
         }
     }
 
@@ -721,7 +727,9 @@ class PistonViewer {
 
     async loadSingleTile(tileDef) {
         const { x, y, q, r } = tileDef;
-        const tileKey = `${x}_${y}`;
+        // Use Q_R as the unique key if available, else fallback provided manifest is old
+        const tileKey = (q !== undefined && r !== undefined) ? `${q}_${r}` : `${x}_${y}`;
+
         if (this.loadingTiles.has(tileKey)) return;
         this.loadingTiles.add(tileKey);
 
@@ -730,10 +738,15 @@ class PistonViewer {
 
         const t0 = performance.now();
 
-        const binUrl = `tiles_bin/${this.currentResMethod}/res_${this.currentRes}/tile_${x}_${y}.bin`;
-        const lowTexUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
-        const medTexUrl = `tiles_sat/med_res/tile_${x}_${y}.webp`;
-        const highTexUrl = `tiles_sat/high_res/tile_${x}_${y}.tif`;
+        // New Sector-based paths
+        // If q,r missing, this will fail 404, which is expected if manifest isn't updated.
+        const binUrl = `tiles_bin/sector_${q}_${r}.bin`;
+
+        // Use 'low_res' (approx 3.2m/px) for standard loading
+        // We can dynamically swap this later based on distance
+        const lowTexUrl = `aerial_tiles/low_res/sector_${q}_${r}.webp`;
+        const medTexUrl = `aerial_tiles/med_res/sector_${q}_${r}.webp`;
+        const highTexUrl = `aerial_tiles/high_res/sector_${q}_${r}.webp`;
 
         // 1. Load Low Res Texture
         const texLoader = new THREE.TextureLoader();
@@ -780,7 +793,7 @@ class PistonViewer {
         );
 
         const tileObj = {
-            x, y,
+            x, y, q, r,
             mesh,
             flatMesh,
             material,
