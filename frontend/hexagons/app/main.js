@@ -26,8 +26,10 @@ function worldToSectorApprox(worldX, worldY) {
 }
 
 // --- CONFIG ---
-const TILE_WIDTH_WORLD = 1250;
-const TILE_HEIGHT_WORLD = 1000;
+// Used for culling and camera centering.
+// Hexagons are 829m wide. Using that for bounds.
+const TILE_WIDTH_WORLD = SECTOR_WIDTH_METERS;
+const TILE_HEIGHT_WORLD = SECTOR_WIDTH_METERS; // Approximate square for culling
 const SCALE_Z = 1.0;
 const DEFAULT_RENDER_DISTANCE = 10000;
 const FLOOR_MODE = 'view-min';
@@ -147,6 +149,8 @@ class PistonViewer {
         this.hexCountEl = document.getElementById('hex-count');
         this.triCountEl = document.getElementById('tri-count');
         this.drawStatsEl = document.getElementById('draw-stats');
+        this.tileHeightEl = document.getElementById('tile-height');
+        this.cameraHeightEl = document.getElementById('camera-height');
         this.frametimeCanvas = document.getElementById('frametime-graph');
         this.frametimeCtx = this.frametimeCanvas ? this.frametimeCanvas.getContext('2d') : null;
         this.frametimeBuffer = new Array(120).fill(16.67); // 120 frames of history
@@ -609,6 +613,64 @@ class PistonViewer {
         }
     }
 
+    maintainCameraAltitudeDuringAnimation(heightFactor) {
+        const camX = this.camera.position.x;
+        const camZ = this.camera.position.z;
+        const BUFFER = 25.0;
+
+        // Convert camera scene position back to world meters
+        // Scene: posX = x - worldOrigin.x, posZ = -(y - worldOrigin.y)
+        // Inverse: x = posX + worldOrigin.x, y = worldOrigin.y - posZ
+        const worldX = camX + this.worldOrigin.x;
+        const worldY = this.worldOrigin.y - camZ;
+
+        // Convert world meters to sector Q, R
+        const { Q, R } = worldToSectorApprox(worldX, worldY);
+
+        // Find tile by Q, R match
+        let foundTile = null;
+        for (const tile of this.tiles) {
+            if (tile.q === Q && tile.r === R) {
+                foundTile = tile;
+                break;
+            }
+        }
+
+        // Update camera height display regardless
+        if (this.cameraHeightEl) {
+            this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
+        }
+
+        if (!foundTile) {
+            if (this.tileHeightEl) {
+                this.tileHeightEl.textContent = `NO TILE (Q${Q},R${R})`;
+            }
+            return;
+        }
+
+        // Check if tile has valid stats
+        if (!foundTile.stats || !Number.isFinite(foundTile.stats.max)) {
+            if (this.tileHeightEl) {
+                this.tileHeightEl.textContent = 'NO STATS';
+            }
+            return;
+        }
+
+        const baseElev = foundTile.stats.max - this.floorState.value;
+        const animatedElev = baseElev * heightFactor;
+        const minCamY = Math.max(100.0, animatedElev + BUFFER);
+
+        // DEBUG: Update tile height display
+        if (this.tileHeightEl) {
+            this.tileHeightEl.textContent = `${animatedElev.toFixed(1)}m (Q${Q},R${R})`;
+        }
+
+        // Only push camera up if below minimum - don't override zoom controls
+        if (this.camera.position.y < minCamY) {
+            this.camera.position.y = minCamY;
+        }
+    }
+
     updateFogAndClip() {
         const dist = this.renderSettings.renderDistance;
         const fogStart = Math.max(10, dist * 0.6);
@@ -686,14 +748,15 @@ class PistonViewer {
         const t0 = performance.now();
 
         // New Sector-based paths
+        // New Sector-based paths
         // If q,r missing, this will fail 404, which is expected if manifest isn't updated.
         const cb = Date.now();
-        const binUrl = (q !== undefined) ? `tiles_bin/sector_${q}_${r}.bin?v=${cb}` : `tiles_bin/tile_${x}_${y}.bin?v=${cb}`;
+        const binUrl = `tiles_bin/sector_${q}_${r}.bin?v=${cb}`;
 
         // Use 'low_res' (approx 3.2m/px) for standard loading
-        const lowTexUrl = (q !== undefined) ? `aerial_tiles/low_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/low_res/tile_${x}_${y}.webp?v=${cb}`;
-        const highTexUrl = (q !== undefined) ? `aerial_tiles/high_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/high_res/tile_${x}_${y}.webp?v=${cb}`;
-
+        const lowTexUrl = `aerial_tiles/low_res/sector_${q}_${r}.webp?v=${cb}`;
+        const medTexUrl = `aerial_tiles/med_res/sector_${q}_${r}.webp?v=${cb}`;
+        const highTexUrl = `aerial_tiles/high_res/sector_${q}_${r}.webp?v=${cb}`;
 
         // 1. Load Low Res Texture
         const texLoader = new THREE.TextureLoader();
@@ -741,7 +804,7 @@ class PistonViewer {
         );
 
         const tileObj = {
-            x, y,
+            x, y, q, r,
             mesh,
             flatMesh,
             material,
@@ -791,25 +854,24 @@ class PistonViewer {
         }
     }
 
-    parseBinaryV3(view) {
+    parseBinaryV2(view) {
+        // HEADER (32 Bytes)
         const Q = view.getInt32(4, true);
         const R = view.getInt32(8, true);
         const minZ = view.getFloat32(12, true);
         const maxZ = view.getFloat32(16, true);
         const scale = view.getFloat32(20, true);
-        const gridW = view.getUint16(24, true);
-        const gridH = view.getUint16(26, true);
-        // Padding: 28..32 (4 bytes)
 
-        const count = gridW * gridH;
         let offset = 32;
+        // Calculate offset to L5 (Unit Hexes)
+        offset += 22408;
+
+        const count = 16807;
         const hexData = new Array(count);
         const unitScale = 0.5;
 
         for (let i = 0; i < count; i++) {
             const baseOff = offset + (i * 8);
-
-            // Height (Uint16) -> Float
             const hRaw = view.getUint16(baseOff, true);
             const zAbs = minZ + hRaw / scale;
 
@@ -817,8 +879,7 @@ class PistonViewer {
             const neighbors = [];
             for (let k = 0; k < 6; k++) {
                 const delta = view.getInt8(baseOff + 2 + k);
-                const val = zAbs + (delta * unitScale);
-                neighbors.push(val);
+                neighbors.push(zAbs + (delta * unitScale));
             }
 
             hexData[i] = {
@@ -836,9 +897,7 @@ class PistonViewer {
         return {
             hexes: hexData,
             stats: { base: minZ, min: minZ, max: maxZ, avg: (minZ + maxZ) / 2 },
-            ySpacing: this.currentRes,
-            gridW,
-            gridH
+            ySpacing: this.currentRes
         };
     }
 
@@ -847,7 +906,8 @@ class PistonViewer {
 
         // 1. Detect Version
         const magic = view.getUint32(0, true);
-        if (magic === 0x33584548) return this.parseBinaryV3(view);
+        // HEX2 = 0x32584548
+        if (magic === 0x32584548) return this.parseBinaryV2(view);
 
         let baseElevation = view.getFloat32(0, true);
         let minElevation = baseElevation;
@@ -978,6 +1038,26 @@ class PistonViewer {
                 const realY = ySteps[row] + yShift;
                 const h = hexes[dataIdx];
 
+                // --- GEOMETRY CLIP (Vertex Count Fix) ---
+                // Prune hexes outside the sector's hexagonal territory to stop doubling vertex count in overlap zones.
+                const localCx = TILE_WIDTH_WORLD / 2.0;
+                const localCy = TILE_HEIGHT_WORLD / 2.0;
+                const dx = x - localCx;
+                const dy = realY - localCy;
+
+                // For a Pointy-Topped Hexagon (Gosper standard):
+                // Flat-to-Flat Width = W.
+                // Radius (Corner) = W / sqrt(3).
+                // We use a 1.05 safety multiplier to avoid cracks at the edge.
+                const maxRadius = (TILE_WIDTH_WORLD / Math.sqrt(3)) * 1.05;
+                if ((dx * dx + dy * dy) > (maxRadius * maxRadius)) {
+                    // This instance is in the "Padding" zone. Collapse it to zero-scale at 0,0,0
+                    // or just don't set its matrix.
+                    matrix.makeScale(0, 0, 0);
+                    mesh.setMatrixAt(instanceIdx, matrix);
+                    continue;
+                }
+
                 // Position within the tile
                 matrix.makeTranslation(x, 0, -realY);
                 mesh.setMatrixAt(instanceIdx, matrix);
@@ -1033,6 +1113,7 @@ class PistonViewer {
             shader.uniforms.uHeightFactor = { value: 0.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileResolution = { value: material.userData.uTileResolution || 10.0 };
+            shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
 
             // UV Correction for Padding
@@ -1125,7 +1206,11 @@ class PistonViewer {
                 }
 
                 // UV Calculation
-                vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                #ifdef USE_INSTANCING
+                    vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                #else
+                    vLocalPos = transformed;
+                #endif
                 vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 
                 vObjNormal = normal;
@@ -1176,8 +1261,8 @@ class PistonViewer {
                 `if (vIsHidden > 0.5) discard;
                 
                 // UV Mapping
-                float rawU = vLocalPos.x / uTileSize;
-                float rawV = -vLocalPos.z / uTileSize;
+                float rawU = (vLocalPos.x / uTileSize) + 0.5;
+                float rawV = (-vLocalPos.z / uTileSize) + 0.5;
                 float u = rawU * uUvScale + uUvOffset;
                 float v = rawV * uUvScale + uUvOffset;
                 float texY = (uTextureFlipY > 0.5) ? v : (1.0 - v);
@@ -1245,22 +1330,8 @@ class PistonViewer {
         this.frametimeIndex = (this.frametimeIndex + 1) % 120;
         // === END DEBUG ===
 
-        // Keep camera above surface
-        const camX = this.camera.position.x;
-        const camZ = this.camera.position.z;
-        let localMax = -10000.0;
-        for (const tile of this.tiles) {
-            if (tile.bounds && camX >= tile.bounds.min.x && camX <= tile.bounds.max.x &&
-                camZ >= tile.bounds.min.z && camZ <= tile.bounds.max.z) {
-                localMax = (tile.stats.max - this.floorState.value);
-                break;
-            }
-        }
-
-        const minCamY = Math.max(100.0, localMax + 100.0);
-        if (this.camera.position.y < minCamY) {
-            this.camera.position.y = minCamY;
-        }
+        // Camera altitude is now maintained by maintainCameraAltitudeDuringAnimation()
+        // which properly accounts for heightFactor scaling
 
         // === DEBUG: Update performance metrics ===
         this.updateRenderStats(now);
@@ -1289,6 +1360,7 @@ class PistonViewer {
         const isFlatMode = angleDeg < FLAT_THRESHOLD;
 
         this.updateFloorState(heightFactor);
+        this.maintainCameraAltitudeDuringAnimation(heightFactor);
 
         for (const tile of this.tiles) {
             if (tile.flatMesh) tile.flatMesh.visible = isFlatMode;
@@ -1322,20 +1394,14 @@ class PistonViewer {
             div.style.height = `${TILE_HEIGHT_WORLD}px`;
 
             // Texture
-            const lowTexUrl = `tiles_sat/low_res/tile_${tileDef.x}_${tileDef.y}.webp`;
+            const lowTexUrl = `aerial_tiles/low_res/sector_${tileDef.q}_${tileDef.r}.webp`;
             div.style.backgroundImage = `url(${lowTexUrl})`;
 
             // Position: Map 3D (X,Z) to CSS (X,Y)
-            // 3D: X is Right, Z is Down (towards viewer)
-            // CSS: Left is Right, Top is Down
-
-            const tx = (tileDef.x - this.worldOrigin.x);
-            // In 3D logic: posZ = -(y - originY).
-            // So if y increases (North), Z is negative (Up/Away).
-            // In CSS, Up/Away is negative Y? No, Top=0 is top.
-            // We want y-increasing (North) to be Up (Negative Top).
-            // So CSS Y = -(y - originY) matches 3D Z.
-            const ty = -(tileDef.y - this.worldOrigin.y);
+            // tileDef.x/y is the world center of the sector.
+            // tx/ty is the top-left offset for the CSS div.
+            const tx = (tileDef.x - this.worldOrigin.x) - (TILE_WIDTH_WORLD / 2);
+            const ty = -(tileDef.y - this.worldOrigin.y) - (TILE_HEIGHT_WORLD / 2);
 
             // Place tile flat on the XY plane (which represents the Ground)
             div.style.left = `${tx}px`;

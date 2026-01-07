@@ -1,7 +1,7 @@
-
 import os
 import glob
 import math
+import time
 import numpy as np
 import rasterio
 import rasterio.enums
@@ -84,8 +84,16 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     
     # Canvas Size: The Hex Width (Pixels) + 2x Buffer
     base_px = coord_util.TEXTURE_SIZE_PX # ~4148.5
-    total_w_px = int(base_px + (BUFFER_PX * 2))
-    total_h_px = int(base_px + (BUFFER_PX * 2)) 
+    
+    # FIX: Pointy Top Hexagon is taller than it is wide.
+    # Height = 2 * Radius = 2 * (Width / sqrt(3)) = Width * 1.1547
+    # To avoid cropping top/bottom, and to satisfy "Square Hex" requirement,
+    # we use the Height as the base dimension for our Square Canvas.
+    hex_height_px = base_px * 2.0 / math.sqrt(3.0)
+    max_dim_px = max(base_px, hex_height_px)
+    
+    total_w_px = int(max_dim_px + (BUFFER_PX * 2))
+    total_h_px = int(max_dim_px + (BUFFER_PX * 2)) 
     
     # Calculate World Bounds for this Canvas
     half_w_m = (total_w_px * coord_util.METERS_PER_PIXEL) / 2.0
@@ -405,99 +413,62 @@ def pack_level(level_idx, heights, min_z, scale_factor):
 
 def bake_sector_binary(Q, R, dem_array, transform, output_dir="frontend/hexagons/app/tiles_bin"):
     """
-    Bakes the 'Universal Bin' for a sector (v3.0 - Grid Packed).
-    Matches the Frontend Grid iteration order (Col-Major).
+    Bakes the 'Universal Bin' for a sector (v2.0).
     """
     t_start = time.time()
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    # 1. Define Grid Dimensions (Matching Frontend)
-    # Frontend: TILE_WIDTH_WORLD based on SECTOR_WIDTH_METERS
-    # Iterates x from 0 to Width (inclusive of boundary?)
-    # Frontend logic:
-    # xSteps = [0, dx, 2dx ... <= Width+1]
-    # ySteps = [0, dy, 2dy ... <= Height+1]
+    # 1. Get Unit Heights (L5 in Fractal Terms, but Leaves of Tree)
+    # Using 'precompute_sector_heights_manual' to get indices
+    rows, cols = precompute_sector_heights_manual(Q, R, transform)
+    h_l5 = dem_array[rows, cols] # (16807,) Unit Hexes
     
-    # We need to calculate exactly how many cols/rows the frontend expects.
-    # Unit Hex Width ~ 6.4m.
-    # Sector Width ~ 829.7m.
+    # 2. Compute Hierarchical Means (Bottom-Up)
+    h_l4 = h_l5.reshape(-1, 7).mean(axis=1) # Parent (Huge)
+    h_l3 = h_l4.reshape(-1, 7).mean(axis=1)
+    h_l2 = h_l3.reshape(-1, 7).mean(axis=1)
+    h_l1 = h_l2.reshape(-1, 7).mean(axis=1)
+    h_l0 = h_l1.reshape(-1, 7).mean(axis=1) # Root (Mega)
     
-    # Let's derive it exactly from coordinate_utility
-    w_m = coord_util.SECTOR_WIDTH_METERS
-    h_m = coord_util.SECTOR_WIDTH_METERS # Square tile bounds
+    all_levels_h = [h_l0, h_l1, h_l2, h_l3, h_l4, h_l5]
     
-    unit_w = coord_util.UNIT_HEX_WIDTH_METERS 
+    # 3. Calculate Global Min/Max for Scaling
+    # We use the Sector Extremes to define the 16-bit range
+    sector_min = float(h_l5.min())
+    sector_max = float(h_l5.max())
     
-    y_spacing = unit_w
-    x_spacing = unit_w * (math.sqrt(3) / 2.0)
-    
-    # Number of steps
-    # for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing)
-    num_cols = int((w_m + 1.0) / x_spacing) + 1
-    num_rows = int((h_m + 1.0) / y_spacing) + 1
-    
-    # 2. Collect Heights in Grid Order (Col-Major)
-    # Frontend Loop: Col (X) outer, Row (Y) inner.
-    
-    # Center of Sector in World Coords
-    cen_x, cen_y = coord_util.sector_to_world_meters(Q, R)
-    
-    # Tile Origin
-    origin_x = cen_x - (w_m / 2.0)
-    origin_y = cen_y - (h_m / 2.0) # Bottom-Left in 2D?
-    
-    # Sample points.
-    
-    # Pre-calculate world coordinates for all points
-    sample_xs = []
-    sample_ys = []
-    
-    for col in range(num_cols):
-        x_local = col * x_spacing
-        y_shift = (y_spacing / 2.0) if (col % 2 == 1) else 0.0
-        
-        for row in range(num_rows):
-            y_local = row * y_spacing + y_shift
-            
-            # Map to World
-            # Frontend increasing row adds y_spacing.
-            # Assuming standard North+ coords for DEM sampling.
-            wx = origin_x + x_local
-            wy = origin_y + y_local 
-            
-            sample_xs.append(wx)
-            sample_ys.append(wy)
-            
-    # Batch Sample
-    rows_idx, cols_idx = rasterio.transform.rowcol(transform, sample_xs, sample_ys)
-    
-    # Read from pre-loaded DEM array
-    # Safety clip
-    r_idx = np.clip(rows_idx, 0, dem_array.shape[0]-1)
-    c_idx = np.clip(cols_idx, 0, dem_array.shape[1]-1)
-    
-    h_values = dem_array[r_idx, c_idx] # Flat array of N items
-    
-    # 3. Calculate Scale
-    sector_min = float(h_values.min())
-    sector_max = float(h_values.max())
+    # Safety margin
     sector_min -= 10.0
     sector_max += 10.0
-    h_range = sector_max - sector_min
-    if h_range < 1.0: h_range = 1.0
-    scale = 65535.0 / h_range
     
-    # 4. Pack Buffer (V3)
+    height_range = sector_max - sector_min
+    if height_range < 1.0: height_range = 1.0
+    scale_factor = 65535.0 / height_range
+    
+    # 4. Pack Data
     final_blob = bytearray()
     
-    # Header: HEX3 (4) + Q(4) + R(4) + Min(4) + Max(4) + Scale(4) 
-    # + GridW(2) + GridH(2) + Pad(4) = 32 Bytes
+    # A. Header (32 Bytes)
+    # Magic (4) + Q(4) + R(4) + Min(4) + Max(4) + Scale(4) + Padding(8)
     import struct
-    header = struct.pack('<4siiffHH4x', 
-        b'HEX3', int(Q), int(R), sector_min, sector_max, scale, 
-        num_cols, num_rows
-    )
+    header = struct.pack('<4siifff8x', b'HEX2', int(Q), int(R), sector_min, sector_max, scale_factor)
+    final_blob.extend(header)
+    
+    # B. Blocks (Levels 0 to 5)
+    for lvl_idx, heights in enumerate(all_levels_h):
+        # Pack
+        packed = pack_level(lvl_idx, heights, sector_min, scale_factor)
+        final_blob.extend(packed)
+        
+    # 5. Write
+    filename = f"sector_{Q}_{R}.bin"
+    path = os.path.join(output_dir, filename)
+    with open(path, 'wb') as f:
+        f.write(final_blob)
+        
+    duration = time.time() - t_start
+    return path, len(final_blob), duration
     final_blob.extend(header)
     
     # Need neighbor lookups in the grid.
