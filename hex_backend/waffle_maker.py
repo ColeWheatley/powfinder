@@ -4,6 +4,8 @@ import glob
 import math
 import numpy as np
 import rasterio
+import rasterio.enums
+import gc
 from shapely.geometry import Polygon, box
 from shapely.affinity import affine_transform
 from multiprocessing import Pool, cpu_count
@@ -57,6 +59,369 @@ def get_sector_bounds(sector_Q, sector_R):
     max_y = cen_y + safety_radius + buffer_meters
     
     return box(min_x, min_y, max_x, max_y)
+
+def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors"):
+    """
+    Bakes the WebP texture for a single sector and its LOD variants.
+    
+    Generates 4 files:
+    1. _compressed (0.2m, 32px/unit) - Full Res
+    2. _high       (~0.8m, 8px/unit) - 1/4 Scale
+    3. _med        (~1.6m, 4px/unit) - 1/8 Scale
+    4. _low        (~3.2m, 2px/unit) - 1/16 Scale
+    
+    All saved at Quality=10 (User Request).
+    """
+    import PIL.Image as Image
+    from rasterio.windows import from_bounds
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # 1. Define Canvas
+    # Shape: Centered on Sector Center
+    cen_x, cen_y = coord_util.sector_to_world_meters(Q, R)
+    
+    # Canvas Size: The Hex Width (Pixels) + 2x Buffer
+    base_px = coord_util.TEXTURE_SIZE_PX # ~4148.5
+    total_w_px = int(base_px + (BUFFER_PX * 2))
+    total_h_px = int(base_px + (BUFFER_PX * 2)) 
+    
+    # Calculate World Bounds for this Canvas
+    half_w_m = (total_w_px * coord_util.METERS_PER_PIXEL) / 2.0
+    half_h_m = (total_h_px * coord_util.METERS_PER_PIXEL) / 2.0
+    
+    win_min_x = cen_x - half_w_m
+    win_max_x = cen_x + half_w_m
+    win_min_y = cen_y - half_h_m
+    win_max_y = cen_y + half_h_m
+    
+    target_poly = box(win_min_x, win_min_y, win_max_x, win_max_y)
+
+    # Create Black Canvas (RGBA)
+    canvas = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 255))
+    
+    # 2. Sample Data
+    # Find intersecting TIFs
+    intersecting = []
+    for t in valid_tifs:
+        if t['poly'].intersects(target_poly):
+            intersecting.append(t)
+            
+    if not intersecting:
+        print(f"⚠️ Sector {Q},{R}: No intersecting TIFs found.")
+        return []
+
+    # Paste Data
+    for t in intersecting:
+        with rasterio.open(t['path']) as src:
+            ix_min_x = max(win_min_x, src.bounds.left)
+            ix_max_x = min(win_max_x, src.bounds.right)
+            ix_min_y = max(win_min_y, src.bounds.bottom)
+            ix_max_y = min(win_max_y, src.bounds.top)
+            
+            if ix_min_x >= ix_max_x or ix_min_y >= ix_max_y:
+                continue
+
+            window = from_bounds(ix_min_x, ix_min_y, ix_max_x, ix_max_y, src.transform)
+            
+            w_px = int((ix_max_x - ix_min_x) / coord_util.METERS_PER_PIXEL)
+            h_px = int((ix_max_y - ix_min_y) / coord_util.METERS_PER_PIXEL)
+            
+            if w_px <= 0 or h_px <= 0: continue
+            
+            try:
+                data = src.read(window=window, out_shape=(src.count, h_px, w_px), resampling=rasterio.enums.Resampling.lanczos)
+                img_array = np.moveaxis(data, 0, -1)
+                
+                if img_array.shape[2] == 3:
+                    patch = Image.fromarray(img_array.astype('uint8'), 'RGB')
+                elif img_array.shape[2] == 4:
+                    patch = Image.fromarray(img_array.astype('uint8'), 'RGBA')
+                else:
+                    continue
+                    
+                paste_x = int((ix_min_x - win_min_x) / coord_util.METERS_PER_PIXEL)
+                # Y flip because PIL is top-down, Map is bottom-up (usually)
+                # But wait, TIFs are usually top-down in rasterio read?
+                # Actually standard geotiff is +Y up? No, usually +Y down in pixel space, but +Y up in coord space.
+                # Let's stick to the world-coord math:
+                paste_y = int((win_max_y - ix_max_y) / coord_util.METERS_PER_PIXEL)
+                
+                canvas.paste(patch, (paste_x, paste_y))
+                
+            except Exception as e:
+                print(f"Error reading TIF {t['path']}: {e}")
+
+    # Create Subfolders
+    res_dirs = {
+        "compressed": os.path.join(output_dir, "compressed"),
+        "high_res": os.path.join(output_dir, "high_res"),
+        "med_res": os.path.join(output_dir, "med_res"),
+        "low_res": os.path.join(output_dir, "low_res")
+    }
+    for d in res_dirs.values():
+        if not os.path.exists(d):
+            os.makedirs(d)
+
+    # 3. Export Variants
+    outputs = []
+    
+    # Variant 1: Full Res (Source 0.2m) -> "compressed/"
+    f_full = f"sector_{Q}_{R}.webp"
+    p_full = os.path.join(res_dirs["compressed"], f_full)
+    canvas.save(p_full, "WEBP", quality=10)
+    outputs.append(("Compressed (0.2m)", p_full, total_w_px))
+    
+    # Variant 2: High Res (~0.8m) -> "high_res/"
+    w_high = int(total_w_px / 4)
+    h_high = int(total_h_px / 4)
+    c_high = canvas.resize((w_high, h_high), Image.LANCZOS)
+    p_high = os.path.join(res_dirs["high_res"], f_full)
+    c_high.save(p_high, "WEBP", quality=10)
+    outputs.append(("High (~0.8m)", p_high, w_high))
+    
+    # Variant 3: Med Res (~1.6m) -> "med_res/"
+    w_med = int(total_w_px / 8)
+    h_med = int(total_h_px / 8)
+    c_med = canvas.resize((w_med, h_med), Image.LANCZOS)
+    p_med = os.path.join(res_dirs["med_res"], f_full)
+    c_med.save(p_med, "WEBP", quality=10)
+    outputs.append(("Med (~1.6m)", p_med, w_med))
+    
+    # Variant 4: Low Res (~3.2m) -> "low_res/"
+    w_low = int(total_w_px / 16)
+    h_low = int(total_h_px / 16)
+    c_low = canvas.resize((w_low, h_low), Image.LANCZOS)
+    p_low = os.path.join(res_dirs["low_res"], f_full)
+    c_low.save(p_low, "WEBP", quality=10)
+    outputs.append(("Low (~3.2m)", p_low, w_low))
+
+    return outputs, canvas
+
+def bake_sector_tifs(Q, R, canvas, output_dir="hex_backend/baked_sectors"):
+    """
+    Saves a TIF version of the sector texture.
+    NOTE: Many browsers do not support TIF natively, but they can be 
+    smaller than high-quality WebPs in some geo-scenarios.
+    """
+    f_tif = f"sector_{Q}_{R}_source.tif"
+    p_tif = os.path.join(output_dir, f_tif)
+    canvas.save(p_tif, "TIFF")
+    return p_tif
+
+# =============================================================================
+# ELEVATION BAKING (THE "BIN" LOGIC)
+# =============================================================================
+
+# Cache the 16,807 offsets relative to a Sector Center
+# Shape: (16807, 2) array of [dq, dr]
+CACHED_GOSPER_OFFSETS = None
+
+def get_cached_offsets():
+    global CACHED_GOSPER_OFFSETS
+    if CACHED_GOSPER_OFFSETS is None:
+        print("⚙️ Generating Fractal Tree (Level 5)...", end="")
+        offsets = coord_util.generate_gosper_offsets(5) # 16,807 points
+        CACHED_GOSPER_OFFSETS = np.array(offsets)
+        print(f" Done. {len(offsets)} nodes.")
+    return CACHED_GOSPER_OFFSETS
+
+def precompute_sector_heights_manual(Q, R, transform):
+    """
+    Optimized DEM Sampler using a specific affine transform.
+    """
+    offsets = get_cached_offsets()
+    center_q = -87 * Q - 149 * R
+    center_r = 149 * Q + 62 * R
+    
+    qs = offsets[:, 0] + center_q
+    rs = offsets[:, 1] + center_r
+    
+    h = coord_util.UNIT_HEX_WIDTH_METERS
+    xs = qs * (math.sqrt(3)/2 * h)
+    ys = rs * h + qs * (0.5 * h)
+    
+    cols, rows = rasterio.transform.rowcol(transform, xs, ys)
+    return np.array(rows), np.array(cols)
+
+# Cache Neighbor Tables for each Level (Unit, Parent, Grand...)
+# { level: np.array(N, 6) }
+CACHED_NEIGHBOR_TABLES = {}
+
+def get_neighbor_table(level):
+    if level not in CACHED_NEIGHBOR_TABLES:
+        print(f"⚙️ Generating Neighbor Table for Level {level}...", end="")
+        table = coord_util.compute_gosper_neighbors(level)
+        CACHED_NEIGHBOR_TABLES[level] = table
+        print(f" Done. {len(table)} nodes.")
+    return CACHED_NEIGHBOR_TABLES[level]
+
+def pack_level(level_idx, heights, min_z, scale_factor):
+    """
+    Compresses a level's height array into the 8-Byte struct.
+    Struct: [Uint16 H, Int8 N1, Int8 N2... Int8 N6]
+    """
+    count = len(heights)
+    neighbor_indices = get_neighbor_table(level_idx)
+    
+    # 1. Quantize Heights -> Uint16
+    # val = (h - min) * scale_factor
+    # scale_factor = 65535 / (max - min)
+    h_norm = (heights - min_z) * scale_factor
+    h_u16 = np.clip(h_norm, 0, 65535).astype(np.uint16)
+    
+    # 2. Compute Skirts (Neighbor Deltas)
+    # We need the quantized height of the neighbors to match visual cracks exactly?
+    # Or just use the source float diff? 
+    # Using source float diff is safer for physics.
+    # Storing: Delta in 0.5m units. Range +/- 64m.
+    # Delta = Neighbor - Self (Convention: Height at edge relative to center)
+    
+    # Prepare Output Buffer: (N, 8) bytes
+    # But numpy struct arrays are tricky. Let's make separate arrays and stack.
+    
+    # Neighbors Matrix (N, 6) of indices
+    # We want heights[neighbors]. If neighbor == -1, use self height (delta 0).
+    
+    # Handle -1 indices safely:
+    # Create padded heights with strict boundary value?
+    # Actually, if index is -1, we want delta=0.
+    # Let's replace -1 with 'current index' in the lookup so diff is 0.
+    
+    self_indices = np.arange(count)
+    safe_neighbors = neighbor_indices.copy()
+    
+    # Mask for valid neighbors
+    invalid_mask = (safe_neighbors == -1)
+    
+    # Temporarily replace -1 with 0 to safely fetch, then zero out diffs
+    safe_neighbors[invalid_mask] = 0 
+    
+    # Fetch Neighbor Heights
+    n_heights = heights[safe_neighbors] # Shape (N, 6)
+    
+    # Correct the values where neighbor was -1 to be equal to self
+    # Actually simpler: Calculate diff, then mask.
+    
+    # Self heights expanded for broadcasting: (N, 1)
+    self_h_col = heights.reshape(-1, 1)
+    
+    diffs = n_heights - self_h_col # (N, 6)
+    
+    # Apply -1 mask: if neighbor was missing, diff is 0
+    # But wait, safe_neighbors used index 0 for invalid.
+    # Row i used index 0. If neighbor was -1, we fetched heights[0] instead of heights[i].
+    # This is WRONG behavior. We wanted heights[i].
+    # FIX:
+    # Use fancy indexing more carefully.
+    # or just: where(mask, self_h, n_heights)
+    
+    actual_n_heights = n_heights # This has heights[0] at invalid spots
+    # We need to construct a matrix of "Correct Neighbor Heights"
+    # If invalid, use self_h.
+    
+    # Correction:
+    # We can iterate cols?
+    # Or optimize:
+    # Just fix the delta.
+    
+    # Let's map delta to Int8
+    # 1 unit = 0.5m
+    delta_units = diffs / 0.5
+    delta_i8 = np.clip(delta_units, -127, 127).astype(np.int8)
+    
+    # Now fix the invalid ones to 0
+    delta_i8[invalid_mask] = 0
+    
+    # 3. Interleave / Pack
+    # We want: H(2), N1(1), N2(1)...
+    # Create raw byte buffer
+    buffer = np.zeros(count * 8, dtype=np.uint8)
+    
+    # View as custom dtype
+    # dtype = [('h', '<u2'), ('n', '6i1')]
+    # This might be padding sensitive.
+    # Safer: Assign byte slices.
+    
+    # H (Uint16) -> Bytes 0,1
+    # Little Endian standard
+    h_bytes = h_u16.tobytes()
+    buffer[0::8] = np.frombuffer(h_bytes[0::2], dtype=np.uint8)
+    buffer[1::8] = np.frombuffer(h_bytes[1::2], dtype=np.uint8)
+    
+    # Neighbors -> Bytes 2..7
+    for k in range(6):
+        col_bytes = delta_i8[:, k].tobytes() # shape N
+        buffer[(2+k)::8] = np.frombuffer(col_bytes, dtype=np.uint8)
+        
+    return buffer
+
+def bake_sector_binary(Q, R, dem_array, transform, output_dir="frontend/hexagons/app/tiles_bin"):
+    """
+    Bakes the 'Universal Bin' for a sector (v2.0).
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    # 1. Get Unit Heights (L5 in Fractal Terms, but Leaves of Tree)
+    # Using 'precompute_sector_heights_manual' to get indices
+    rows, cols = precompute_sector_heights_manual(Q, R, transform)
+    h_l5 = dem_array[rows, cols] # (16807,) Unit Hexes
+    
+    # 2. Compute Hierarchical Means (Bottom-Up)
+    # 16807 -> 2401 -> 343 -> 49 -> 7 -> 1
+    h_l4 = h_l5.reshape(-1, 7).mean(axis=1) # Parent (Huge)
+    h_l3 = h_l4.reshape(-1, 7).mean(axis=1)
+    h_l2 = h_l3.reshape(-1, 7).mean(axis=1)
+    h_l1 = h_l2.reshape(-1, 7).mean(axis=1)
+    h_l0 = h_l1.reshape(-1, 7).mean(axis=1) # Root (Mega)
+    
+    # Levels List (Ordered Root -> Leaves for reading?)
+    # Usually better to store [Root, L1... L5] so finding Root is O(1) at byte 32.
+    # Levels:
+    # 0: Root (1 item)
+    # 1: (7 items)
+    # ...
+    # 5: (16807 items)
+    
+    all_levels_h = [h_l0, h_l1, h_l2, h_l3, h_l4, h_l5]
+    
+    # 3. Calculate Global Min/Max for Scaling
+    # We use the Sector Extremes to define the 16-bit range
+    sector_min = float(h_l5.min())
+    sector_max = float(h_l5.max())
+    
+    # Safety margin
+    sector_min -= 10.0
+    sector_max += 10.0
+    
+    height_range = sector_max - sector_min
+    if height_range < 1.0: height_range = 1.0
+    scale_factor = 65535.0 / height_range
+    
+    # 4. Pack Data
+    final_blob = bytearray()
+    
+    # A. Header (32 Bytes)
+    # Magic (4) + Q(4) + R(4) + Min(4) + Max(4) + Scale(4) + Padding(8)
+    import struct
+    header = struct.pack('<4siifff8x', b'HEX2', int(Q), int(R), sector_min, sector_max, scale_factor)
+    final_blob.extend(header)
+    
+    # B. Blocks (Levels 0 to 5)
+    for lvl_idx, heights in enumerate(all_levels_h):
+        # Pack
+        packed = pack_level(lvl_idx, heights, sector_min, scale_factor)
+        final_blob.extend(packed)
+        
+    # 5. Write
+    filename = f"sector_{Q}_{R}.bin"
+    path = os.path.join(output_dir, filename)
+    with open(path, 'wb') as f:
+        f.write(final_blob)
+        
+    return path, len(final_blob)
 
 # =============================================================================
 # MAIN PIPELINE
@@ -167,21 +532,82 @@ def main():
     print(f"   Pixel-Verified: YES")
 
     # =============================================================================
-    # 4. LOD TREE GENERATION (Preview)
+    # 4. FULL BAKE: WebP Textures
     # =============================================================================
-    # To support the "Hybrid LOD" system:
-    # 1. "Far Field": We need a QuadTree/BVH of these Sectors for fast frustum/distance culling.
-    # 2. "Near Field": We use 'world_meters_to_axial' for O(1) lookups.
+    if valid_sectors:
+        print(f"\n🧑‍🍳 COOKING: Baking {len(valid_sectors)} Sectors...")
+        
+        baked_count = 0
+        total_sectors = len(valid_sectors)
+        
+        for Q, R in valid_sectors:
+            baked_count += 1
+            print(f"[{baked_count}/{total_sectors}] Baking Q={Q}, R={R}...", end="\r")
+            
+            # TEXTURE BAKE (Skipping to focus on Elevation Logic)
+            # results, canvas = bake_sector_textures(Q, R, valid_tifs, output_dir="frontend/hexagons/app/aerial_tiles")
+            
+            # TIF BAKE (Commented out per request)
+            # path_tif = bake_sector_tifs(Q, R, canvas, output_dir="frontend/hexagons/app/aerial_tiles")
+            
+    # =============================================================================
+    # 5. ELEVATION LOGIC PREVIEW (The "Waffle Batter")
+    # =============================================================================
+    print("\n🥞 ELEVATION LOGIC PREVIEW (Tree Logic)")
     
-    # In the full bake, we would export 'manifest_lod_tree.json':
-    # {
-    #   "sectors": [
-    #      { "q": ..., "r": ..., "center": [x,y], "bounds": [minx, miny, maxx, maxy], "children": [] }
-    #   ]
-    # }
-    print("🌳 LOD Tree Readiness: COMPATIBLE")
-    print("   - Inverse Coordinate System: Active")
-    print("   - Sector Bounding Boxes: Ready for QuadTree insertion")
+    TARGET_RES = 3.5 # Upscale from 5m to 3.5m to fit ~10GB RAM
+    
+    print(f"   Upscaling DEM to {TARGET_RES}m (Targeting ~10GB RAM)...")
+    with rasterio.open(DEM_PATH) as src:
+        # Calculate new shape
+        new_w = int((src.bounds.right - src.bounds.left) / TARGET_RES)
+        new_h = int((src.bounds.top - src.bounds.bottom) / TARGET_RES)
+        
+        # Read with resampling
+        print(f"   Reading and Resampling {new_w}x{new_h}...", end="", flush=True)
+        dem_data = src.read(
+            1, 
+            out_shape=(new_h, new_w), 
+            resampling=rasterio.enums.Resampling.lanczos
+        )
+        upscaled_transform = rasterio.transform.from_bounds(
+            src.bounds.left, src.bounds.bottom, src.bounds.right, src.bounds.top, 
+            new_w, new_h
+        )
+        print(f" Done. {dem_data.nbytes / 1e9:.2f} GB used.")
+
+        # =============================================================================
+        # 6. FULL PRODUCTION BAKE
+        # =============================================================================
+        if valid_sectors:
+            print(f"\n🏭 FACTORY MODE: Baking {len(valid_sectors)} Sectors (Texture + Geometry)...")
+            
+            baked_count = 0
+            total_sectors = len(valid_sectors)
+            
+            for Q, R in valid_sectors:
+                baked_count += 1
+                print(f"[{baked_count}/{total_sectors}] Baking Q={Q}, R={R}...", end="\r")
+                
+                # A. TEXTURES
+                results, canvas = bake_sector_textures(Q, R, valid_tifs, output_dir="frontend/hexagons/app/aerial_tiles")
+                
+                # B. GEOMETRY (BIN)
+                bin_path, bin_size = bake_sector_binary(Q, R, dem_data, upscaled_transform, output_dir="frontend/hexagons/app/tiles_bin")
+                
+                # Explicit Cleanup of Canvas
+                del canvas
+                
+                if baked_count % 10 == 0:
+                    gc.collect()
+                    
+            print(f"\n✅ SUCCESS! All {baked_count} Sectors served.")
+            print(f"   - Textures: 'frontend/hexagons/app/aerial_tiles/'")
+            print(f"   - Geometry: 'frontend/hexagons/app/tiles_bin/'")
+
+    # Final cleanup
+    del dem_data
+    gc.collect()
 
 if __name__ == "__main__":
     main()

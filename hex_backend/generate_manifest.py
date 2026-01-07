@@ -1,31 +1,25 @@
-
 import os
 import json
 import re
-import glob
+import sys
+import coordinate_utility as coord_util
 
-TILES_DIR = '../frontend/hexagons/app/tiles_bin/res_10'
-OUTPUT_FILE = '../frontend/hexagons/app/tile_manifest.json'
+# CONFIG
+BINARY_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/hexagons/app/tiles_bin"))
+OUTPUT_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/hexagons/app/tile_manifest.json"))
 
 def generate_manifest():
-    TILES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/hexagons/app/tiles_bin/bilinear/res_10"))
+    print(f"🔍 Manifest Generator looking in: {BINARY_DIR}")
     
-    if not os.path.exists(TILES_DIR):
-        # Fallback: look for ANY res_ subdirectory
-        parent = os.path.dirname(TILES_DIR)
-        subdirs = [d for d in glob.glob(os.path.join(parent, "res_*")) if os.path.isdir(d)]
-        if subdirs:
-            TILES_DIR = subdirs[0]
-        else:
-            print(f"Error: Could not find any tile directory at {TILES_DIR} or parent. Bake first.")
-            return
+    if not os.path.exists(BINARY_DIR):
+        print("❌ Error: Binary directory not found.")
+        return
+
+    files = os.listdir(BINARY_DIR)
+    sectors = []
     
-    print(f"Indexing tiles from {TILES_DIR}...")
-    files = os.listdir(TILES_DIR)
-    tiles = []
-    
-    # Pattern to match tile_X_Y.bin
-    pattern = re.compile(r'tile_(\d+)_(\d+)\.bin')
+    # Pattern: sector_Q_R.bin ("sector_277_-234.bin")
+    pattern = re.compile(r'sector_(-?\d+)_(-?\d+)\.bin')
     
     min_x = float('inf')
     min_y = float('inf')
@@ -35,39 +29,50 @@ def generate_manifest():
     for f in files:
         match = pattern.match(f)
         if match:
-            x = int(match.group(1))
-            y = int(match.group(2))
+            # Parse Q, R
+            Q = int(match.group(1))
+            R = int(match.group(2))
             
-            # Skip the 'oddball' tile at the lower left
-            if x == 53750:
-                continue
-                
-            tiles.append({'x': x, 'y': y})
+            # Convert to World Center (for Frontend positioning)
+            cx, cy = coord_util.sector_to_world_meters(Q, R)
             
-            if x < min_x: min_x = x
-            if x > max_x: max_x = x
-            if y < min_y: min_y = y
-            if y > max_y: max_y = y
+            # Append to list
+            # We treat 'x','y' in the manifest as the CENTER of the tile/sector
+            sectors.append({
+                'q': Q,
+                'r': R,
+                'x': cx,
+                'y': cy
+            })
+            
+            # Update Bounds (Approximate, based on center)
+            # Actually, frontend uses bounds to center camera.
+            if cx < min_x: min_x = cx
+            if cx > max_x: max_x = cx
+            if cy < min_y: min_y = cy
+            if cy > max_y: max_y = cy
+            
+    # Calculate approx bounds size for camera
+    margin = 1000.0
             
     manifest = {
-        'tiles': tiles,
+        'tiles': sectors, # Rename to 'sectors'? Frontend expects 'tiles' array.
+        'type': 'sector_hex',
         'bounds': {
-            'min_x': min_x,
-            'max_x': max_x,
-            'min_y': min_y,
-            'max_y': max_y
+            'min_x': min_x - margin,
+            'max_x': max_x + margin,
+            'min_y': min_y - margin,
+            'max_y': max_y + margin
         },
-        'tile_size': {
-            'x': 1250,
-            'y': 1000
-        }
+        'sector_radius_m': coord_util.SECTOR_WIDTH_METERS / 2.0
     }
     
     with open(OUTPUT_FILE, 'w') as f:
         json.dump(manifest, f, indent=4)
         
-    print(f"Generated manifest with {len(tiles)} tiles.")
-    print(f"Bounds: X[{min_x}, {max_x}], Y[{min_y}, {max_y}]")
+    print(f"✅ Generated manifest for {len(sectors)} sectors.")
+    print(f"   Bounds: X[{min_x:.0f}, {max_x:.0f}], Y[{min_y:.0f}, {max_y:.0f}]")
+    print(f"   Saved to: {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     generate_manifest()

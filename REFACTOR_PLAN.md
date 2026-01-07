@@ -34,7 +34,8 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
     *   **The Reveal**: Use the `uHeightFactor` to "shatter" the flat map into individual pistons that rise to their real elevations.
 *   **Overshoot Texturing (WebP Optimization)**: 
     *   **Justification**: WebP uses 16x16 macroblocks. High-contrast edges (Satellite vs. Black padding) cause artifacts if they fall mid-block.
-    *   **Implementation**: Crop satellite textures with a **16-32px overshoot** past the hex boundary. The 3D hex mesh acts as a clean "cookie cutter," hiding the compression-muddled edge while gaining the file-size benefits of the black padding.
+    *   **Implementation**: Crop satellite textures with a **32px overshoot** past the hex boundary. The 3D hex mesh acts as a clean "cookie cutter," hiding the compression-muddled edge while gaining the file-size benefits of the black padding.
+    *   **Compression Note**: We utilize an aggressive **10% quality** WebP setting to keep mobile loads fast. Interestingly, tests show that **Original Resolution TIFs are actually smaller** than 90% quality WebPs, though WebP remains the target for browser compatibility.
 *   **Instancing**: Use `InstancedMesh` with an "Ideal Hex" and `aNeighborSlot` attribute.
 *   **Ideal Hex**: Optimized indexed geometry (~19 vertices vs ~36).
     *   **Flat Tops**: Strictly horizontal tops (Normal: 0,1,0). No tilting or cross-product calculations on geometry.
@@ -52,6 +53,7 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
 *   **Adaptive Frame Capping**: Detect OS; if Android/iOS, hard-cap the rendering at 60 FPS (even on 120Hz ProMotion displays) to prioritize battery life over extreme smoothness.
 *   **Dynamic UI**: Auto-minimize performance metrics/debug panels on smaller screens to maximize map visibility.
 *   **Orientation-Aware Load**: Detect Portrait vs. Horizontal orientation on initial load and adjust the initial camera FOV or starting zoom to fit the device aspect ratio.
+*   **Android Battery API**: Query Android Battery Status API to detect low-battery mode; automatically reduce frame rate, texture quality, and LOD aggressiveness when device battery is critically low.
 
 ## 6. Camera 
 *   **Pivot-Based Rig**: The camera orbits a `PivotPoint` locked to the terrain surface at screen-center.

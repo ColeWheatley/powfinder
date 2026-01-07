@@ -79,6 +79,39 @@
                         <span>DRAW CALLS</span>
                         <span class="value" id="draw-stats">-- | G:-- | T:--</span>
                     </div>
+                    <div class="hud-item">
+                        <span>TILE HEIGHT</span>
+                        <span class="value" id="tile-height">--m</span>
+                    </div>
+                    <div class="hud-item">
+                        <span>CAMERA HEIGHT</span>
+                        <span class="value" id="camera-height">--m</span>
+                    </div>
+
+                    <div class="hud-item"
+                        style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                        <span>LOD BENCHMARK (MS)</span>
+                    </div>
+
+                    <div class="hud-item"
+                        style="justify-content: space-between; font-family: 'Courier New', monospace; font-size: 10px;"
+                        title="O(N) Brute Force: Iterates through every single sector in the world for every frame. Slowest method, scales poorly with map size.">
+                        <span style="color: #aaa;">LINEAR SCAN</span>
+                        <span class="value" id="bench-loop" style="color: #ff6b9d;">--</span>
+                    </div>
+                    <div class="hud-item"
+                        style="justify-content: space-between; font-family: 'Courier New', monospace; font-size: 10px;"
+                        title="O(log N) Spatial Tree: Recursively subdivides space into quadrants. Efficiently discards large chunks of the world outside the view range.">
+                        <span style="color: #aaa;">QUAD TREE</span>
+                        <span class="value" id="bench-tree" style="color: #74b9ff;">--</span>
+                    </div>
+                    <div class="hud-item"
+                        style="justify-content: space-between; font-family: 'Courier New', monospace; font-size: 10px;"
+                        title="O(1) Spatial Hash: Maps coordinates directly to grid buckets. Near-instant constant time lookup, but uses more memory for the hash table.">
+                        <span style="color: #aaa;">GRID HASH</span>
+                        <span class="value" id="bench-hash" style="color: #2ecc71;">--</span>
+                    </div>
+
                     <!-- === END DEBUG === -->
                     <div class="hud-item">
                         <span>PRECISION</span>
@@ -116,6 +149,7 @@
                         <input type="range" id="lod3-slider" min="0" max="20000" step="500" value="2000"
                             style="width: 100%; pointer-events: auto;">
                     </div>
+
                     <div class="hud-item frametime-item">
                         <canvas id="frametime-graph" width="640" height="80"></canvas>
                     </div>
