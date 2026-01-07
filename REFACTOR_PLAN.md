@@ -1,5 +1,11 @@
 # Refactor Plan: Operation "Precision Piston"
 
+## 0. Sequential Baking Pipeline
+1.  **Index Data Sources**: Load all available TIFs and DEM files.
+2.  **Coverage Analysis**: Intersection of Satellite + DEM to define valid Level 5 (1km) "Sector" hexes.
+3.  **No-Rotation Policy**: All hexes are strictly North-facing.
+4.  **Sequential Bake**: Process by Sector. If a Sector has both data types, pack 16,807 unit hexes.
+
 ## 1. The "Cardinal" Coordinate Standard
 A strict, hard-coded standard across Python and JS.
 *   **Zero**: North (Positive Y in World/Baker, Negative Z in Three.js).
@@ -26,6 +32,9 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
     *   **State 1 (Flat Mode)**: When viewed top-down, tiles are rendered as single, static textured quads at $z=0$. This is computationally identical to 2D rendering.
     *   **State 2 (Transition)**: As the camera tilts, the flat quads are replaced by the "Instanced Hex Mesh". Because they share the same world coordinate origin, the handoff is invisible.
     *   **The Reveal**: Use the `uHeightFactor` to "shatter" the flat map into individual pistons that rise to their real elevations.
+*   **Overshoot Texturing (WebP Optimization)**: 
+    *   **Justification**: WebP uses 16x16 macroblocks. High-contrast edges (Satellite vs. Black padding) cause artifacts if they fall mid-block.
+    *   **Implementation**: Crop satellite textures with a **16-32px overshoot** past the hex boundary. The 3D hex mesh acts as a clean "cookie cutter," hiding the compression-muddled edge while gaining the file-size benefits of the black padding.
 *   **Instancing**: Use `InstancedMesh` with an "Ideal Hex" and `aNeighborSlot` attribute.
 *   **Ideal Hex**: Optimized indexed geometry (~19 vertices vs ~36).
     *   **Flat Tops**: Strictly horizontal tops (Normal: 0,1,0). No tilting or cross-product calculations on geometry.
