@@ -1,9 +1,9 @@
 import json
 import os
 
-TIFF_DIR = 'backend/aerial_tifs'
-GRID_STATUS = 'backend/grid_status.json'
-QUEUE_FILE = 'backend/download_queue.json'
+TIFF_DIR = '../aerial_tifs'
+GRID_STATUS = '../grid_status.json'
+QUEUE_FILE = '../download_queue.json'
 
 def get_grid_bounds(grid_id):
     try:
@@ -35,7 +35,7 @@ def main():
     # Our grid_status.json currently only holds the LATEST scan.
     # We should probably compile a master list of all worldfiles on disk.
     available_gids = set()
-    wf_dir = 'backend/worldfiles'
+    wf_dir = './worldfiles_for_aerials'
     if os.path.exists(wf_dir):
         for f in os.listdir(wf_dir):
             if f.endswith('.tfw'):

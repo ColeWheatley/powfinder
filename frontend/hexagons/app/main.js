@@ -8,7 +8,11 @@ const TILE_HEIGHT_WORLD = 1000;
 const SCALE_Z = 1.0;
 const DEFAULT_RENDER_DISTANCE = 10000;
 const FLOOR_MODE = 'view-min';
-const RESOLUTIONS = [2.5, 5, 8, 10, 12, 15, 20, 25, 30, 50];
+const RESOLUTIONS = [
+    1, 2, 3, 4, 5, 6, 7, 7.7136, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    30, 35, 40, 45, 50
+];
 // Options: view-min, view-avg, camera-tile-min, camera-tile-avg, camera-tile-base, global-min, global-avg, global-base
 const LOCK_FLOOR_ON_RISE = true;
 const FLOOR_LOCK_THRESHOLD = 0.02;
@@ -67,8 +71,9 @@ class PistonViewer {
 
         // State
         this.resolutions = RESOLUTIONS;
-        this.currentResIndex = 3; // 10m
+        this.currentResIndex = 7; // 7.7136m
         this.currentRes = this.resolutions[this.currentResIndex];
+        this.currentResMethod = 'bilinear';
         this.hexWidth = this.currentRes;
         this.hexDx = this.hexWidth * (Math.sqrt(3) / 2);
 
@@ -121,6 +126,7 @@ class PistonViewer {
         this.initDebugConsole();
         this.initMinimizeButton();
         this.initResSlider();
+        this.initResMethod();
         this.detectRefreshRate();
         this.updateFogAndClip();
         this.initWorld();
@@ -175,6 +181,24 @@ class PistonViewer {
         }
     }
 
+    clearAllTiles() {
+        for (const tile of this.tiles) {
+            if (tile.mesh) {
+                this.scene.remove(tile.mesh);
+                if (tile.mesh.geometry) tile.mesh.geometry.dispose();
+                if (tile.mesh.material) {
+                    if (tile.mesh.material.map) tile.mesh.material.map.dispose();
+                    tile.mesh.material.dispose();
+                }
+            }
+        }
+        this.tiles = [];
+        this.materialsToUpdate = [];
+        this.loadingTiles.clear();
+        this.tilesLoadedCount = 0;
+        this.essentialTilesLoaded = 0;
+    }
+
     initResSlider() {
         const slider = document.getElementById('res-slider');
         const valLabel = document.getElementById('res-val');
@@ -190,30 +214,24 @@ class PistonViewer {
                 const res = this.resolutions[index];
                 this.log(`Changing resolution to ${res}m...`, "info");
 
-                // Clear existing tiles
-                for (const tile of this.tiles) {
-                    this.scene.remove(tile.mesh);
-                    tile.mesh.geometry.dispose();
-                    tile.material.dispose();
-                }
-                this.tiles = [];
-                this.materialsToUpdate = [];
-                this.loadingTiles.clear();
-                this.tilesLoadedCount = 0;
-                this.essentialTilesLoaded = 0;
-
-                // Update hex dimensions
                 this.currentResIndex = index;
                 this.currentRes = res;
                 this.hexWidth = res;
                 this.hexDx = this.hexWidth * (Math.sqrt(3) / 2);
 
-                // Recreate hex geometry
-                const side = this.hexWidth / Math.sqrt(3);
-                this.hexGeometry.dispose();
-                this.hexGeometry = this.createHexGeometry(side);
+                this.clearAllTiles();
+                this.updateLOD();
+            });
+        }
+    }
 
-                // Reload LOD
+    initResMethod() {
+        const resMethod = document.getElementById('res-method');
+        if (resMethod) {
+            resMethod.addEventListener('change', (e) => {
+                this.currentResMethod = e.target.value;
+                this.log(`Resampling method changed to ${this.currentResMethod}. Reloading...`, "info");
+                this.clearAllTiles();
                 this.updateLOD();
             });
         }
@@ -616,7 +634,7 @@ class PistonViewer {
 
         const t0 = performance.now();
 
-        const binUrl = `tiles_bin/res_${this.currentRes}/tile_${x}_${y}.bin`;
+        const binUrl = `tiles_bin/${this.currentResMethod}/res_${this.currentRes}/tile_${x}_${y}.bin`;
         const lowTexUrl = `tiles_sat/low_res/tile_${x}_${y}.webp`;
         const medTexUrl = `tiles_sat/med_res/tile_${x}_${y}.webp`;
         const highTexUrl = `tiles_sat/high_res/tile_${x}_${y}.tif`;
@@ -644,7 +662,8 @@ class PistonViewer {
         const stats = parsed.stats;
 
         // 4. Create Instanced Mesh (with Cloned Geometry!)
-        const mesh = this.createInstancedMesh(hexData, material);
+        material.userData.uTileResolution = parsed.ySpacing;
+        const mesh = this.createInstancedMesh(hexData, material, parsed.ySpacing);
 
         // 5. Position Mesh
         mesh.position.set(posX, 0, posZ);
@@ -716,15 +735,33 @@ class PistonViewer {
         let baseElevation = view.getFloat32(0, true);
         let minElevation = baseElevation;
         let avgElevation = baseElevation;
+        let ySpacing = this.currentRes; // Fallback
         let headerSize = 4;
+        let payloadStride = 14;
 
-        if ((buffer.byteLength - 12) % 14 === 0) {
+        if ((buffer.byteLength - 16) % 26 === 0) {
+            baseElevation = view.getFloat32(0, true);
+            minElevation = view.getFloat32(4, true);
+            avgElevation = view.getFloat32(8, true);
+            ySpacing = view.getFloat32(12, true);
+            headerSize = 16;
+            payloadStride = 26;
+        } else if ((buffer.byteLength - 16) % 14 === 0) {
+            baseElevation = view.getFloat32(0, true);
+            minElevation = view.getFloat32(4, true);
+            avgElevation = view.getFloat32(8, true);
+            ySpacing = view.getFloat32(12, true);
+            headerSize = 16;
+            payloadStride = 14;
+        } else if ((buffer.byteLength - 12) % 14 === 0) {
             baseElevation = view.getFloat32(0, true);
             minElevation = view.getFloat32(4, true);
             avgElevation = view.getFloat32(8, true);
             headerSize = 12;
+            payloadStride = 14;
         } else if ((buffer.byteLength - 4) % 14 === 0) {
             headerSize = 4;
+            payloadStride = 14;
         }
 
         const hexData = [];
@@ -736,22 +773,28 @@ class PistonViewer {
 
         while (offset < buffer.byteLength) {
             const z = this.decodeFloat16(view.getUint16(offset, true));
-            const n_n = this.decodeFloat16(view.getUint16(offset + 2, true));
-            const n_ne = this.decodeFloat16(view.getUint16(offset + 4, true));
-            const n_se = this.decodeFloat16(view.getUint16(offset + 6, true));
-            const n_s = this.decodeFloat16(view.getUint16(offset + 8, true));
-            const n_sw = this.decodeFloat16(view.getUint16(offset + 10, true));
-            const n_nw = this.decodeFloat16(view.getUint16(offset + 12, true));
+            const neighbors = [];
+            for (let i = 0; i < 6; i++) {
+                neighbors.push(this.decodeFloat16(view.getUint16(offset + 2 + i * 2, true)) + baseElevation);
+            }
+
+            let slopes = [0, 0, 0, 0, 0, 0];
+            if (payloadStride === 26) {
+                for (let i = 0; i < 6; i++) {
+                    slopes[i] = this.decodeFloat16(view.getUint16(offset + 14 + i * 2, true));
+                }
+            }
 
             const zAbs = z + baseElevation;
             hexData.push({
                 z: zAbs,
-                n_n: n_n + baseElevation,
-                n_ne: n_ne + baseElevation,
-                n_se: n_se + baseElevation,
-                n_s: n_s + baseElevation,
-                n_sw: n_sw + baseElevation,
-                n_nw: n_nw + baseElevation
+                n_n: neighbors[0],
+                n_ne: neighbors[1],
+                n_se: neighbors[2],
+                n_s: neighbors[3],
+                n_sw: neighbors[4],
+                n_nw: neighbors[5],
+                s: slopes
             });
 
             if (headerSize === 4) {
@@ -760,25 +803,36 @@ class PistonViewer {
                 sumAbs += zAbs;
                 count += 1;
             }
-            offset += 14;
+            offset += payloadStride;
         }
 
         if (headerSize === 4) {
             if (!Number.isFinite(minAbs)) minAbs = baseElevation;
             if (!Number.isFinite(maxAbs)) maxAbs = baseElevation;
             const avgAbs = count ? (sumAbs / count) : baseElevation;
-            return { hexes: hexData, stats: { base: baseElevation, min: minAbs, max: maxAbs, avg: avgAbs } };
+            return {
+                hexes: hexData,
+                stats: { base: baseElevation, min: minAbs, max: maxAbs, avg: avgAbs },
+                ySpacing
+            };
         }
-        // If header size is 12, we don't have max in the header, so we should really compute it above anyway
-        // or just return min/avg as provided. Let's assume max is useful and compute it.
-        return { hexes: hexData, stats: { base: baseElevation, min: minElevation, max: maxAbs, avg: avgElevation } };
+        return {
+            hexes: hexData,
+            stats: { base: baseElevation, min: minElevation, max: maxAbs, avg: avgElevation },
+            ySpacing
+        };
     }
 
-    createInstancedMesh(hexes, material) {
+    createInstancedMesh(hexes, material, tileYSpacing) {
         const numHexes = hexes.length;
+        const currentTileYSpacing = tileYSpacing || this.hexWidth;
+        const currentTileXSpacing = currentTileYSpacing * (Math.sqrt(3) / 2);
 
         // FIX: Clone geometry so each tile has unique instance attributes
-        const mesh = new THREE.InstancedMesh(this.hexGeometry.clone(), material, numHexes);
+        // ALSO: Create a fresh hex geometry for this specific spacing
+        const side = currentTileYSpacing / Math.sqrt(3);
+        const tileGeom = this.createHexGeometry(side);
+        const mesh = new THREE.InstancedMesh(tileGeom, material, numHexes);
 
         const matrix = new THREE.Matrix4();
         const instanceNZ_1 = new Float32Array(numHexes * 4);
@@ -786,16 +840,16 @@ class PistonViewer {
         const instanceBorder = new Float32Array(numHexes);
 
         const xSteps = [];
-        for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += this.hexDx) xSteps.push(x);
+        for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing) xSteps.push(x);
         const ySteps = [];
-        for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += this.hexWidth) ySteps.push(y);
+        for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += currentTileYSpacing) ySteps.push(y);
 
         const rowCount = ySteps.length;
         const colCount = xSteps.length;
 
         for (let col = 0; col < colCount; col++) {
             const x = xSteps[col];
-            const yShift = (col % 2 === 1) ? 5 : 0;
+            const yShift = (col % 2 === 1) ? (currentTileYSpacing / 2.0) : 0;
             for (let row = 0; row < rowCount; row++) {
                 const instanceIdx = (col * rowCount) + row;
                 if (instanceIdx >= numHexes) continue;
@@ -830,6 +884,25 @@ class PistonViewer {
         mesh.instanceMatrix.needsUpdate = true;
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(instanceNZ_1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(instanceNZ_2, 4));
+
+        const instanceSlope_1 = new Float32Array(numHexes * 4);
+        const instanceSlope_2 = new Float32Array(numHexes * 4);
+
+        for (let i = 0; i < numHexes; i++) {
+            const h = hexes[i];
+            instanceSlope_1[i * 4] = h.s[0];
+            instanceSlope_1[i * 4 + 1] = h.s[1];
+            instanceSlope_1[i * 4 + 2] = h.s[2];
+            instanceSlope_1[i * 4 + 3] = h.s[3];
+
+            instanceSlope_2[i * 4] = h.s[4];
+            instanceSlope_2[i * 4 + 1] = h.s[5];
+            instanceSlope_2[i * 4 + 2] = 0.0;
+            instanceSlope_2[i * 4 + 3] = 0.0;
+        }
+
+        mesh.geometry.setAttribute('instanceSlope_1', new THREE.InstancedBufferAttribute(instanceSlope_1, 4));
+        mesh.geometry.setAttribute('instanceSlope_2', new THREE.InstancedBufferAttribute(instanceSlope_2, 4));
         mesh.geometry.setAttribute('instanceBorder', new THREE.InstancedBufferAttribute(instanceBorder, 1));
         mesh.frustumCulled = true;
 
@@ -842,6 +915,7 @@ class PistonViewer {
             material.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
+            shader.uniforms.uTileResolution = { value: material.userData.uTileResolution || 10.0 };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
 
             shader.uniforms.uAoFloor = { value: LIGHTING_DEFAULTS.aoFloor };
@@ -858,8 +932,11 @@ class PistonViewer {
                 `#include <common>
                 uniform float uHeightFactor;
                 uniform float uFloorOffset;
+                uniform float uTileResolution; // Declared uniform
                 attribute vec4 instanceNZ_1; 
                 attribute vec4 instanceNZ_2;
+                attribute vec4 instanceSlope_1;
+                attribute vec4 instanceSlope_2;
                 attribute float instanceBorder;
                 attribute float faceIndex;
                 
@@ -883,17 +960,17 @@ class PistonViewer {
                 
                 // Face index mapping (verified in-scene):
                 // 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW (clockwise)
-                // Uniform "Max Depth" Skirt Logic:
-                // Find the lowest neighbor Z among all 6 neighbors to ensure skirts cover everything.
-                float minNeighborZ = myZ;
-                minNeighborZ = min(minNeighborZ, instanceNZ_1.x - uFloorOffset); // N
-                minNeighborZ = min(minNeighborZ, instanceNZ_1.y - uFloorOffset); // NE
-                minNeighborZ = min(minNeighborZ, instanceNZ_1.z - uFloorOffset); // SE
-                minNeighborZ = min(minNeighborZ, instanceNZ_1.w - uFloorOffset); // S
-                minNeighborZ = min(minNeighborZ, instanceNZ_2.x - uFloorOffset); // SW
-                minNeighborZ = min(minNeighborZ, instanceNZ_2.y - uFloorOffset); // NW
-                
-                neighborZ = minNeighborZ;
+                // Face-specific skirt logic (Manifold Crust):
+                // Each face renders down to the height of ITS specific neighbor.
+                // This seals the gap perfectly while avoiding redundant deep-geometry.
+                if (face == 0) neighborZ = instanceNZ_1.x - uFloorOffset;
+                else if (face == 1) neighborZ = instanceNZ_1.y - uFloorOffset;
+                else if (face == 2) neighborZ = instanceNZ_1.z - uFloorOffset;
+                else if (face == 3) neighborZ = instanceNZ_1.w - uFloorOffset;
+                else if (face == 4) neighborZ = instanceNZ_2.x - uFloorOffset;
+                else if (face == 5) neighborZ = instanceNZ_2.y - uFloorOffset;
+                else neighborZ = myZ;
+
                 isWall = (face < 6); 
 
 
@@ -930,7 +1007,17 @@ class PistonViewer {
                 vObjNormal = normal;
 
                 float dz = abs(myZ - neighborZ);
-                vFaceSlope = degrees(atan(dz, 10.0));
+                
+                // Use per-face slope from attributes
+                float slopeVal = 0.0;
+                if (face < 1) slopeVal = instanceSlope_1.x;
+                else if (face < 2) slopeVal = instanceSlope_1.y;
+                else if (face < 3) slopeVal = instanceSlope_1.z;
+                else if (face < 4) slopeVal = instanceSlope_1.w;
+                else if (face < 5) slopeVal = instanceSlope_2.x;
+                else if (face < 6) slopeVal = instanceSlope_2.y;
+                
+                vFaceSlope = slopeVal;
                 
                 vGrad = 1.0;
                 if (isWall && position.y < 0.5) vGrad = 0.0;
@@ -993,9 +1080,10 @@ class PistonViewer {
                     vec3 cRed = vec3(0.85, 0.0, 0.0);
 
                     vec3 slopeColor = cGreen;
-                    if (vFaceSlope >= 35.0 && vFaceSlope < 40.0) slopeColor = cBlue;
-                    else if (vFaceSlope >= 40.0 && vFaceSlope < 45.0) slopeColor = cYellow;
-                    else if (vFaceSlope >= 45.0) slopeColor = cRed;
+                    if (vFaceSlope >= 30.0 && vFaceSlope < 40.0) slopeColor = cGreen;
+                    else if (vFaceSlope >= 40.0 && vFaceSlope < 50.0) slopeColor = cYellow;
+                    else if (vFaceSlope >= 50.0 && vFaceSlope < 60.0) slopeColor = cRed;
+                    else if (vFaceSlope >= 60.0) slopeColor = cBlue;
                     slopeColor *= mix(1.0, light, uSlopeLight) * ao;
                     
                     if (${DEBUG_VIOLET_SOUTH ? 'true' : 'false'}) {

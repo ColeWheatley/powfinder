@@ -1,7 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 
-LOG_FILE = "/Users/cole/dev/PowFinder/frontend/piston_viewer/fuckups.md"
+LOG_FILE = "/Users/cole/dev/PowFinder/frontend/hexagons/app/fuckups.md"
 
 class Logger(BaseHTTPRequestHandler):
     def do_POST(self):

@@ -2,19 +2,23 @@
 import os
 import json
 import re
+import glob
 
 TILES_DIR = '../frontend/hexagons/app/tiles_bin/res_10'
 OUTPUT_FILE = '../frontend/hexagons/app/tile_manifest.json'
 
 def generate_manifest():
-    global TILES_DIR
+    TILES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/hexagons/app/tiles_bin/bilinear/res_10"))
+    
     if not os.path.exists(TILES_DIR):
-        # Fallback to see if any res_ folder exists
+        # Fallback: look for ANY res_ subdirectory
         parent = os.path.dirname(TILES_DIR)
-        if os.path.exists(parent):
-            subs = [d for d in os.listdir(parent) if d.startswith('res_')]
-            if subs:
-                TILES_DIR = os.path.join(parent, subs[0])
+        subdirs = [d for d in glob.glob(os.path.join(parent, "res_*")) if os.path.isdir(d)]
+        if subdirs:
+            TILES_DIR = subdirs[0]
+        else:
+            print(f"Error: Could not find any tile directory at {TILES_DIR} or parent. Bake first.")
+            return
     
     print(f"Indexing tiles from {TILES_DIR}...")
     files = os.listdir(TILES_DIR)

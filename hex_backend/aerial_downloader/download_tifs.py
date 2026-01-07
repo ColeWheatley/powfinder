@@ -2,7 +2,7 @@ import os
 import requests
 import sys
 
-def download_tif(grid_id, year="2023", output_dir="backend/aerial_tifs"):
+def download_tif(grid_id, year="2023", output_dir="../aerial_tifs"):
     """
     Downloads a TIF file for a given grid ID and year from the Tirol GIS server.
     Example URL: https://gis.tirol.gv.at/geo/dop/m28/dop_2121-53_2023.tif

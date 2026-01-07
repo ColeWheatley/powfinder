@@ -23,8 +23,8 @@ import json
 import requests
 import time
 
-QUEUE_FILE = "backend/download_queue.json"
-OUTPUT_DIR = "backend/aerial_tifs"
+QUEUE_FILE = "../download_queue.json"
+OUTPUT_DIR = "../aerial_tifs"
 YEAR = "2023"
 
 def download_tif(grid_id):

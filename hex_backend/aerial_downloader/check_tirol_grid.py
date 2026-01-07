@@ -9,7 +9,7 @@ try:
 except ImportError:
     Transformer = None
 
-def check_and_download_worldfile(grid_id, year="2023", output_dir="backend/worldfiles"):
+def check_and_download_worldfile(grid_id, year="2023", output_dir="./worldfiles_for_aerials"):
     """
     Downloads a .tfw worldfile for a given grid ID and year.
     Returns status: "downloaded", "already_exists", or "not_found"
@@ -155,9 +155,9 @@ def main():
     print(f"Already had:   {len(results['already_exists'])}")
     print(f"Not Available: {len(results['not_found'])}")
     
-    with open("backend/grid_status.json", "w") as f:
+    with open("../grid_status.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\nStatus saved to backend/grid_status.json")
+    print("\nStatus saved to ../grid_status.json")
 
 if __name__ == "__main__":
     main()

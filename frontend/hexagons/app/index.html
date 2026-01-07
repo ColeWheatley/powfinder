@@ -87,10 +87,21 @@
                     <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                             <span>DEM RESOLUTION</span>
-                            <span class="value" id="res-val">10m</span>
+                            <span class="value" id="res-val">7.71m</span>
                         </div>
-                        <input type="range" id="res-slider" min="0" max="9" step="1" value="3"
+                        <input type="range" id="res-slider" min="0" max="30" step="1" value="7"
                             style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>RESAMPLING</span>
+                        </div>
+                        <select id="res-method"
+                            style="width: 100%; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 4px; border-radius: 4px; pointer-events: auto;">
+                            <option value="bilinear" selected>Bilinear (Standard)</option>
+                            <option value="bicubic">Bicubic (Smoother)</option>
+                            <option value="lanczos">Lanczos (Sharpest)</option>
+                        </select>
                     </div>
                     <div class="hud-item frametime-item">
                         <canvas id="frametime-graph" width="640" height="80"></canvas>

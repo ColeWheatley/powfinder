@@ -7,8 +7,8 @@ import multiprocessing
 import shutil
 
 # Config
-INPUT_DIR = "/Users/cole/dev/PowFinder/backend/aerial_tifs"
-BASE_OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/piston_viewer/tiles_sat"
+INPUT_DIR = "/Users/cole/dev/PowFinder/hex_backend/aerial_tifs"
+BASE_OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/hexagons/app/tiles_sat"
 
 def ensure_dir(path):
     if not os.path.exists(path):

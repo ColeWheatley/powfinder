@@ -5,8 +5,8 @@ from PIL import Image
 import concurrent.futures
 
 # --- CONFIG ---
-SOURCE_DIR = "/Users/cole/dev/PowFinder/frontend/hexes_beta/aerial_dem/original_tifs"
-OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/piston_viewer/tiles_sat"
+SOURCE_DIR = "/Users/cole/dev/PowFinder/hex_backend/aerial_tifs"
+OUTPUT_DIR = "/Users/cole/dev/PowFinder/frontend/hexagons/app/tiles_sat"
 QUALITY = 10
 
 def process_tif(tif_path):
