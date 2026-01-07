@@ -86,22 +86,35 @@
                     </div>
                     <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>DEM RESOLUTION</span>
-                            <span class="value" id="res-val">7.71m</span>
+                            <span>LOD LEVEL 0 (UNIT)</span>
+                            <span class="value" id="lod0-val">200m</span>
                         </div>
-                        <input type="range" id="res-slider" min="0" max="30" step="1" value="7"
+                        <input type="range" id="lod0-slider" min="0" max="1000" step="10" value="200"
                             style="width: 100%; pointer-events: auto;">
                     </div>
-                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>RESAMPLING</span>
+                            <span>LOD LEVEL 1 (SMALL)</span>
+                            <span class="value" id="lod1-val">500m</span>
                         </div>
-                        <select id="res-method"
-                            style="width: 100%; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 4px; border-radius: 4px; pointer-events: auto;">
-                            <option value="bilinear" selected>Bilinear (Standard)</option>
-                            <option value="bicubic">Bicubic (Smoother)</option>
-                            <option value="lanczos">Lanczos (Sharpest)</option>
-                        </select>
+                        <input type="range" id="lod1-slider" min="0" max="5000" step="50" value="500"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>LOD LEVEL 2 (MED)</span>
+                            <span class="value" id="lod2-val">1000m</span>
+                        </div>
+                        <input type="range" id="lod2-slider" min="0" max="10000" step="100" value="1000"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>LOD LEVEL 3 (LARGE)</span>
+                            <span class="value" id="lod3-val">2000m</span>
+                        </div>
+                        <input type="range" id="lod3-slider" min="0" max="20000" step="500" value="2000"
+                            style="width: 100%; pointer-events: auto;">
                     </div>
                     <div class="hud-item frametime-item">
                         <canvas id="frametime-graph" width="640" height="80"></canvas>

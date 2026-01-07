@@ -6,7 +6,7 @@ A strict, hard-coded standard across Python and JS.
 *   **Direction**: Clockwise.
 *   **Indices**: 0: N, 1: NE, 2: SE, 3: S, 4: SW, 5: NW.
 *   **Implementation**:
-    *   **Baker**: `OFFSETS` array aligned to this.
+    *   **Baker**: `OFFSETS` array aligned to this. Use **Lanczos Resampling** for ridge/cliff sharpness (Bicubic as fallback) when sampling the DEM for hex centers.
     *   **Frontend**: `createHexGeometry` explicitly maps face vertices to these slots.
 
 ## 2. Fractal Hex Tiling

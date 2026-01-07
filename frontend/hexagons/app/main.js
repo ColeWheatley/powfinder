@@ -70,12 +70,12 @@ class PistonViewer {
         this.scene.add(dirLight);
 
         // State
-        this.resolutions = RESOLUTIONS;
-        this.currentResIndex = 7; // 7.7136m
-        this.currentRes = this.resolutions[this.currentResIndex];
+        this.currentRes = 7.7136; // Level 0 Unit
         this.currentResMethod = 'bilinear';
         this.hexWidth = this.currentRes;
         this.hexDx = this.hexWidth * (Math.sqrt(3) / 2);
+
+        this.lodThresholds = [200, 500, 1000, 2000];
 
         // Resize Handler
         window.addEventListener('resize', this.onResize.bind(this));
@@ -125,8 +125,7 @@ class PistonViewer {
         // Start
         this.initDebugConsole();
         this.initMinimizeButton();
-        this.initResSlider();
-        this.initResMethod();
+        this.initLODSliders();
         this.detectRefreshRate();
         this.updateFogAndClip();
         this.initWorld();
@@ -199,41 +198,21 @@ class PistonViewer {
         this.essentialTilesLoaded = 0;
     }
 
-    initResSlider() {
-        const slider = document.getElementById('res-slider');
-        const valLabel = document.getElementById('res-val');
-        if (slider && valLabel) {
-            slider.addEventListener('input', () => {
-                const index = parseInt(slider.value);
-                const res = this.resolutions[index];
-                valLabel.textContent = `${res}m`;
-            });
-
-            slider.addEventListener('change', async () => {
-                const index = parseInt(slider.value);
-                const res = this.resolutions[index];
-                this.log(`Changing resolution to ${res}m...`, "info");
-
-                this.currentResIndex = index;
-                this.currentRes = res;
-                this.hexWidth = res;
-                this.hexDx = this.hexWidth * (Math.sqrt(3) / 2);
-
-                this.clearAllTiles();
-                this.updateLOD();
-            });
-        }
-    }
-
-    initResMethod() {
-        const resMethod = document.getElementById('res-method');
-        if (resMethod) {
-            resMethod.addEventListener('change', (e) => {
-                this.currentResMethod = e.target.value;
-                this.log(`Resampling method changed to ${this.currentResMethod}. Reloading...`, "info");
-                this.clearAllTiles();
-                this.updateLOD();
-            });
+    initLODSliders() {
+        for (let i = 0; i < 4; i++) {
+            const slider = document.getElementById(`lod${i}-slider`);
+            const label = document.getElementById(`lod${i}-val`);
+            if (slider && label) {
+                slider.addEventListener('input', () => {
+                    const val = slider.value;
+                    label.textContent = val >= 1000 ? `${(val / 1000).toFixed(1)}km` : `${val}m`;
+                });
+                slider.addEventListener('change', () => {
+                    this.lodThresholds[i] = parseInt(slider.value);
+                    this.log(`LOD Level ${i} threshold updated to ${this.lodThresholds[i]}m.`, "info");
+                    // Internal logic for LOD refresh goes here in future
+                });
+            }
         }
     }
     // === END DEBUG ===
