@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { TIFFLoader } from 'three/addons/loaders/TIFFLoader.js';
-import { LODController } from './lod_controller.js';
 
 // --- HEX COORDINATE SYSTEM (from coordinate_utility.py) ---
 const UNIT_HEX_PX = 32.0;
@@ -9,13 +8,6 @@ const METERS_PER_PIXEL = 0.2;
 const UNIT_HEX_WIDTH_METERS = UNIT_HEX_PX * METERS_PER_PIXEL; // 6.4m
 const LEVEL_5_SCALE_FACTOR = Math.pow(7, 2.5); // ~129.6418
 const SECTOR_WIDTH_METERS = UNIT_HEX_WIDTH_METERS * LEVEL_5_SCALE_FACTOR; // ~829.7m
-
-// --- CONFIG ---
-// Used for culling and camera centering.
-// Hexagons are 829m wide. Using that for bounds.
-const TILE_WIDTH_WORLD = SECTOR_WIDTH_METERS;
-const TILE_HEIGHT_WORLD = SECTOR_WIDTH_METERS; // Approximate square for culling
-const SCALE_Z = 1.0;
 
 // Convert world meters (x, y) to approximate sector (Q, R)
 function worldToSectorApprox(worldX, worldY) {
@@ -32,6 +24,11 @@ function worldToSectorApprox(worldX, worldY) {
 
     return { Q, R };
 }
+
+// --- CONFIG ---
+const TILE_WIDTH_WORLD = 1250;
+const TILE_HEIGHT_WORLD = 1000;
+const SCALE_Z = 1.0;
 const DEFAULT_RENDER_DISTANCE = 10000;
 const FLOOR_MODE = 'view-min';
 const RESOLUTIONS = [
@@ -145,22 +142,11 @@ class PistonViewer {
         this.fpsState = { lastSample: performance.now(), frames: 0 };
         this.fpsEl = document.getElementById('fps-counter');
         this.tilesLoadedCount = 0;
-        this.lodController = new LODController();
-        this.lodStats = {
-            accumulator: 0,
-            count: 0,
-            lastUpdate: 0,
-            accLoop: 0,
-            accTree: 0,
-            accHash: 0
-        };
 
         // === DEBUG: Render Analysis ===
         this.hexCountEl = document.getElementById('hex-count');
         this.triCountEl = document.getElementById('tri-count');
         this.drawStatsEl = document.getElementById('draw-stats');
-        this.tileHeightEl = document.getElementById('tile-height');
-        this.cameraHeightEl = document.getElementById('camera-height');
         this.frametimeCanvas = document.getElementById('frametime-graph');
         this.frametimeCtx = this.frametimeCanvas ? this.frametimeCanvas.getContext('2d') : null;
         this.frametimeBuffer = new Array(120).fill(16.67); // 120 frames of history
@@ -248,17 +234,25 @@ class PistonViewer {
     }
 
     initLODSliders() {
-        for (let i = 0; i < 4; i++) {
-            const slider = document.getElementById(`lod${i}-slider`);
-            const label = document.getElementById(`lod${i}-val`);
+        // Geometry Sliders (Unit, Small, Med, Large)
+        const geoSliders = [
+            { id: 'geo-lod0', index: 0, label: 'Unit Hex' },
+            { id: 'geo-lod1', index: 1, label: 'Small Hex' },
+            { id: 'geo-lod2', index: 2, label: 'Medium Hex' },
+            { id: 'geo-lod3', index: 3, label: 'Large Hex' }
+        ];
+
+        geoSliders.forEach(s => {
+            const slider = document.getElementById(`${s.id}-slider`);
+            const label = document.getElementById(`${s.id}-val`);
             if (slider && label) {
                 slider.addEventListener('input', () => {
                     const val = slider.value;
                     label.textContent = val >= 1000 ? `${(val / 1000).toFixed(1)}km` : `${val}m`;
                 });
                 slider.addEventListener('change', () => {
-                    this.lodThresholds[i] = parseInt(slider.value);
-                    this.log(`LOD Level ${i} threshold updated to ${this.lodThresholds[i]}m.`, "info");
+                    this.lodThresholds[s.index] = parseInt(slider.value);
+                    this.log(`[Geometry] ${s.label} threshold updated to ${this.lodThresholds[s.index]}m.`, "info");
 
                     if (this.lodController) {
                         this.lodController.setThresholds({
@@ -270,9 +264,28 @@ class PistonViewer {
                     }
                 });
             }
-        }
-    }
+        });
 
+        // Texture Sliders (High, Low)
+        const texSliders = [
+            { id: 'tex-lod0', label: 'High Res' }
+            // Low Res is "Always Loaded" at infinity
+        ];
+        texSliders.forEach(s => {
+            const slider = document.getElementById(`${s.id}-slider`);
+            const label = document.getElementById(`${s.id}-val`);
+            if (slider && label) {
+                slider.addEventListener('input', () => {
+                    const val = slider.value;
+                    label.textContent = val >= 1000 ? `${(val / 1000).toFixed(1)}km` : `${val}m`;
+                });
+                slider.addEventListener('change', () => {
+                    // This would map to 'CAM_HIGH_RES_DIST' eventually
+                    this.log(`[Texture] ${s.label} threshold updated to ${slider.value}m (Pending Implementation).`, "info");
+                });
+            }
+        });
+    }
     // === END DEBUG ===
 
     // === DEBUG: Detect display refresh rate ===
@@ -596,64 +609,6 @@ class PistonViewer {
         }
     }
 
-    maintainCameraAltitudeDuringAnimation(heightFactor) {
-        const camX = this.camera.position.x;
-        const camZ = this.camera.position.z;
-        const BUFFER = 25.0;
-
-        // Convert camera scene position back to world meters
-        // Scene: posX = x - worldOrigin.x, posZ = -(y - worldOrigin.y)
-        // Inverse: x = posX + worldOrigin.x, y = worldOrigin.y - posZ
-        const worldX = camX + this.worldOrigin.x;
-        const worldY = this.worldOrigin.y - camZ;
-
-        // Convert world meters to sector Q, R
-        const { Q, R } = worldToSectorApprox(worldX, worldY);
-
-        // Find tile by Q, R match
-        let foundTile = null;
-        for (const tile of this.tiles) {
-            if (tile.q === Q && tile.r === R) {
-                foundTile = tile;
-                break;
-            }
-        }
-
-        // Update camera height display regardless
-        if (this.cameraHeightEl) {
-            this.cameraHeightEl.textContent = this.camera.position.y.toFixed(1) + 'm';
-        }
-
-        if (!foundTile) {
-            if (this.tileHeightEl) {
-                this.tileHeightEl.textContent = `NO TILE (Q${Q},R${R})`;
-            }
-            return;
-        }
-
-        // Check if tile has valid stats
-        if (!foundTile.stats || !Number.isFinite(foundTile.stats.max)) {
-            if (this.tileHeightEl) {
-                this.tileHeightEl.textContent = 'NO STATS';
-            }
-            return;
-        }
-
-        const baseElev = foundTile.stats.max - this.floorState.value;
-        const animatedElev = baseElev * heightFactor;
-        const minCamY = Math.max(100.0, animatedElev + BUFFER);
-
-        // DEBUG: Update tile height display
-        if (this.tileHeightEl) {
-            this.tileHeightEl.textContent = `${animatedElev.toFixed(1)}m (Q${Q},R${R})`;
-        }
-
-        // Only push camera up if below minimum - don't override zoom controls
-        if (this.camera.position.y < minCamY) {
-            this.camera.position.y = minCamY;
-        }
-    }
-
     updateFogAndClip() {
         const dist = this.renderSettings.renderDistance;
         const fogStart = Math.max(10, dist * 0.6);
@@ -672,7 +627,7 @@ class PistonViewer {
 
     async initWorld() {
         try {
-            const res = await fetch(`tile_manifest.json?v=${Date.now()}`);
+            const res = await fetch('tile_manifest.json');
             if (!res.ok) throw new Error('Failed to load tile_manifest.json');
             this.manifest = await res.json();
 
@@ -706,14 +661,6 @@ class PistonViewer {
             this.essentialTilesTarget = Math.max(1, initialInView.length);
             this.log(`Proximity Engine: ${this.essentialTilesTarget} tiles required for first paint.`, "info");
 
-            // Initialize LOD Science
-            if (this.lodController) {
-                // Ensure tiles have q, r (assuming manifest has them or we calculate them? 
-                // Currently manifest has x, y (World Meters). 
-                // LODController calculates its own q,r from x,y, so raw x,y is fine for QuadTree insertion.
-                this.lodController.init(this.manifest.bounds, this.manifest.tiles);
-            }
-
             // CSS Map is dead. Unified pipeline lives.
 
             // Only trigger updateLOD to start loading what's in range
@@ -742,8 +689,11 @@ class PistonViewer {
         // If q,r missing, this will fail 404, which is expected if manifest isn't updated.
         const cb = Date.now();
         const binUrl = (q !== undefined) ? `tiles_bin/sector_${q}_${r}.bin?v=${cb}` : `tiles_bin/tile_${x}_${y}.bin?v=${cb}`;
+
+        // Use 'low_res' (approx 3.2m/px) for standard loading
         const lowTexUrl = (q !== undefined) ? `aerial_tiles/low_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/low_res/tile_${x}_${y}.webp?v=${cb}`;
         const highTexUrl = (q !== undefined) ? `aerial_tiles/high_res/sector_${q}_${r}.webp?v=${cb}` : `tiles_sat/high_res/tile_${x}_${y}.webp?v=${cb}`;
+
 
         // 1. Load Low Res Texture
         const texLoader = new THREE.TextureLoader();
@@ -791,7 +741,7 @@ class PistonViewer {
         );
 
         const tileObj = {
-            x, y, q, r,
+            x, y,
             mesh,
             flatMesh,
             material,
@@ -841,18 +791,64 @@ class PistonViewer {
         }
     }
 
+    parseBinaryV3(view) {
+        const Q = view.getInt32(4, true);
+        const R = view.getInt32(8, true);
+        const minZ = view.getFloat32(12, true);
+        const maxZ = view.getFloat32(16, true);
+        const scale = view.getFloat32(20, true);
+        const gridW = view.getUint16(24, true);
+        const gridH = view.getUint16(26, true);
+        // Padding: 28..32 (4 bytes)
+
+        const count = gridW * gridH;
+        let offset = 32;
+        const hexData = new Array(count);
+        const unitScale = 0.5;
+
+        for (let i = 0; i < count; i++) {
+            const baseOff = offset + (i * 8);
+
+            // Height (Uint16) -> Float
+            const hRaw = view.getUint16(baseOff, true);
+            const zAbs = minZ + hRaw / scale;
+
+            // Neighbors (6 x Int8)
+            const neighbors = [];
+            for (let k = 0; k < 6; k++) {
+                const delta = view.getInt8(baseOff + 2 + k);
+                const val = zAbs + (delta * unitScale);
+                neighbors.push(val);
+            }
+
+            hexData[i] = {
+                z: zAbs,
+                n_n: neighbors[0],
+                n_ne: neighbors[1],
+                n_se: neighbors[2],
+                n_s: neighbors[3],
+                n_sw: neighbors[4],
+                n_nw: neighbors[5],
+                s: [0, 0, 0, 0, 0, 0]
+            };
+        }
+
+        return {
+            hexes: hexData,
+            stats: { base: minZ, min: minZ, max: maxZ, avg: (minZ + maxZ) / 2 },
+            ySpacing: this.currentRes,
+            gridW,
+            gridH
+        };
+    }
+
     parseBinary(buffer) {
         const view = new DataView(buffer);
 
         // 1. Detect Version
-        // Check for 'HEX2' Magic (0x32584548)
-        // Little endian read of first 4 bytes
         const magic = view.getUint32(0, true);
-        if (magic === 0x32584548) {
-            return this.parseBinaryV2(view);
-        }
+        if (magic === 0x33584548) return this.parseBinaryV3(view);
 
-        // --- Legacy Fallback ---
         let baseElevation = view.getFloat32(0, true);
         let minElevation = baseElevation;
         let avgElevation = baseElevation;
@@ -941,76 +937,6 @@ class PistonViewer {
             hexes: hexData,
             stats: { base: baseElevation, min: minElevation, max: maxAbs, avg: avgElevation },
             ySpacing
-        };
-    }
-
-    parseBinaryV2(view) {
-        // HEADER (32 Bytes)
-        // Magic (4) Already checked
-        const Q = view.getInt32(4, true);
-        const R = view.getInt32(8, true);
-        const minZ = view.getFloat32(12, true);
-        const maxZ = view.getFloat32(16, true);
-        const scale = view.getFloat32(20, true);
-        // Padding 8 bytes at 24..32
-
-        let offset = 32;
-
-        // Blocks: 
-        // 0: Mega (1)
-        // 1: Huge (7)
-        // 2: Great (49)
-        // 3: Grand (343)
-        // 4: Parent (2401)
-        // 5: Unit (16807)
-
-        // For now, hardcode reading Level 5 (Unit)
-        // Calculate offset to L5
-        // 1 + 7 + 49 + 343 + 2401 = 2801 items * 8 bytes = 22408 bytes
-        offset += 22408;
-
-        const count = 16807;
-        const hexData = new Array(count);
-
-        const unitScale = 0.5; // Neighbor delta units
-
-        // This loop works well enough for 16k items
-        // Since attributes are Float32Arrays later, we convert here.
-
-        for (let i = 0; i < count; i++) {
-            const baseOff = offset + (i * 8);
-
-            // Height (Uint16) -> Float
-            const hRaw = view.getUint16(baseOff, true);
-            const zAbs = minZ + hRaw / scale;
-
-            // Neighbors (6 x Int8)
-            // Stored as relative delta in 0.5m units
-            const neighbors = [];
-            for (let k = 0; k < 6; k++) {
-                const delta = view.getInt8(baseOff + 2 + k);
-                const val = zAbs + (delta * unitScale);
-                neighbors.push(val);
-            }
-
-            // Mapping to N_N, N_NE...
-            // Standard order: N, NE, SE, S, SW, NW
-            hexData[i] = {
-                z: zAbs,
-                n_n: neighbors[0],
-                n_ne: neighbors[1],
-                n_se: neighbors[2],
-                n_s: neighbors[3],
-                n_sw: neighbors[4],
-                n_nw: neighbors[5],
-                s: [0, 0, 0, 0, 0, 0] // Slopes implicit now
-            };
-        }
-
-        return {
-            hexes: hexData,
-            stats: { base: minZ, min: minZ, max: maxZ, avg: (minZ + maxZ) / 2 },
-            ySpacing: this.currentRes // We trust the renderer knows ~6.4m
         };
     }
 
@@ -1107,8 +1033,14 @@ class PistonViewer {
             shader.uniforms.uHeightFactor = { value: 0.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileResolution = { value: material.userData.uTileResolution || 10.0 };
-            shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uTextureFlipY = { value: 0.0 };
+
+            // UV Correction for Padding
+            const texPx = SECTOR_WIDTH_METERS / METERS_PER_PIXEL;
+            const padPx = 32.0;
+            const totalPx = texPx + 2.0 * padPx;
+            shader.uniforms.uUvScale = { value: texPx / totalPx };
+            shader.uniforms.uUvOffset = { value: padPx / totalPx };
 
             shader.uniforms.uAoFloor = { value: LIGHTING_DEFAULTS.aoFloor };
             shader.uniforms.uAoPower = { value: LIGHTING_DEFAULTS.aoPower };
@@ -1193,11 +1125,7 @@ class PistonViewer {
                 }
 
                 // UV Calculation
-                #ifdef USE_INSTANCING
-                    vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
-                #else
-                    vLocalPos = transformed;
-                #endif
+                vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 
                 vObjNormal = normal;
@@ -1232,6 +1160,8 @@ class PistonViewer {
                 uniform float uSpecStrength;
                 uniform float uSpecPower;
                 uniform float uSlopeLight;
+                uniform float uUvScale;
+                uniform float uUvOffset;
                 uniform float uTileSize;
                 varying vec3 vLocalPos;
                 varying vec3 vWorldPos;
@@ -1246,8 +1176,10 @@ class PistonViewer {
                 `if (vIsHidden > 0.5) discard;
                 
                 // UV Mapping
-                float u = vLocalPos.x / uTileSize;
-                float v = -vLocalPos.z / uTileSize;
+                float rawU = vLocalPos.x / uTileSize;
+                float rawV = -vLocalPos.z / uTileSize;
+                float u = rawU * uUvScale + uUvOffset;
+                float v = rawV * uUvScale + uUvOffset;
                 float texY = (uTextureFlipY > 0.5) ? v : (1.0 - v);
                 vec2 myUV = vec2(clamp(u, 0.001, 0.999), clamp(texY, 0.001, 0.999));
                 
@@ -1313,8 +1245,22 @@ class PistonViewer {
         this.frametimeIndex = (this.frametimeIndex + 1) % 120;
         // === END DEBUG ===
 
-        // Camera altitude is now maintained by maintainCameraAltitudeDuringAnimation()
-        // which properly accounts for heightFactor scaling
+        // Keep camera above surface
+        const camX = this.camera.position.x;
+        const camZ = this.camera.position.z;
+        let localMax = -10000.0;
+        for (const tile of this.tiles) {
+            if (tile.bounds && camX >= tile.bounds.min.x && camX <= tile.bounds.max.x &&
+                camZ >= tile.bounds.min.z && camZ <= tile.bounds.max.z) {
+                localMax = (tile.stats.max - this.floorState.value);
+                break;
+            }
+        }
+
+        const minCamY = Math.max(100.0, localMax + 100.0);
+        if (this.camera.position.y < minCamY) {
+            this.camera.position.y = minCamY;
+        }
 
         // === DEBUG: Update performance metrics ===
         this.updateRenderStats(now);
@@ -1343,7 +1289,6 @@ class PistonViewer {
         const isFlatMode = angleDeg < FLAT_THRESHOLD;
 
         this.updateFloorState(heightFactor);
-        this.maintainCameraAltitudeDuringAnimation(heightFactor);
 
         for (const tile of this.tiles) {
             if (tile.flatMesh) tile.flatMesh.visible = isFlatMode;
@@ -1357,36 +1302,6 @@ class PistonViewer {
         }
 
         this.updateLOD();
-
-        // LOD Science Benchmark
-        if (this.lodController && this.lodController.initialized) {
-            const bench = this.lodController.runBenchmark(this.camera.position); // returns { times: { loop, tree, hash }, results }
-
-            // Accumulate
-            this.lodStats.accLoop += bench.times.loop;
-            this.lodStats.accTree += bench.times.tree;
-            this.lodStats.accHash += bench.times.hash;
-            this.lodStats.count++;
-
-            // Update UI at 2Hz
-            if (now - this.lodStats.lastUpdate > 500) {
-                const count = this.lodStats.count;
-                const elLoop = document.getElementById('bench-loop');
-                const elTree = document.getElementById('bench-tree');
-                const elHash = document.getElementById('bench-hash');
-
-                if (elLoop) elLoop.textContent = (this.lodStats.accLoop / count).toFixed(5);
-                if (elTree) elTree.textContent = (this.lodStats.accTree / count).toFixed(5);
-                if (elHash) elHash.textContent = (this.lodStats.accHash / count).toFixed(5);
-
-                this.lodStats.accLoop = 0;
-                this.lodStats.accTree = 0;
-                this.lodStats.accHash = 0;
-                this.lodStats.count = 0;
-                this.lodStats.lastUpdate = now;
-            }
-        }
-
         if (this.webglActive) {
             this.renderer.render(this.scene, this.camera);
         }
@@ -1407,14 +1322,20 @@ class PistonViewer {
             div.style.height = `${TILE_HEIGHT_WORLD}px`;
 
             // Texture
-            const lowTexUrl = `aerial_tiles/low_res/sector_${tileDef.q}_${tileDef.r}.webp`;
+            const lowTexUrl = `tiles_sat/low_res/tile_${tileDef.x}_${tileDef.y}.webp`;
             div.style.backgroundImage = `url(${lowTexUrl})`;
 
             // Position: Map 3D (X,Z) to CSS (X,Y)
-            // tileDef.x/y is the world center of the sector.
-            // tx/ty is the top-left offset for the CSS div.
-            const tx = (tileDef.x - this.worldOrigin.x) - (TILE_WIDTH_WORLD / 2);
-            const ty = -(tileDef.y - this.worldOrigin.y) - (TILE_HEIGHT_WORLD / 2);
+            // 3D: X is Right, Z is Down (towards viewer)
+            // CSS: Left is Right, Top is Down
+
+            const tx = (tileDef.x - this.worldOrigin.x);
+            // In 3D logic: posZ = -(y - originY).
+            // So if y increases (North), Z is negative (Up/Away).
+            // In CSS, Up/Away is negative Y? No, Top=0 is top.
+            // We want y-increasing (North) to be Up (Negative Top).
+            // So CSS Y = -(y - originY) matches 3D Z.
+            const ty = -(tileDef.y - this.worldOrigin.y);
 
             // Place tile flat on the XY plane (which represents the Ground)
             div.style.left = `${tx}px`;
@@ -1488,9 +1409,7 @@ class PistonViewer {
             if (distSq < CAM_HIGH_RES_DIST ** 2) {
                 if (!tile.highResLoaded && !tile.highResLoading) {
                     tile.highResLoading = true;
-                    // Note: In a real production app we'd want to handle the 
-                    // switch from WebP to TIFF or High-WebP here.
-                    texLoader.load(tile.urls.high, (tex) => {
+                    tiffLoader.load(tile.urls.high, (tex) => {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.flipY = false;
                         tile.material.map = tex;

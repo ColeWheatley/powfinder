@@ -64,11 +64,10 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     """
     Bakes the WebP texture for a single sector and its LOD variants.
     
-    Generates 4 files:
-    1. _compressed (0.2m, 32px/unit) - Full Res
-    2. _high       (~0.8m, 8px/unit) - 1/4 Scale
-    3. _med        (~1.6m, 4px/unit) - 1/8 Scale
-    4. _low        (~3.2m, 2px/unit) - 1/16 Scale
+    Generates 3 files:
+    1. _compressed (0.2m) - Full Res
+    2. _high       (~0.8m) - 1/4 Scale
+    3. _low        (~3.2m) - 1/16 Scale
     
     All saved at Quality=10 (User Request).
     """
@@ -212,7 +211,6 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     res_dirs = {
         "compressed": os.path.join(output_dir, "compressed"),
         "high_res": os.path.join(output_dir, "high_res"),
-        "med_res": os.path.join(output_dir, "med_res"),
         "low_res": os.path.join(output_dir, "low_res")
     }
     for d in res_dirs.values():
@@ -236,13 +234,6 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     c_high.save(p_high, "WEBP", quality=10)
     outputs.append(("High (~0.8m)", p_high, w_high))
     
-    # Variant 3: Med Res (~1.6m) -> "med_res/"
-    w_med = int(total_w_px / 8)
-    h_med = int(total_h_px / 8)
-    c_med = canvas.resize((w_med, h_med), Image.LANCZOS)
-    p_med = os.path.join(res_dirs["med_res"], f_full)
-    c_med.save(p_med, "WEBP", quality=10)
-    outputs.append(("Med (~1.6m)", p_med, w_med))
     
     # Variant 4: Low Res (~3.2m) -> "low_res/"
     w_low = int(total_w_px / 16)
@@ -414,69 +405,155 @@ def pack_level(level_idx, heights, min_z, scale_factor):
 
 def bake_sector_binary(Q, R, dem_array, transform, output_dir="frontend/hexagons/app/tiles_bin"):
     """
-    Bakes the 'Universal Bin' for a sector (v2.0).
+    Bakes the 'Universal Bin' for a sector (v3.0 - Grid Packed).
+    Matches the Frontend Grid iteration order (Col-Major).
     """
+    t_start = time.time()
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    # 1. Get Unit Heights (L5 in Fractal Terms, but Leaves of Tree)
-    # Using 'precompute_sector_heights_manual' to get indices
-    rows, cols = precompute_sector_heights_manual(Q, R, transform)
-    h_l5 = dem_array[rows, cols] # (16807,) Unit Hexes
+    # 1. Define Grid Dimensions (Matching Frontend)
+    # Frontend: TILE_WIDTH_WORLD based on SECTOR_WIDTH_METERS
+    # Iterates x from 0 to Width (inclusive of boundary?)
+    # Frontend logic:
+    # xSteps = [0, dx, 2dx ... <= Width+1]
+    # ySteps = [0, dy, 2dy ... <= Height+1]
     
-    # 2. Compute Hierarchical Means (Bottom-Up)
-    # 16807 -> 2401 -> 343 -> 49 -> 7 -> 1
-    h_l4 = h_l5.reshape(-1, 7).mean(axis=1) # Parent (Huge)
-    h_l3 = h_l4.reshape(-1, 7).mean(axis=1)
-    h_l2 = h_l3.reshape(-1, 7).mean(axis=1)
-    h_l1 = h_l2.reshape(-1, 7).mean(axis=1)
-    h_l0 = h_l1.reshape(-1, 7).mean(axis=1) # Root (Mega)
+    # We need to calculate exactly how many cols/rows the frontend expects.
+    # Unit Hex Width ~ 6.4m.
+    # Sector Width ~ 829.7m.
     
-    # Levels List (Ordered Root -> Leaves for reading?)
-    # Usually better to store [Root, L1... L5] so finding Root is O(1) at byte 32.
-    # Levels:
-    # 0: Root (1 item)
-    # 1: (7 items)
-    # ...
-    # 5: (16807 items)
+    # Let's derive it exactly from coordinate_utility
+    w_m = coord_util.SECTOR_WIDTH_METERS
+    h_m = coord_util.SECTOR_WIDTH_METERS # Square tile bounds
     
-    all_levels_h = [h_l0, h_l1, h_l2, h_l3, h_l4, h_l5]
+    unit_w = coord_util.UNIT_HEX_WIDTH_METERS 
     
-    # 3. Calculate Global Min/Max for Scaling
-    # We use the Sector Extremes to define the 16-bit range
-    sector_min = float(h_l5.min())
-    sector_max = float(h_l5.max())
+    y_spacing = unit_w
+    x_spacing = unit_w * (math.sqrt(3) / 2.0)
     
-    # Safety margin
+    # Number of steps
+    # for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing)
+    num_cols = int((w_m + 1.0) / x_spacing) + 1
+    num_rows = int((h_m + 1.0) / y_spacing) + 1
+    
+    # 2. Collect Heights in Grid Order (Col-Major)
+    # Frontend Loop: Col (X) outer, Row (Y) inner.
+    
+    # Center of Sector in World Coords
+    cen_x, cen_y = coord_util.sector_to_world_meters(Q, R)
+    
+    # Tile Origin
+    origin_x = cen_x - (w_m / 2.0)
+    origin_y = cen_y - (h_m / 2.0) # Bottom-Left in 2D?
+    
+    # Sample points.
+    
+    # Pre-calculate world coordinates for all points
+    sample_xs = []
+    sample_ys = []
+    
+    for col in range(num_cols):
+        x_local = col * x_spacing
+        y_shift = (y_spacing / 2.0) if (col % 2 == 1) else 0.0
+        
+        for row in range(num_rows):
+            y_local = row * y_spacing + y_shift
+            
+            # Map to World
+            # Frontend increasing row adds y_spacing.
+            # Assuming standard North+ coords for DEM sampling.
+            wx = origin_x + x_local
+            wy = origin_y + y_local 
+            
+            sample_xs.append(wx)
+            sample_ys.append(wy)
+            
+    # Batch Sample
+    rows_idx, cols_idx = rasterio.transform.rowcol(transform, sample_xs, sample_ys)
+    
+    # Read from pre-loaded DEM array
+    # Safety clip
+    r_idx = np.clip(rows_idx, 0, dem_array.shape[0]-1)
+    c_idx = np.clip(cols_idx, 0, dem_array.shape[1]-1)
+    
+    h_values = dem_array[r_idx, c_idx] # Flat array of N items
+    
+    # 3. Calculate Scale
+    sector_min = float(h_values.min())
+    sector_max = float(h_values.max())
     sector_min -= 10.0
     sector_max += 10.0
+    h_range = sector_max - sector_min
+    if h_range < 1.0: h_range = 1.0
+    scale = 65535.0 / h_range
     
-    height_range = sector_max - sector_min
-    if height_range < 1.0: height_range = 1.0
-    scale_factor = 65535.0 / height_range
-    
-    # 4. Pack Data
+    # 4. Pack Buffer (V3)
     final_blob = bytearray()
     
-    # A. Header (32 Bytes)
-    # Magic (4) + Q(4) + R(4) + Min(4) + Max(4) + Scale(4) + Padding(8)
+    # Header: HEX3 (4) + Q(4) + R(4) + Min(4) + Max(4) + Scale(4) 
+    # + GridW(2) + GridH(2) + Pad(4) = 32 Bytes
     import struct
-    header = struct.pack('<4siifff8x', b'HEX2', int(Q), int(R), sector_min, sector_max, scale_factor)
+    header = struct.pack('<4siiffHH4x', 
+        b'HEX3', int(Q), int(R), sector_min, sector_max, scale, 
+        num_cols, num_rows
+    )
     final_blob.extend(header)
     
-    # B. Blocks (Levels 0 to 5)
-    for lvl_idx, heights in enumerate(all_levels_h):
-        # Pack
-        packed = pack_level(lvl_idx, heights, sector_min, scale_factor)
-        final_blob.extend(packed)
+    # Need neighbor lookups in the grid.
+    # Reshape heights to (Cols, Rows) for easy indexing
+    grid_h = h_values.reshape((num_cols, num_rows))
+    
+    # Helper to get neighbor height safely
+    def get_h(c, r, default):
+        if 0 <= c < num_cols and 0 <= r < num_rows:
+            return grid_h[c, r]
+        return default
         
+    for c in range(num_cols):
+        is_odd = (c % 2 == 1)
+        for r in range(num_rows):
+            z_self = grid_h[c, r]
+            
+            # Encoded Height
+            h_u16 = int(np.clip((z_self - sector_min) * scale, 0, 65535))
+            final_blob.extend(struct.pack('<H', h_u16))
+            
+            # Neighbors (N, NE, SE, S, SW, NW)
+            # Based on standard Grid logic used in Frontend or visual consistency
+            if not is_odd:
+                n_coords = [
+                    (c, r+1),   # N
+                    (c+1, r),   # NE
+                    (c+1, r-1), # SE
+                    (c, r-1),   # S
+                    (c-1, r-1), # SW
+                    (c-1, r)    # NW
+                ]
+            else:
+                 n_coords = [
+                    (c, r+1),   # N
+                    (c+1, r+1), # NE
+                    (c+1, r),   # SE
+                    (c, r-1),   # S
+                    (c-1, r),   # SW
+                    (c-1, r+1)  # NW
+                ]
+                
+            for (nc, nr) in n_coords:
+                nz = get_h(nc, nr, z_self)
+                diff = nz - z_self
+                d_byte = int(np.clip(diff / 0.5, -127, 127))
+                final_blob.extend(struct.pack('b', d_byte))
+                
     # 5. Write
     filename = f"sector_{Q}_{R}.bin"
     path = os.path.join(output_dir, filename)
     with open(path, 'wb') as f:
         f.write(final_blob)
         
-    return path, len(final_blob)
+    duration = time.time() - t_start
+    return path, len(final_blob), duration
 
 # =============================================================================
 # MAIN PIPELINE

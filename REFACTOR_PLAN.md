@@ -60,11 +60,17 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
 *   **Surface-Aware Translation**: As pistons rise, the `PivotPoint` rises with them, ensuring the spot the user is looking at remains stable in the viewport during the 2D->3D transition.
 *   **Dynamic Culling**: Use frustum culling on tiles (and future occlusion maps) to minimize vertex density.
 *   **3D-Aware LOD Strategy (The "Peak & Valley" Check)**: 
-    *   **Goal**: Ensure mountainous terrain is rendered at correct resolution regardless of viewing angle or zoom, without expensive tree traversals.
-    *   **Pre-Calc**: Each Level 5 (1km) tile stores its `minZ` (valley floor) and `maxZ` (peak height) in the header.
+    *   **Architecture Clarification (Vertices vs. Textures)**:
+        *   **The Bottleneck**: It's **Vertices**, not VRAM. We have millions of hexes.
+        *   **Texture Strategy**: Lazy load. Network constrained. But once loaded, render freely (~1MB files are cheap).
+            *   *Compressed (High Res)*: For nearby terrain.
+            *   *Low Res*: For distant horizons.
+        *   **Geometry Strategy**: Aggressive Vertex Reduction.
+            *   *Unit Hexes*: Render dense geometry ONLY where needed (Slope > Threshold or Camera < Distance).
+            *   *Sector Hexes*: Render huge ~800m hexes for distant valleys or flat areas.
     *   **The Check (Conservative Heuristic)**:
         1.  **Proximal Check**: Is the camera within distance $D$ of the closest point on the tile's bounding cylinder? (`Distance - Radius`). If NO, stop (Low Res/Cull).
         2.  **Elevation Check**: Since we are in the mountains, check vertical distance. 
             *   Is the camera close to `maxZ`? (User is flying near a peak). If YES -> Force High-Res recursion.
             *   Is the camera far above `minZ`? (User is high above a deep valley). If YES -> Allow Low-Res.
-    *   **Efficiency**: This "Dual Lookup" replaces iterating thousands of child hexes. If the *entire* 1km tile bounding volume fits the "Low Res" criteria (far away AND deep down), we render 1 big hex. If ANY part of it (the peak) is close, we drill down.
+    *   **Efficiency**: This "Dual Lookup" replaces iterating thousands of child hexes. If the *entire* 1km tile bounding volume fits the "Low Res" criteria (far away AND deep down), we render 1 big hex (Sector Mesh). If ANY part of it (the peak) is close, we drill down (Unit Mesh).

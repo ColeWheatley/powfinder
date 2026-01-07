@@ -153,8 +153,10 @@ export class LODController {
         this.initialized = false;
 
         // Configuration
-        this.nearThreshold = 200.0;
-        this.farThreshold = 2000.0;
+        this.nearThreshold = 200.0;  // Unit
+        this.smallThreshold = 500.0; // Small
+        this.medThreshold = 1000.0;  // Medium
+        this.farThreshold = 2000.0;  // Large
 
         // This is now purely for the 'result' return, not the benchmark
         this.activeStrategy = 'HYBRID';
@@ -187,6 +189,8 @@ export class LODController {
 
     setThresholds(levels) {
         if (levels.lod0 !== undefined) this.nearThreshold = levels.lod0;
+        if (levels.lod1 !== undefined) this.smallThreshold = levels.lod1;
+        if (levels.lod2 !== undefined) this.medThreshold = levels.lod2;
         if (levels.lod3 !== undefined) this.farThreshold = levels.lod3;
     }
 

@@ -117,21 +117,64 @@
                         <span>PRECISION</span>
                         <span class="value">FLOAT16 (CM)</span>
                     </div>
+                    <div class="hud-item"
+                        style="margin-top: 15px; border-bottom: 1px solid #333; padding-bottom: 5px; color: #fff; font-weight: bold;">
+                        GEOMETRY (VERTEX)
+                    </div>
+                    <!-- Geometry Controls -->
                     <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>LOD LEVEL 0 (UNIT)</span>
-                            <span class="value" id="lod0-val">200m</span>
+                            <span>UNIT HEX (CLOSE)</span>
+                            <span class="value" id="geo-lod0-val">200m</span>
                         </div>
-                        <input type="range" id="lod0-slider" min="0" max="1000" step="10" value="200"
+                        <input type="range" id="geo-lod0-slider" min="0" max="1000" step="10" value="200"
                             style="width: 100%; pointer-events: auto;">
                     </div>
                     <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>LOD LEVEL 1 (FAR)</span>
-                            <span class="value" id="lod3-val">2000m</span>
+                            <span>SMALL HEX</span>
+                            <span class="value" id="geo-lod1-val">500m</span>
                         </div>
-                        <input type="range" id="lod3-slider" min="0" max="20000" step="500" value="2000"
+                        <input type="range" id="geo-lod1-slider" min="0" max="2000" step="50" value="500"
                             style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>MEDIUM HEX</span>
+                            <span class="value" id="geo-lod2-val">1000m</span>
+                        </div>
+                        <input type="range" id="geo-lod2-slider" min="0" max="5000" step="100" value="1000"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>LARGE HEX (FAR)</span>
+                            <span class="value" id="geo-lod3-val">2000m</span>
+                        </div>
+                        <input type="range" id="geo-lod3-slider" min="0" max="10000" step="100" value="2000"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+
+                    <div class="hud-item"
+                        style="margin-top: 15px; border-bottom: 1px solid #333; padding-bottom: 5px; color: #fff; font-weight: bold;">
+                        TEXTURE (VRAM)
+                    </div>
+                    <!-- Texture Controls -->
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>HIGH RES (COMPRESSED)</span>
+                            <span class="value" id="tex-lod0-val">500m</span>
+                        </div>
+                        <input type="range" id="tex-lod0-slider" min="0" max="2000" step="50" value="500"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>LOW RES (FALLBACK)</span>
+                            <span class="value" id="tex-lod1-val">∞</span>
+                        </div>
+                        <!-- Disabled slider just for visual consistency or could be render distance? -->
+                        <div style="font-size: 10px; color: #666;">(Always Loaded)</div>
                     </div>
 
                     <div class="hud-item frametime-item">
