@@ -788,7 +788,7 @@ class PistonViewer {
 
         // 4. Create Instanced Mesh (with Cloned Geometry!)
         material.userData.uTileResolution = parsed.ySpacing;
-        const mesh = this.createInstancedMesh(hexData, material, parsed.ySpacing);
+        const mesh = this.createInstancedMesh(hexData, material, parsed.ySpacing, parsed.gridW, parsed.gridH);
 
         // 5. Position Mesh
         mesh.position.set(posX, 0, posZ);
@@ -1000,7 +1000,7 @@ class PistonViewer {
         };
     }
 
-    createInstancedMesh(hexes, material, tileYSpacing) {
+    createInstancedMesh(hexes, material, tileYSpacing, gridW, gridH) {
         const numHexes = hexes.length;
         const currentTileYSpacing = tileYSpacing || this.hexWidth;
         const currentTileXSpacing = currentTileYSpacing * (Math.sqrt(3) / 2);
@@ -1016,26 +1016,34 @@ class PistonViewer {
         const instanceNZ_2 = new Float32Array(numHexes * 4);
         const instanceBorder = new Float32Array(numHexes);
 
-        const xSteps = [];
-        for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing) xSteps.push(x);
-        const ySteps = [];
-        for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += currentTileYSpacing) ySteps.push(y);
+        // Use logic from Binary if available (V3), else fallback to calc (V2)
+        let rowCount, colCount;
 
-        const rowCount = ySteps.length;
-        const colCount = xSteps.length;
+        if (gridW && gridH) {
+            colCount = gridW;
+            rowCount = gridH;
+        } else {
+            const xSteps = [];
+            for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing) xSteps.push(x);
+            const ySteps = [];
+            for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += currentTileYSpacing) ySteps.push(y);
+            colCount = xSteps.length;
+            rowCount = ySteps.length;
+        }
 
         for (let col = 0; col < colCount; col++) {
-            const x = xSteps[col];
+            const x = col * currentTileXSpacing;
             const yShift = (col % 2 === 1) ? (currentTileYSpacing / 2.0) : 0;
             for (let row = 0; row < rowCount; row++) {
                 const instanceIdx = (col * rowCount) + row;
                 if (instanceIdx >= numHexes) continue;
 
-                const dataRow = DEM_FLIP_NS ? (rowCount - 1 - row) : row;
-                const dataIdx = (col * rowCount) + dataRow;
+                // Indexing matches WaffleIron V3
+                const dataIdx = instanceIdx;
                 if (dataIdx >= numHexes) continue;
 
-                const realY = ySteps[row] + yShift;
+                // Calculate Position
+                const realY = (row * currentTileYSpacing) + yShift;
                 const h = hexes[dataIdx];
 
                 // --- GEOMETRY CLIP (Vertex Count Fix) ---
