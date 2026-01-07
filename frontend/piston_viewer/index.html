@@ -51,28 +51,43 @@
     </div>
 
     <div id="ui">
-        <div class="glass-panel">
-            <h1>POWFINDER 3D</h1>
-            <div class="subtitle">Binary Hex Piston Engine</div>
-
-            <div class="stats">
-                <div class="hud-item">
-                    <span>LOCATION</span>
-                    <span class="value" id="loc-val">SULZENAU, TIROL</span>
+        <div class="glass-panel" id="main-panel">
+            <div class="panel-header">
+                <div class="header-content">
+                    <h1>POWFINDER 3D</h1>
+                    <div class="subtitle">Binary Hex Piston Engine</div>
                 </div>
-                <div class="hud-item">
-                    <span>PISTONS</span>
-                    <span class="value" id="piston-count">CALCULATING...</span>
-                </div>
-                <div class="hud-item">
-                    <span>FPS / ZOOM</span>
-                    <span class="value" id="fps-counter">--</span>
-                </div>
-                <div class="hud-item">
-                    <span>PRECISION</span>
-                    <span class="value">FLOAT16 (CM)</span>
-                </div>
+                <button id="minimize-btn" class="minimize-btn" title="Minimize Panel">−</button>
             </div>
+
+            <div class="panel-body">
+                <div class="stats">
+                    <div class="hud-item">
+                        <span>LOCATION</span>
+                        <span class="value" id="loc-val">SULZENAU, TIROL</span>
+                    </div>
+                    <!-- === DEBUG: Render Analysis === -->
+                    <div class="hud-item">
+                        <span>HEXAGONS</span>
+                        <span class="value" id="hex-count">-- VISIBLE</span>
+                    </div>
+                    <div class="hud-item">
+                        <span>TRIANGLES</span>
+                        <span class="value" id="tri-count">-- / -- (--)</span>
+                    </div>
+                    <div class="hud-item">
+                        <span>DRAW CALLS</span>
+                        <span class="value" id="draw-stats">-- | G:-- | T:--</span>
+                    </div>
+                    <!-- === END DEBUG === -->
+                    <div class="hud-item">
+                        <span>PRECISION</span>
+                        <span class="value">FLOAT16 (CM)</span>
+                    </div>
+                    <div class="hud-item frametime-item">
+                        <canvas id="frametime-graph" width="640" height="80"></canvas>
+                    </div>
+                </div>
 
             <div class="info-panel">
                 <div class="tech-header">
@@ -92,13 +107,14 @@
                 </div>
             </div>
 
-            <div class="console-panel">
-                <div class="console-header">
-                    <span>STATUS LOG</span>
-                    <button id="copy-log-btn" class="console-btn">COPY</button>
-                </div>
-                <div id="console-output" class="console-box">
-                    <div class="log-line">Waiting for system...</div>
+                <div class="console-panel">
+                    <div class="console-header">
+                        <span>STATUS LOG</span>
+                        <button id="copy-log-btn" class="console-btn">COPY</button>
+                    </div>
+                    <div id="console-output" class="console-box">
+                        <div class="log-line">Waiting for system...</div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -40,6 +40,7 @@ class PistonViewer {
         console.log("Initializing PistonViewer (Multi-Tile)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
+        // this.scene.background = new THREE.Color(0xff2aa1); // debug pink
         this.scene.background = new THREE.Color(0x000000);
 
         // Initial Camera Setup
@@ -96,8 +97,24 @@ class PistonViewer {
         this.fpsEl = document.getElementById('fps-counter');
         this.tilesLoadedCount = 0;
 
+        // === DEBUG: Render Analysis ===
+        this.hexCountEl = document.getElementById('hex-count');
+        this.triCountEl = document.getElementById('tri-count');
+        this.drawStatsEl = document.getElementById('draw-stats');
+        this.frametimeCanvas = document.getElementById('frametime-graph');
+        this.frametimeCtx = this.frametimeCanvas ? this.frametimeCanvas.getContext('2d') : null;
+        this.frametimeBuffer = new Array(120).fill(16.67); // 120 frames of history
+        this.frametimeIndex = 0;
+        this.lastFrameTime = performance.now();
+        this.displayRefreshRate = 60; // Will be detected
+        this.statsUpdateState = { lastUpdate: 0, interval: 500 }; // Update stats every 500ms
+        this.lastTriCount = { theoretical: 0, actual: 0 };
+        // === END DEBUG ===
+
         // Start
         this.initDebugConsole();
+        this.initMinimizeButton();
+        this.detectRefreshRate();
         this.updateFogAndClip();
         this.initWorld();
         this.animate();
@@ -138,6 +155,174 @@ class PistonViewer {
         this.consoleEl.appendChild(line);
         this.consoleEl.scrollTop = this.consoleEl.scrollHeight;
     }
+
+    // === DEBUG: Minimize button functionality ===
+    initMinimizeButton() {
+        const btn = document.getElementById('minimize-btn');
+        const panel = document.getElementById('main-panel');
+        if (btn && panel) {
+            btn.addEventListener('click', () => {
+                panel.classList.toggle('minimized');
+                btn.textContent = panel.classList.contains('minimized') ? '+' : '−';
+            });
+        }
+    }
+    // === END DEBUG ===
+
+    // === DEBUG: Detect display refresh rate ===
+    detectRefreshRate() {
+        let lastTime = performance.now();
+        let frameCount = 0;
+        const samples = [];
+
+        const measure = (currentTime) => {
+            const delta = currentTime - lastTime;
+            if (delta > 0) {
+                samples.push(1000 / delta);
+            }
+            lastTime = currentTime;
+            frameCount++;
+
+            if (frameCount < 60) {
+                requestAnimationFrame(measure);
+            } else {
+                // Calculate median FPS from samples
+                samples.sort((a, b) => a - b);
+                const median = samples[Math.floor(samples.length / 2)];
+
+                // Round to common refresh rates: 60, 75, 90, 120, 144, 165, 240
+                const commonRates = [60, 75, 90, 120, 144, 165, 240];
+                this.displayRefreshRate = commonRates.reduce((prev, curr) =>
+                    Math.abs(curr - median) < Math.abs(prev - median) ? curr : prev
+                );
+
+                this.log(`Display refresh rate detected: ${this.displayRefreshRate}Hz`, "info");
+            }
+        };
+
+        requestAnimationFrame(measure);
+    }
+    // === END DEBUG ===
+
+    // === DEBUG: Render statistics update ===
+    updateRenderStats(now) {
+        // Throttle updates to avoid DOM thrashing
+        if (now - this.statsUpdateState.lastUpdate < this.statsUpdateState.interval) {
+            return;
+        }
+        this.statsUpdateState.lastUpdate = now;
+
+        // Count visible hexagons
+        let visibleHexCount = 0;
+        for (const tile of this.tiles) {
+            if (tile.mesh && tile.mesh.visible) {
+                visibleHexCount += tile.mesh.count;
+            }
+        }
+
+        // Get GPU stats
+        const info = this.renderer.info.render;
+        const actualTriangles = info.triangles;
+        const drawCalls = info.calls;
+        const geometries = this.renderer.info.memory.geometries;
+        const textures = this.renderer.info.memory.textures;
+
+        // Calculate theoretical triangles (12 per hex)
+        const theoreticalTriangles = visibleHexCount * 12;
+        const efficiency = theoreticalTriangles > 0
+            ? Math.round((theoreticalTriangles / actualTriangles) * 100)
+            : 100;
+
+        // Update DOM
+        if (this.hexCountEl) {
+            this.hexCountEl.textContent = visibleHexCount.toLocaleString() + ' VISIBLE';
+        }
+
+        if (this.triCountEl) {
+            const theoStr = (theoreticalTriangles / 1000000).toFixed(2) + 'M';
+            const actualStr = (actualTriangles / 1000000).toFixed(2) + 'M';
+            this.triCountEl.textContent = `${theoStr} / ${actualStr} (${efficiency}%)`;
+        }
+
+        if (this.drawStatsEl) {
+            this.drawStatsEl.textContent = `${drawCalls} | G:${geometries} | T:${textures}`;
+        }
+
+        // Log significant changes
+        const triDiff = Math.abs(actualTriangles - this.lastTriCount.actual);
+        if (triDiff > actualTriangles * 0.1) { // >10% change
+            this.log(`Render: ${visibleHexCount.toLocaleString()} hex | Efficiency: ${efficiency}% | Draws: ${drawCalls}`, "info");
+            this.lastTriCount = { theoretical: theoreticalTriangles, actual: actualTriangles };
+        }
+    }
+    // === END DEBUG ===
+
+    // === DEBUG: Frametime graph rendering ===
+    drawFrametimeGraph() {
+        if (!this.frametimeCtx) return;
+
+        const ctx = this.frametimeCtx;
+        const width = this.frametimeCanvas.width;
+        const height = this.frametimeCanvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, width, height);
+
+        // Calculate current FPS (average of recent frames)
+        const recentFrames = 30;
+        let sum = 0;
+        for (let i = 0; i < recentFrames; i++) {
+            const idx = (this.frametimeIndex - 1 - i + 120) % 120;
+            sum += this.frametimeBuffer[idx];
+        }
+        const avgFrameTime = sum / recentFrames;
+        const currentFps = Math.round(1000 / avgFrameTime);
+
+        // Draw FRAMETIME label
+        ctx.font = '9px monospace';
+        ctx.fillStyle = '#666';
+        ctx.textAlign = 'left';
+        ctx.fillText('FRAMETIME', 6, 11);
+
+        // Draw FPS counter (display cap / current)
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = '#74b9ff';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${this.displayRefreshRate}/${currentFps}fps`, width - 6, 11);
+
+        // Draw target line (16.67ms for 60fps)
+        const targetMs = 16.67;
+        const targetY = height - (targetMs / 33.33) * height; // Scale to 33.33ms max
+        ctx.strokeStyle = 'rgba(46, 204, 113, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, targetY);
+        ctx.lineTo(width, targetY);
+        ctx.stroke();
+
+        // Draw frametime bars (oldest on left, newest on right)
+        const barWidth = width / 120;
+        for (let i = 0; i < 120; i++) {
+            const idx = (this.frametimeIndex + i) % 120;
+            const frameTime = this.frametimeBuffer[idx];
+            const barHeight = Math.min((frameTime / 33.33) * height, height);
+            const x = i * barWidth;
+            const y = height - barHeight;
+
+            // Color code: green if under 16.67ms, yellow if under 20ms, red if over
+            if (frameTime < 16.67) {
+                ctx.fillStyle = 'rgba(116, 185, 255, 0.8)';
+            } else if (frameTime < 20) {
+                ctx.fillStyle = 'rgba(241, 196, 15, 0.8)';
+            } else {
+                ctx.fillStyle = 'rgba(231, 76, 60, 0.8)';
+            }
+
+            ctx.fillRect(x, y, barWidth, barHeight);
+        }
+    }
+    // === END DEBUG ===
 
     updateFloorUniforms() {
         for (const mat of this.materialsToUpdate) {
@@ -752,7 +937,7 @@ class PistonViewer {
                     sideBase *= light * ao;
 
                     vec3 cGreen = vec3(0.0, 1.0, 0.0);
-                    vec3 cBlue = vec3(0.0, 0.15, 0.5);
+                    vec3 cBlue = vec3(0.0009, 0.0027, 0.1119);
                     vec3 cYellow = vec3(1.0, 0.85, 0.0);
                     vec3 cRed = vec3(0.85, 0.0, 0.0);
 
@@ -784,12 +969,35 @@ class PistonViewer {
         requestAnimationFrame(() => this.animate());
         this.controls.update();
 
-        const minCamY = 100.0;
+        // === DEBUG: Frametime tracking ===
+        const now = performance.now();
+        const frameTime = now - this.lastFrameTime;
+        this.lastFrameTime = now;
+        this.frametimeBuffer[this.frametimeIndex] = frameTime;
+        this.frametimeIndex = (this.frametimeIndex + 1) % 120;
+        // === END DEBUG ===
+
+        // Keep camera above surface
+        const camX = this.camera.position.x;
+        const camZ = this.camera.position.z;
+        let localMax = -10000.0;
+        for (const tile of this.tiles) {
+            if (tile.bounds && camX >= tile.bounds.min.x && camX <= tile.bounds.max.x &&
+                camZ >= tile.bounds.min.z && camZ <= tile.bounds.max.z) {
+                localMax = (tile.stats.max - this.floorState.value);
+                break;
+            }
+        }
+
+        const minCamY = Math.max(100.0, localMax + 100.0);
         if (this.camera.position.y < minCamY) {
             this.camera.position.y = minCamY;
         }
 
-        this.updateFps();
+        // === DEBUG: Update performance metrics ===
+        this.updateRenderStats(now);
+        this.drawFrametimeGraph();
+        // === END DEBUG ===
 
         const angle = this.controls.getPolarAngle();
         let factor = angle / (20 * Math.PI / 180);
