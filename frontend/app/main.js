@@ -4,7 +4,7 @@ import 'https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js';
 const RES = './web-resources/';
 
 // Create base map layers
-const osmLayer = new ol.layer.Tile({ 
+const osmLayer = new ol.layer.Tile({
   source: new ol.source.OSM({
     cacheSize: 16384  // 4x default cache size for smooth zooming
   })
@@ -45,14 +45,14 @@ const layer = new ol.layer.Vector({ source: src });
 map.addLayer(layer);
 // Tiled PNG layer for interpolated data
 const TILE_EXTENT = [1116554.4631222049, 5871439.8889177805,
-                     1454674.4631222049, 6072574.8889177805];
+  1454674.4631222049, 6072574.8889177805];
 const tileGrid = new ol.tilegrid.TileGrid({
   extent: TILE_EXTENT,
   origin: [TILE_EXTENT[0], TILE_EXTENT[3]],
   resolutions: [100],
   tileSize: 256
 });
-const tileLayer = new ol.layer.Tile({visible:false}); // Back to hidden by default
+const tileLayer = new ol.layer.Tile({ visible: false }); // Back to hidden by default
 map.addLayer(tileLayer);
 const popup = document.getElementById('popup');
 const popupContent = document.getElementById('popup-content');
@@ -65,9 +65,9 @@ const toggleBtn = document.getElementById('mode-toggle');
 
 let times = [], points = [], varName = 'sqh'; // Default to SQH layer
 let variables = [
-  'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
-  'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
-  'freezing_level_height', 'surface_pressure', 
+  'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation',
+  'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m',
+  'freezing_level_height', 'surface_pressure',
   'dewpoint_2m', 'skiability', 'sqh'
 ];
 let colorScales = {};
@@ -76,17 +76,44 @@ let colorScales = {};
 let weatherData = null;
 let weatherDataLoading = false;
 
-// Available tile timestamps - these match the actual tile directory names
+// Available tile timestamps - loaded dynamically from weather data
+// Will be updated by loadWeatherData() with actual timestamps from the server
 let availableTimestamps = [
-  "2025-05-24T09:00:00", "2025-05-24T12:00:00", "2025-05-24T15:00:00", "2025-05-24T18:00:00",
-  "2025-05-25T09:00:00", "2025-05-25T12:00:00", "2025-05-25T15:00:00", "2025-05-25T18:00:00",
-  "2025-05-26T09:00:00", "2025-05-26T12:00:00", "2025-05-26T15:00:00", "2025-05-26T18:00:00",
-  "2025-05-27T09:00:00", "2025-05-27T12:00:00", "2025-05-27T15:00:00", "2025-05-27T18:00:00",
-  "2025-05-28T09:00:00", "2025-05-28T12:00:00", "2025-05-28T15:00:00", "2025-05-28T18:00:00"
+  // Fallback: Full range Dec 25, 2025 - Jan 7, 2026 (8 times per day at 3-hour intervals)
+  "2025-12-25T01:30:00", "2025-12-25T04:30:00", "2025-12-25T07:30:00", "2025-12-25T10:30:00",
+  "2025-12-25T13:30:00", "2025-12-25T16:30:00", "2025-12-25T19:30:00", "2025-12-25T22:30:00",
+  "2025-12-26T01:30:00", "2025-12-26T04:30:00", "2025-12-26T07:30:00", "2025-12-26T10:30:00",
+  "2025-12-26T13:30:00", "2025-12-26T16:30:00", "2025-12-26T19:30:00", "2025-12-26T22:30:00",
+  "2025-12-27T01:30:00", "2025-12-27T04:30:00", "2025-12-27T07:30:00", "2025-12-27T10:30:00",
+  "2025-12-27T13:30:00", "2025-12-27T16:30:00", "2025-12-27T19:30:00", "2025-12-27T22:30:00",
+  "2025-12-28T01:30:00", "2025-12-28T04:30:00", "2025-12-28T07:30:00", "2025-12-28T10:30:00",
+  "2025-12-28T13:30:00", "2025-12-28T16:30:00", "2025-12-28T19:30:00", "2025-12-28T22:30:00",
+  "2025-12-29T01:30:00", "2025-12-29T04:30:00", "2025-12-29T07:30:00", "2025-12-29T10:30:00",
+  "2025-12-29T13:30:00", "2025-12-29T16:30:00", "2025-12-29T19:30:00", "2025-12-29T22:30:00",
+  "2025-12-30T01:30:00", "2025-12-30T04:30:00", "2025-12-30T07:30:00", "2025-12-30T10:30:00",
+  "2025-12-30T13:30:00", "2025-12-30T16:30:00", "2025-12-30T19:30:00", "2025-12-30T22:30:00",
+  "2025-12-31T01:30:00", "2025-12-31T04:30:00", "2025-12-31T07:30:00", "2025-12-31T10:30:00",
+  "2025-12-31T13:30:00", "2025-12-31T16:30:00", "2025-12-31T19:30:00", "2025-12-31T22:30:00",
+  "2026-01-01T01:30:00", "2026-01-01T04:30:00", "2026-01-01T07:30:00", "2026-01-01T10:30:00",
+  "2026-01-01T13:30:00", "2026-01-01T16:30:00", "2026-01-01T19:30:00", "2026-01-01T22:30:00",
+  "2026-01-02T01:30:00", "2026-01-02T04:30:00", "2026-01-02T07:30:00", "2026-01-02T10:30:00",
+  "2026-01-02T13:30:00", "2026-01-02T16:30:00", "2026-01-02T19:30:00", "2026-01-02T22:30:00",
+  "2026-01-03T01:30:00", "2026-01-03T04:30:00", "2026-01-03T07:30:00", "2026-01-03T10:30:00",
+  "2026-01-03T13:30:00", "2026-01-03T16:30:00", "2026-01-03T19:30:00", "2026-01-03T22:30:00",
+  "2026-01-04T01:30:00", "2026-01-04T04:30:00", "2026-01-04T07:30:00", "2026-01-04T10:30:00",
+  "2026-01-04T13:30:00", "2026-01-04T16:30:00", "2026-01-04T19:30:00", "2026-01-04T22:30:00",
+  "2026-01-05T01:30:00", "2026-01-05T04:30:00", "2026-01-05T07:30:00", "2026-01-05T10:30:00",
+  "2026-01-05T13:30:00", "2026-01-05T16:30:00", "2026-01-05T19:30:00", "2026-01-05T22:30:00",
+  "2026-01-06T01:30:00", "2026-01-06T04:30:00", "2026-01-06T07:30:00", "2026-01-06T10:30:00",
+  "2026-01-06T13:30:00", "2026-01-06T16:30:00", "2026-01-06T19:30:00", "2026-01-06T22:30:00",
+  "2026-01-07T01:30:00", "2026-01-07T04:30:00", "2026-01-07T07:30:00", "2026-01-07T10:30:00",
+  "2026-01-07T13:30:00", "2026-01-07T16:30:00", "2026-01-07T19:30:00", "2026-01-07T22:30:00"
 ];
 
-const hourOffsets = [0,1,2,3]; // Index into the 4 daily timestamps (9am, 12pm, 3pm, 6pm)
-let dayIdx = 0, hourIdx = 0; // Start at day 0 (May 24th) as "Today"
+// Calculate day/hour indices based on timestamps
+// Start on Jan 2 (day index 8, since Dec 25 = 0)
+let dayIdx = 8, hourIdx = 0;
+let timestampsPerDay = 8; // 3-hour intervals = 8 per day
 let currentMin = 0, currentMax = 1;
 let peaks = [];
 let drawerOpen = false;
@@ -153,7 +180,7 @@ const peaksPromise = fetch(`${RES}data/tirol_peaks.geojson`)
       lat: f.geometry.coordinates[1],
       lon: f.geometry.coordinates[0]
     }));
-  }).catch(() => {});
+  }).catch(() => { });
 
 const colorScalePromise = fetch(`${RES}data/color_scales.json`)
   .then(r => {
@@ -166,17 +193,17 @@ const colorScalePromise = fetch(`${RES}data/color_scales.json`)
 // Lazy load weather data for point mode validation
 function loadWeatherData() {
   if (weatherData || weatherDataLoading) return Promise.resolve(weatherData);
-  
+
   weatherDataLoading = true;
   console.log('Loading weather data for point validation...');
-  
+
   return fetch(`${RES}data/weather_data_frontend.json`)
     .then(r => r.json())
     .then(d => {
       const sample = d.coordinates.find(c => c.weather_data_3hour);
       if (sample) {
         times = sample.weather_data_3hour.hourly.time.map(t => new Date(t));
-        
+
         // Update availableTimestamps from the loaded data
         if (sample.weather_data_3hour.hourly.time && sample.weather_data_3hour.hourly.time.length > 0) {
           availableTimestamps = sample.weather_data_3hour.hourly.time;
@@ -220,64 +247,64 @@ setTimeout(() => {
   loadWeatherData();
 }, 2000);
 
-function formatDay(d){
+function formatDay(d) {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  
+
   const dayName = days[d.getDay()];
   const monthName = months[d.getMonth()];
   const date = d.getDate();
-  
+
   let suffix = 'th';
   if (date === 1 || date === 21 || date === 31) suffix = 'st';
   else if (date === 2 || date === 22) suffix = 'nd';
   else if (date === 3 || date === 23) suffix = 'rd';
-  
+
   return `${dayName}, ${monthName} ${date}${suffix}`;
 }
 
-function formatTime(d){
+function formatTime(d) {
   const h = d.getHours();
   const period = h >= 12 ? 'pm' : 'am';
   const hour = ((h + 11) % 12) + 1;
   return `${hour}${period}`;
 }
 
-function parseColor(str){
-  if(str.startsWith('rgba')){
+function parseColor(str) {
+  if (str.startsWith('rgba')) {
     const m = str.match(/rgba\((\d+),(\d+),(\d+),(\d*\.?\d+)\)/);
     return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseFloat(m[4])];
   }
-  const hex = str.replace('#','');
-  const full = hex.length===3 ? hex.split('').map(c=>c+c).join('') : hex;
-  const num = parseInt(full,16);
-  return [num>>16 & 255, num>>8 & 255, num & 255, 1];
+  const hex = str.replace('#', '');
+  const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+  const num = parseInt(full, 16);
+  return [num >> 16 & 255, num >> 8 & 255, num & 255, 1];
 }
 
-function interpColor(c1,c2,t){
+function interpColor(c1, c2, t) {
   return [
-    Math.round(c1[0] + (c2[0]-c1[0])*t),
-    Math.round(c1[1] + (c2[1]-c1[1])*t),
-    Math.round(c1[2] + (c2[2]-c1[2])*t),
-    c1[3] + (c2[3]-c1[3])*t
+    Math.round(c1[0] + (c2[0] - c1[0]) * t),
+    Math.round(c1[1] + (c2[1] - c1[1]) * t),
+    Math.round(c1[2] + (c2[2] - c1[2]) * t),
+    c1[3] + (c2[3] - c1[3]) * t
   ];
 }
 
-function color(val, varName){
+function color(val, varName) {
   const spec = colorScales[varName];
-  if(!spec) return '#ff00ff';
+  if (!spec) return '#ff00ff';
 
   const min = spec.min;
   const max = spec.max;
   const palette = spec.palette;
-  const t = Math.max(0, Math.min(1, (val - min)/(max - min)));
+  const t = Math.max(0, Math.min(1, (val - min) / (max - min)));
   const scaled = t * (palette.length - 1);
   const idx = Math.floor(scaled);
   const frac = scaled - idx;
   const c1 = parseColor(palette[idx]);
-  const c2 = parseColor(palette[Math.min(idx+1, palette.length-1)]);
-  const c = interpColor(c1,c2,frac);
-  if(spec.opacity || c[3] !== 1){
+  const c2 = parseColor(palette[Math.min(idx + 1, palette.length - 1)]);
+  const c = interpColor(c1, c2, frac);
+  if (spec.opacity || c[3] !== 1) {
     return `rgba(${c[0]},${c[1]},${c[2]},${c[3].toFixed(2)})`;
   }
   return `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -286,16 +313,16 @@ function color(val, varName){
 // Cache canvases for sampled PNGs
 const canvasCache = {};
 
-function loadCanvas(url){
+function loadCanvas(url) {
   return new Promise((resolve, reject) => {
-    if(canvasCache[url]) return resolve(canvasCache[url]);
+    if (canvasCache[url]) return resolve(canvasCache[url]);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       const c = document.createElement('canvas');
       c.width = img.width;
       c.height = img.height;
-      c.getContext('2d').drawImage(img,0,0);
+      c.getContext('2d').drawImage(img, 0, 0);
       canvasCache[url] = c;
       resolve(c);
     };
@@ -304,58 +331,58 @@ function loadCanvas(url){
   });
 }
 
-function colorToValue(pixel, varName){
+function colorToValue(pixel, varName) {
   const spec = colorScales[varName];
-  if(!spec) return null;
-  if(pixel[3] === 0) return null;
+  if (!spec) return null;
+  if (pixel[3] === 0) return null;
 
   const palette = spec.palette.map(parseColor);
-  if(spec.discrete){
-    let best=0, bestDist=Infinity;
-    for(let i=0;i<palette.length;i++){
-      const c=palette[i];
-      const d=(c[0]-pixel[0])**2+(c[1]-pixel[1])**2+(c[2]-pixel[2])**2;
-      if(d<bestDist){bestDist=d;best=i;}
+  if (spec.discrete) {
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < palette.length; i++) {
+      const c = palette[i];
+      const d = (c[0] - pixel[0]) ** 2 + (c[1] - pixel[1]) ** 2 + (c[2] - pixel[2]) ** 2;
+      if (d < bestDist) { bestDist = d; best = i; }
     }
-    const t=best/(palette.length-1);
-    return spec.min + t*(spec.max-spec.min);
+    const t = best / (palette.length - 1);
+    return spec.min + t * (spec.max - spec.min);
   }
 
-  let bestVal=null,bestDist=Infinity;
-  for(let i=0;i<palette.length-1;i++){
-    const c1=palette[i], c2=palette[i+1];
-    const dx=c2[0]-c1[0], dy=c2[1]-c1[1], dz=c2[2]-c1[2];
-    const dot=(pixel[0]-c1[0])*dx+(pixel[1]-c1[1])*dy+(pixel[2]-c1[2])*dz;
-    const len2=dx*dx+dy*dy+dz*dz;
-    const t=Math.max(0,Math.min(1,len2?dot/len2:0));
-    const r=c1[0]+dx*t, g=c1[1]+dy*t, b=c1[2]+dz*t;
-    const d=(pixel[0]-r)**2+(pixel[1]-g)**2+(pixel[2]-b)**2;
-    if(d<bestDist){bestDist=d;bestVal=i+t;}
+  let bestVal = null, bestDist = Infinity;
+  for (let i = 0; i < palette.length - 1; i++) {
+    const c1 = palette[i], c2 = palette[i + 1];
+    const dx = c2[0] - c1[0], dy = c2[1] - c1[1], dz = c2[2] - c1[2];
+    const dot = (pixel[0] - c1[0]) * dx + (pixel[1] - c1[1]) * dy + (pixel[2] - c1[2]) * dz;
+    const len2 = dx * dx + dy * dy + dz * dz;
+    const t = Math.max(0, Math.min(1, len2 ? dot / len2 : 0));
+    const r = c1[0] + dx * t, g = c1[1] + dy * t, b = c1[2] + dz * t;
+    const d = (pixel[0] - r) ** 2 + (pixel[1] - g) ** 2 + (pixel[2] - b) ** 2;
+    if (d < bestDist) { bestDist = d; bestVal = i + t; }
   }
-  if(bestVal==null) return null;
-  const t=bestVal/(palette.length-1);
-  return spec.min + t*(spec.max-spec.min);
+  if (bestVal == null) return null;
+  const t = bestVal / (palette.length - 1);
+  return spec.min + t * (spec.max - spec.min);
 }
 
-async function getPngValue(varName, tsStr, lat, lon){
+async function getPngValue(varName, tsStr, lat, lon) {
   const layerType = getLayerType(varName);
   let imageUrl;
-  if(layerType === 'terrain'){
-    imageUrl = `${RES}images/terrain/${varName}.png`;
-  }else{
-    imageUrl = `${RES}images/weather/${tsStr}/${varName}.png`;
+  if (layerType === 'terrain') {
+    imageUrl = `${RES}images/terrain/${varName}.webp`;
+  } else {
+    imageUrl = `${RES}images/weather/${tsStr}/${varName}.webp`;
   }
-  try{
+  try {
     const canvas = await loadCanvas(imageUrl);
     const coord = ol.proj.fromLonLat([lon, lat]);
-    const xRatio = (coord[0]-TILE_EXTENT[0])/(TILE_EXTENT[2]-TILE_EXTENT[0]);
-    const yRatio = (TILE_EXTENT[3]-coord[1])/(TILE_EXTENT[3]-TILE_EXTENT[1]);
-    const x = Math.round(xRatio*canvas.width);
-    const y = Math.round(yRatio*canvas.height);
-    if(x<0||x>=canvas.width||y<0||y>=canvas.height) return null;
-    const data = canvas.getContext('2d').getImageData(x,y,1,1).data;
+    const xRatio = (coord[0] - TILE_EXTENT[0]) / (TILE_EXTENT[2] - TILE_EXTENT[0]);
+    const yRatio = (TILE_EXTENT[3] - coord[1]) / (TILE_EXTENT[3] - TILE_EXTENT[1]);
+    const x = Math.round(xRatio * canvas.width);
+    const y = Math.round(yRatio * canvas.height);
+    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return null;
+    const data = canvas.getContext('2d').getImageData(x, y, 1, 1).data;
     return colorToValue(data, varName);
-  }catch(e){
+  } catch (e) {
     return null;
   }
 }
@@ -366,7 +393,7 @@ function updatePopupRow(variable, value, type) {
 
   const cellIndex = type === 'source' ? 1 : 2; // 1 for Source, 2 for Extrapolated
   const cell = row.cells[cellIndex];
-  
+
   if (value === null || value === undefined) {
     cell.innerHTML = 'N/A';
     cell.dataset.value = '';
@@ -412,12 +439,12 @@ async function fetchMapData(lat, lon, tsStr) {
 async function fetchApiData(lat, lon, tsStr) {
   const selectedDate = new Date(tsStr);
   const dateStr = selectedDate.toISOString().split('T')[0];
-  
+
   // Variables supported by Open-Meteo
   const apiVars = [
-    'temperature_2m','relative_humidity_2m','shortwave_radiation',
-    'cloud_cover','snow_depth','snowfall','wind_speed_10m',
-    'weather_code','freezing_level_height','surface_pressure',
+    'temperature_2m', 'relative_humidity_2m', 'shortwave_radiation',
+    'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m',
+    'weather_code', 'freezing_level_height', 'surface_pressure',
     'dewpoint_2m'
   ];
 
@@ -435,8 +462,8 @@ async function fetchApiData(lat, lon, tsStr) {
   // Archive API covers everything else.
   // Simple check: if date is older than 5 days ago, use Archive.
   const diffTime = new Date() - selectedDate;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-  
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
   let baseUrl = 'https://api.open-meteo.com/v1/forecast';
   if (diffDays > 5) {
     baseUrl = 'https://archive-api.open-meteo.com/v1/archive';
@@ -457,10 +484,10 @@ async function fetchApiData(lat, lon, tsStr) {
     // Find closest time index
     let closestIndex = 0;
     let minDiff = Math.abs(new Date(apiTimes[0]).getTime() - new Date(tsStr).getTime());
-    
-    for(let i=1; i < apiTimes.length; i++){
+
+    for (let i = 1; i < apiTimes.length; i++) {
       const d = Math.abs(new Date(apiTimes[i]).getTime() - new Date(tsStr).getTime());
-      if(d < minDiff){ minDiff = d; closestIndex = i; }
+      if (d < minDiff) { minDiff = d; closestIndex = i; }
     }
 
     // Update table with API values
@@ -469,7 +496,7 @@ async function fetchApiData(lat, lon, tsStr) {
         updatePopupRow(v, apiData.hourly[v][closestIndex], 'source');
       }
     });
-    
+
     // API provides elevation too
     if (apiData.elevation) {
       updatePopupRow('elevation', apiData.elevation, 'source');
@@ -493,16 +520,16 @@ async function fetchApiData(lat, lon, tsStr) {
 
 function showAsyncPopup(lat, lon, tsStr, coordinate) {
   const vars = [...variables];
-  if(!vars.includes('elevation')) vars.push('elevation');
-  if(!vars.includes('aspect')) vars.push('aspect');
-  if(!vars.includes('slope')) vars.push('slope');
+  if (!vars.includes('elevation')) vars.push('elevation');
+  if (!vars.includes('aspect')) vars.push('aspect');
+  if (!vars.includes('slope')) vars.push('slope');
 
   // Build Table Skeleton
   let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                <div style="font-weight:bold;">${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
                <div style="font-size:0.9em;color:#666;">${tsStr.replace('T', ' ')}</div>
              </div>`;
-  
+
   html += `<table class="popup-table">
     <thead>
       <tr>
@@ -524,7 +551,7 @@ function showAsyncPopup(lat, lon, tsStr, coordinate) {
   });
 
   html += `</tbody></table>`;
-  
+
   popupContent.innerHTML = html;
   overlay.setPosition(coordinate);
   popup.style.display = 'block';
@@ -534,27 +561,27 @@ function showAsyncPopup(lat, lon, tsStr, coordinate) {
   fetchMapData(lat, lon, tsStr);
 }
 
-function haversine(lat1, lon1, lat2, lon2){
-  const R=6371000;
-  const rad=Math.PI/180;
-  const dLat=(lat2-lat1)*rad;
-  const dLon=(lon2-lon1)*rad;
-  const a=Math.sin(dLat/2)**2+Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dLon/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 
 
-function draw(){
-  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
-  if(timestampIdx >= availableTimestamps.length) return;
+function draw() {
+  const timestampIdx = dayIdx * timestampsPerDay + hourIdx;
+  if (timestampIdx >= availableTimestamps.length) return;
   const spec = colorScales[varName] || {};
   currentMin = spec.min ?? 0;
   currentMax = spec.max ?? 1;
-  
+
   const layerType = getLayerType(varName);
-  
-  if(!isPointMode){
+
+  if (!isPointMode) {
     // Smooth mode: hide points, show image layer
     src.clear();
     layer.setVisible(false);
@@ -582,7 +609,7 @@ function draw(){
   if (tileLayer.imageLayer) {
     tileLayer.imageLayer.setVisible(false);
   }
-  
+
   // For terrain layers, we don't have point data, so switch to smooth mode
   if (layerType === 'terrain') {
     isPointMode = false;
@@ -593,55 +620,55 @@ function draw(){
     showLayerInfoBox();
     return;
   }
-  
+
   layer.setVisible(true);
 
-  const feats = points.map(p=>{
+  const feats = points.map(p => {
     const v = p.w[varName]?.[timestampIdx];
-    const f = new ol.Feature(new ol.geom.Point(ol.proj.fromLonLat([p.lon,p.lat])));
+    const f = new ol.Feature(new ol.geom.Point(ol.proj.fromLonLat([p.lon, p.lat])));
     f.set('v', v);
-    f.set('data', {p, timestampIdx});
+    f.set('data', { p, timestampIdx });
     return f;
   });
   src.clear();
-  feats.forEach(f=>{
-    const v=f.get('v');
-    if(typeof v!=='number') return;
-    f.setStyle(new ol.style.Style({image:new ol.style.Circle({radius:6,fill:new ol.style.Fill({color:color(v,varName)})})}));
+  feats.forEach(f => {
+    const v = f.get('v');
+    if (typeof v !== 'number') return;
+    f.setStyle(new ol.style.Style({ image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: color(v, varName) }) }) }));
     src.addFeature(f);
   });
   showLayerInfoBox();
 }
 
-function updateButtons(){
-  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
-  if(timestampIdx >= availableTimestamps.length) return;
+function updateButtons() {
+  const timestampIdx = dayIdx * timestampsPerDay + hourIdx;
+  if (timestampIdx >= availableTimestamps.length) return;
   const t = new Date(availableTimestamps[timestampIdx]);
   dayBtn.textContent = formatDay(t);
   timeBtn.textContent = formatTime(t);
 }
 
-function showLayerInfoBox(){
+function showLayerInfoBox() {
   const info = document.getElementById('info-box');
-  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
-  if(timestampIdx >= availableTimestamps.length) return;
+  const timestampIdx = dayIdx * timestampsPerDay + hourIdx;
+  if (timestampIdx >= availableTimestamps.length) return;
   const t = new Date(availableTimestamps[timestampIdx]);
-  if(!info || !t) return;
+  if (!info || !t) return;
   info.classList.remove('info-box-selecting');
-  const spec = colorScales[varName] || {palette:['#0000ff','#ff0000']};
-  
+  const spec = colorScales[varName] || { palette: ['#0000ff', '#ff0000'] };
+
   const layerType = getLayerType(varName);
-  
+
   const label = `${varLabels[varName] ?? varName}`;
   const timeLabel = `${formatDay(t)} at ${formatTime(t)}`;
-  
+
   // Update mobile-only floating date/time
   const mobDt = document.getElementById('mobile-datetime');
-  if(mobDt) mobDt.textContent = timeLabel;
+  if (mobDt) mobDt.textContent = timeLabel;
 
   const unit = varUnits[varName] ?? '';
   info.classList.remove('info-box-selecting');
-  
+
   const barStyle = `background:linear-gradient(to right,${spec.palette.join(',')})`;
   info.innerHTML = `
     <div class="info-box-right" style="width: 100%;">
@@ -655,45 +682,45 @@ function showLayerInfoBox(){
       </div>
     </div>
   `;
-  
+
   info.style.display = 'block';
 }
-function updateTileLayer(){
-  const timestampIdx = dayIdx * 4 + hourIdx; // 4 times per day
-  if(timestampIdx >= availableTimestamps.length) return;
+function updateTileLayer() {
+  const timestampIdx = dayIdx * timestampsPerDay + hourIdx;
+  if (timestampIdx >= availableTimestamps.length) return;
   const ts = availableTimestamps[timestampIdx];
-  
+
   // Remove any existing image layer
   if (tileLayer.imageLayer) {
     map.removeLayer(tileLayer.imageLayer);
   }
-  
+
   // Determine the image URL based on layer type
   let imageUrl;
   const layerType = getLayerType(varName);
-  
+
   if (layerType === 'terrain') {
-    // Static terrain layers
+    // Static terrain layers - use PNG (WebP has CloudFlare issues)
     imageUrl = `${RES}images/terrain/${varName}.png`;
   } else if (layerType === 'snow_composite' || layerType === 'weather') {
     // Time-dependent layers (weather data, skiability, SQH)
-    imageUrl = `${RES}images/weather/${ts}/${varName}.png`;
+    imageUrl = `${RES}images/weather/${ts}/${varName}.webp`;
   } else {
     console.warn(`Unknown layer type for ${varName}`);
     return;
   }
-  
+
   const src = new ol.source.ImageStatic({
     url: imageUrl,
     imageExtent: TILE_EXTENT, // Use the same extent as before
     projection: 'EPSG:3857' // Web Mercator
   });
-  
+
   const imageLayer = new ol.layer.Image({
     source: src,
     opacity: 0.7 // Make it semi-transparent so we can see the base map
   });
-  
+
   // Store reference and add to map
   tileLayer.imageLayer = imageLayer;
   map.addLayer(imageLayer);
@@ -703,7 +730,7 @@ function updateTileLayer(){
 function getLayerType(layerName) {
   const terrainLayers = ['elevation', 'aspect', 'slope'];
   const snowCompositeLayers = ['skiability', 'sqh'];
-  
+
   if (terrainLayers.includes(layerName)) {
     return 'terrain';
   } else if (snowCompositeLayers.includes(layerName)) {
@@ -723,7 +750,7 @@ function supportsPointMode(layerName) {
 // Helper function to update toggle button state
 function updateToggleButtonState() {
   const supportsPoints = supportsPointMode(varName);
-  
+
   if (supportsPoints) {
     // Enable the toggle button
     toggleBtn.disabled = false;
@@ -744,7 +771,9 @@ function isMobile() {
   return window.innerWidth <= 768;
 }
 
-function showDaySelector(){
+function showDaySelector() {
+  const numDays = Math.ceil(availableTimestamps.length / timestampsPerDay);
+
   if (isMobile()) {
     const layerGrid = document.getElementById('layer-grid');
     const selectorGrid = document.getElementById('mobile-selector-grid');
@@ -754,9 +783,9 @@ function showDaySelector(){
     selectorGrid.style.display = 'grid'; // Ensure grid layout
     layerGrid.style.display = 'none';
 
-    for(let i=0; i < 5; i++){ 
-      const timestampIdx = i * 4;
-      if(timestampIdx >= availableTimestamps.length) continue;
+    for (let i = 0; i < numDays; i++) {
+      const timestampIdx = i * timestampsPerDay;
+      if (timestampIdx >= availableTimestamps.length) continue;
       const d = new Date(availableTimestamps[timestampIdx]);
       const div = document.createElement('div');
       div.className = 'layer-item';
@@ -764,6 +793,7 @@ function showDaySelector(){
       if (i === dayIdx) div.classList.add('active');
       div.onclick = () => {
         dayIdx = i;
+        hourIdx = 0;
         updateButtons();
         draw();
         // Return to layer view
@@ -775,35 +805,36 @@ function showDaySelector(){
     return;
   }
 
-  // Desktop Behavior
+  // Desktop Behavior - show all days in a horizontal scrollable grid
   const info = document.getElementById('info-box');
-  info.innerHTML='';
+  info.innerHTML = '';
   info.classList.add('info-box-selecting');
   const dayRow = document.createElement('div');
   dayRow.className = 'date-selector-row';
   info.appendChild(dayRow);
 
-  for(let i=0; i < 5; i++){ 
-    const timestampIdx = i * 4; 
-    if(timestampIdx >= availableTimestamps.length) continue;
+  for (let i = 0; i < numDays; i++) {
+    const timestampIdx = i * timestampsPerDay;
+    if (timestampIdx >= availableTimestamps.length) continue;
     const d = new Date(availableTimestamps[timestampIdx]);
     const div = document.createElement('div');
     div.className = 'layer-item';
-    div.style.setProperty('--selector-basis', '15%');
+    div.style.setProperty('--selector-basis', `${100 / numDays}%`);
     div.textContent = formatDay(d);
     if (i === dayIdx) div.classList.add('active');
     div.onclick = () => {
       dayIdx = i;
+      hourIdx = 0;
       updateButtons();
       draw();
       showDaySelector();
     };
     dayRow.appendChild(div);
   }
-  info.style.display='block';
+  info.style.display = 'block';
 }
 
-function showTimeSelector(){
+function showTimeSelector() {
   if (isMobile()) {
     const layerGrid = document.getElementById('layer-grid');
     const selectorGrid = document.getElementById('mobile-selector-grid');
@@ -813,14 +844,14 @@ function showTimeSelector(){
     selectorGrid.style.display = 'grid';
     layerGrid.style.display = 'none';
 
-    for(let i=0; i<4; i++){
-      const tsStr = availableTimestamps[dayIdx*4 + i];
-      if(!tsStr) continue;
+    for (let i = 0; i < timestampsPerDay; i++) {
+      const tsStr = availableTimestamps[dayIdx * timestampsPerDay + i];
+      if (!tsStr) continue;
       const d = new Date(tsStr);
       const div = document.createElement('div');
       div.className = 'layer-item';
       div.textContent = formatTime(d);
-      if(i === hourIdx) div.classList.add('active');
+      if (i === hourIdx) div.classList.add('active');
       div.onclick = () => {
         hourIdx = i;
         updateButtons();
@@ -836,21 +867,21 @@ function showTimeSelector(){
 
   // Desktop Behavior
   const info = document.getElementById('info-box');
-  info.innerHTML='';
+  info.innerHTML = '';
   info.classList.add('info-box-selecting');
   const timeRow = document.createElement('div');
   timeRow.className = 'time-selector-row';
   info.appendChild(timeRow);
 
-  for(let i=0; i<4; i++){
-    const tsStr = availableTimestamps[dayIdx*4 + i];
-    if(!tsStr) continue;
+  for (let i = 0; i < timestampsPerDay; i++) {
+    const tsStr = availableTimestamps[dayIdx * timestampsPerDay + i];
+    if (!tsStr) continue;
     const d = new Date(tsStr);
     const div = document.createElement('div');
     div.className = 'layer-item';
-    div.style.setProperty('--selector-basis', '20%');
+    div.style.setProperty('--selector-basis', `${100 / timestampsPerDay}%`);
     div.textContent = formatTime(d);
-    if(i === hourIdx) div.classList.add('active');
+    if (i === hourIdx) div.classList.add('active');
     div.onclick = () => {
       hourIdx = i;
       updateButtons();
@@ -859,11 +890,11 @@ function showTimeSelector(){
     };
     timeRow.appendChild(div);
   }
-  info.style.display='block';
+  info.style.display = 'block';
 }
 
-dayBtn.onclick=()=>{showDaySelector();};
-timeBtn.onclick=()=>{showTimeSelector();};
+dayBtn.onclick = () => { showDaySelector(); };
+timeBtn.onclick = () => { showTimeSelector(); };
 
 // Toggle button functionality
 let isPointMode = false; // Default to smooth mode for web
@@ -897,10 +928,10 @@ if (toggleBtn) {
 function toggleMode() {
   // Don't do anything if the button is disabled
   if (toggleBtn.disabled) return;
-  
+
   isPointMode = !isPointMode;
   updateBaseMapLayers();
-  
+
   if (isPointMode) {
     toggleBtn.classList.remove('smooth');
     // Hide any existing image layer
@@ -922,36 +953,36 @@ function toggleMode() {
 toggleBtn.onclick = toggleMode;
 
 // Handle all layer types: weather, terrain, and snow_composite
-document.querySelectorAll('.layer-item[data-layer-name]').forEach(btn=>{
-  if(btn.dataset.layerName===varName) btn.classList.add('active'); // SQH will be active
-  btn.onclick=()=>{
-    document.querySelectorAll('.layer-item[data-layer-name]').forEach(b=>b.classList.remove('active'));
+document.querySelectorAll('.layer-item[data-layer-name]').forEach(btn => {
+  if (btn.dataset.layerName === varName) btn.classList.add('active'); // SQH will be active
+  btn.onclick = () => {
+    document.querySelectorAll('.layer-item[data-layer-name]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    varName=btn.dataset.layerName;
+    varName = btn.dataset.layerName;
     updateToggleButtonState(); // Update toggle button based on new layer
     draw();
   };
 });
 
-function findPeak(lat,lon){
-  return peaks.find(p=>Math.abs(p.lat-lat)<1e-4 && Math.abs(p.lon-lon)<1e-4);
+function findPeak(lat, lon) {
+  return peaks.find(p => Math.abs(p.lat - lat) < 1e-4 && Math.abs(p.lon - lon) < 1e-4);
 }
 
 map.on('singleclick', async evt => {
-  if(drawerOpen){
+  if (drawerOpen) {
     toggleDrawer();
     return;
   }
   overlay.setPosition(undefined);
 
   const clicked = ol.proj.toLonLat(evt.coordinate);
-  const [lon,lat] = clicked;
-  const tsStr = availableTimestamps[dayIdx*4 + hourIdx];
-  
-  if(!tsStr){
+  const [lon, lat] = clicked;
+  const tsStr = availableTimestamps[dayIdx * 4 + hourIdx];
+
+  if (!tsStr) {
     popupContent.textContent = 'Time data unavailable';
     overlay.setPosition(evt.coordinate);
-    popup.style.display='block';
+    popup.style.display = 'block';
     return;
   }
 
@@ -960,12 +991,12 @@ map.on('singleclick', async evt => {
 });
 
 // Drawer toggle functionality
-window.toggleDrawer = function() {
+window.toggleDrawer = function () {
   const cont = document.getElementById('drawer-container');
   cont.classList.toggle('open');
   drawerOpen = cont.classList.contains('open');
-  popup.style.display='none';
-  if(!drawerOpen) showLayerInfoBox();
+  popup.style.display = 'none';
+  if (!drawerOpen) showLayerInfoBox();
 };
 
 // Event listener for 'Escape' key press
@@ -987,7 +1018,7 @@ document.addEventListener('keydown', (event) => {
     const currentIndex = layers.findIndex(layer => layer.dataset.layerName === varName);
     const prevIndex = currentIndex > 0 ? currentIndex - 1 : layers.length - 1;
     const prevLayer = layers[prevIndex];
-    
+
     // Update active layer
     layers.forEach(layer => layer.classList.remove('active'));
     prevLayer.classList.add('active');
@@ -1001,7 +1032,7 @@ document.addEventListener('keydown', (event) => {
     const currentIndex = layers.findIndex(layer => layer.dataset.layerName === varName);
     const nextIndex = currentIndex < layers.length - 1 ? currentIndex + 1 : 0;
     const nextLayer = layers[nextIndex];
-    
+
     // Update active layer
     layers.forEach(layer => layer.classList.remove('active'));
     nextLayer.classList.add('active');
@@ -1053,25 +1084,25 @@ let totalPngsToPreload = 0;
 // Generate all PNG URLs to preload
 function generateAllPngUrls() {
   const allUrls = [];
-  
+
   // Terrain PNGs (always available)
   const terrainVars = ['elevation', 'aspect', 'slope'];
   terrainVars.forEach(varName => {
-    allUrls.push(`${RES}images/terrain/${varName}.png`);
+    allUrls.push(`${RES}images/terrain/${varName}.webp`);
   });
-  
+
   // Weather and composite PNGs (time-based)
-  const weatherVars = ['temperature_2m', 'relative_humidity_2m', 'shortwave_radiation', 
-                      'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m', 
-                      'freezing_level_height', 'surface_pressure', 
-                      'dewpoint_2m', 'skiability', 'sqh'];
-  
+  const weatherVars = ['temperature_2m', 'relative_humidity_2m', 'shortwave_radiation',
+    'cloud_cover', 'snow_depth', 'snowfall', 'wind_speed_10m',
+    'freezing_level_height', 'surface_pressure',
+    'dewpoint_2m', 'skiability', 'sqh'];
+
   availableTimestamps.forEach(timestamp => {
     weatherVars.forEach(varName => {
-      allUrls.push(`${RES}images/weather/${timestamp}/${varName}.png`);
+      allUrls.push(`${RES}images/weather/${timestamp}/${varName}.webp`);
     });
   });
-  
+
   // Sort alphabetically for systematic loading
   return allUrls.sort();
 }
@@ -1082,25 +1113,25 @@ function preloadPngsInBackground() {
   preloadingActive = true;
   totalPngsToPreload = allUrls.length;
   preloadedCount = 0;
-  
+
   console.log(`Starting background preload of ${totalPngsToPreload} PNGs...`);
-  
+
   // Preload with delay to avoid overwhelming the browser
   let urlIndex = 0;
-  
+
   function preloadNext() {
     if (urlIndex >= allUrls.length) {
       console.log(`✅ Preloaded all ${preloadedCount} PNGs successfully!`);
       preloadingActive = false;
       return;
     }
-    
+
     const url = allUrls[urlIndex++];
     loadCanvas(url)
       .then(() => {
         preloadedCount++;
         if (preloadedCount % 10 === 0) {
-          console.log(`📥 Preloaded ${preloadedCount}/${totalPngsToPreload} PNGs (${Math.round(preloadedCount/totalPngsToPreload*100)}%)`);
+          console.log(`📥 Preloaded ${preloadedCount}/${totalPngsToPreload} PNGs (${Math.round(preloadedCount / totalPngsToPreload * 100)}%)`);
         }
         // Small delay between requests to avoid overwhelming the browser
         setTimeout(preloadNext, 50);
@@ -1110,7 +1141,7 @@ function preloadPngsInBackground() {
         setTimeout(preloadNext, 50);
       });
   }
-  
+
   preloadNext();
 }
 
@@ -1121,7 +1152,7 @@ window.addEventListener('load', () => {
     console.log('Auto-loading weather data...');
     loadWeatherData();
   }, 2000);
-  
+
   // Give weather data priority - start PNG preloading after weather data has had time to load
   setTimeout(preloadPngsInBackground, 5000);
 });

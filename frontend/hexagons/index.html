@@ -80,6 +80,27 @@
             font-weight: bold;
         }
 
+        .app-link {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: 0.2s;
+        }
+
+        .app-link:hover {
+            background: #fff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 255, 204, 0.5);
+        }
+
         #main {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -218,6 +239,7 @@
     <div id="header">
         <div class="logo">POW<b>FINDER</b> // HEX PROVER</div>
         <div id="controls">
+            <a href="app/" class="app-link">LAUNCH VIEWER →</a>
             <button class="toggle-btn active" id="btn-devito">DOWNSAMPLE: <b>DEVITO</b></button>
             <button class="toggle-btn" id="btn-homer">UPSAMPLE: <b>HOMER</b></button>
             <button class="info-btn" onclick="toggleModal(true)">?</button>
