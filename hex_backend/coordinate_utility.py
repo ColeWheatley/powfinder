@@ -4,22 +4,19 @@ import numpy as np
 # =============================================================================
 # PIXEL-FIRST CONSTANTS (UNIT-BASED)
 # =============================================================================
-# The fundamental truth is the UNIT HEX.
-# We want exactly 32 pixels across a unit hex to strictly avoid aliasing/shimmer.
-
 UNIT_HEX_PX = 32.0           # Exactly 32 pixels flat-to-flat
 METERS_PER_PIXEL = 0.2       # The "Tirol Truth"
 
-# Gosper Fractal Scale Factor for Level 5 (7^2.5)
-LEVEL_5_SCALE_FACTOR = 7.0 ** 2.5  # ~129.6418
-
-# Derived Dimensions
+# Scale Factors (Visual / LOD)
 UNIT_HEX_WIDTH_METERS = UNIT_HEX_PX * METERS_PER_PIXEL  # 6.4 meters exactly
-SECTOR_WIDTH_METERS = UNIT_HEX_WIDTH_METERS * LEVEL_5_SCALE_FACTOR # ~829.7m
 
-# Final Texture Size (Non-Power-of-Two is OK for modern GL)
-# 32 * 129.6418 = ~4148.5 px
-TEXTURE_SIZE_PX = UNIT_HEX_PX * LEVEL_5_SCALE_FACTOR 
+# SECTOR DEFINITION (Rectangular Bins)
+# User mentioned expecting 1024x1024.
+# If we want the "High Res" (1/4 scale) to be exactly 1024px:
+# 1024 * 4 = 4096 pixels for Full Res.
+# 4096 pixels * 0.2 m/pixel = 819.2 meters.
+SECTOR_SIZE_METERS = 819.2 
+SECTOR_PIXELS = 4096 # 819.2 / 0.2
 
 # Directions
 NORTH = 0
@@ -34,261 +31,96 @@ def get_hex_dimensions():
     Returns the calculated dimensions of the hexes based on pixel constants.
     """
     return {
-        'sector_width_m': SECTOR_WIDTH_METERS,
+        'sector_width_m': SECTOR_SIZE_METERS,
         'unit_hex_width_m': UNIT_HEX_WIDTH_METERS,
         'unit_hex_radius_m': UNIT_HEX_WIDTH_METERS / math.sqrt(3),
         'pixels_per_unit_hex': UNIT_HEX_PX,
-        'texture_size_px': TEXTURE_SIZE_PX
+        'texture_size_px': SECTOR_PIXELS
     }
 
 def axial_to_world_meters(q, r):
     """
     Converts Universal Unit Axial (q, r) to World Meters (x, y).
-    North-Zero Standard.
+    North-Zero Standard (Flat Top).
     """
     h = UNIT_HEX_WIDTH_METERS
-    # Basis vectors: +r is North, +q is NE
     world_x = (q * (math.sqrt(3)/2) * h)
     world_y = (r * h + q * 0.5 * h)
     return world_x, world_y
     
-def sector_to_world_meters(Q, R):
+def world_meters_to_axial_approx(x, y):
     """
-    Converts Level 5 Sector (Q, R) -> World Meters center point.
-    Uses Matrix 7^5 Transformation.
-    """
-    # 1. Transform Sector (Q, R) -> Universal Unit Center (q, r)
-    center_q = -87 * Q - 149 * R
-    center_r = 149 * Q + 62 * R
-    return axial_to_world_meters(center_q, center_r)
-
-def world_meters_to_sector_approx(x, y):
-    """
-    Approximate inverse to find which Sector (Q, R) a point (x, y) falls in.
-    Useful for scanning bounds.
+    Finds the nearest q,r for a given x,y.
     """
     h = UNIT_HEX_WIDTH_METERS
-    w_inv = 1.0 / (math.sqrt(3)/2 * h)
-    
-    q_approx = x * w_inv
-    r_approx = (y - q_approx * 0.5 * h) / h
-    
-    # Inverse Matrix 7^5 (Det = 16807)
-    det = 16807
-    Q = (62 * q_approx + 149 * r_approx) / det
-    R = (-149 * q_approx - 87 * r_approx) / det
-    
-    return Q, R
+    A = (math.sqrt(3)/2 * h)
+    q = x / A
+    r = (y - (q * 0.5 * h)) / h
+    return q, r 
 
-# =============================================================================
-# FRACTAL TREE LOGIC
-# =============================================================================
+def round_axial(q, r):
+    x_cube = q
+    z_cube = r
+    y_cube = -q - r
+    rx, ry, rz = round(x_cube), round(y_cube), round(z_cube)
+    x_diff, y_diff, z_diff = abs(rx - x_cube), abs(ry - y_cube), abs(rz - z_cube)
+    if x_diff > y_diff and x_diff > z_diff: rx = -ry - rz
+    elif y_diff > z_diff: ry = -rx - rz
+    else: rz = -rx - ry
+    return int(rx), int(rz)
 
-def generate_gosper_offsets(level, debug=False):
-    """
-    Generates the list of (q, r) unit hex offsets for a Gosper Tile of 'level'.
+def world_to_sector_id(x, y):
+    sx = math.floor(x / SECTOR_SIZE_METERS)
+    sy = math.floor(y / SECTOR_SIZE_METERS)
+    return sx, sy
 
-    The list is HIERARCHICALLY ORDERED.
-    - Index 0-6: The 7 unit hexes of the first Level 1 child.
-    - Index 7-13: The 7 unit hexes of the second Level 1 child.
-    - ...
+def sector_id_to_bounds_meters(sx, sy):
+    min_x = sx * SECTOR_SIZE_METERS
+    min_y = sy * SECTOR_SIZE_METERS
+    max_x = min_x + SECTOR_SIZE_METERS
+    max_y = min_y + SECTOR_SIZE_METERS
+    return min_x, min_y, max_x, max_y
 
-    This allows us to perform "Bottom-Up Aggregation" by simply reshaping the array:
-    heights_lvl_0 = [16807]
-    heights_lvl_1 = heights_lvl_0.reshape(-1, 7).mean(axis=1) -> [2401]
-    heights_lvl_2 = heights_lvl_1.reshape(-1, 7).mean(axis=1) -> [343]
-    ...
-    """
-    if level == 0:
-        return [(0, 0)]
-    
-    # Gosper "Flower" Pattern (7 children relative to parent center)
-    # These are the specific offsets for a standard "Pointy Top" gosper? 
-    # NO: We are Flat Topped. But the logic is isomorphic.
-    # We use a specific 'Seed' pattern that tiles the plane.
-    # 
-    # Relative offsets for the 7 children (Center + 6 Neighbors)
-    # Note: These must be rotated/scaled appropriately for the level?
-    # Actually, the recursion logic is:
-    # 
-    # P_child = P_parent + (Basis_Level * Offset_1_to_7)
-    #
-    # We build Bottom-Up recursively:
-    # Offsets(N) = [ child_pos + (Basis * sub_offset) ]
-    
-    prev_offsets = generate_gosper_offsets(level - 1, debug)
-    
-    # The 7 Positions of the sub-tiles in a Gosper level
-    # This matrix/offset depends heavily on the specific variation (island index).
-    # Using a standard "Flower" spread helps, but for perfect tiling we need the specific shifting vectors.
-    #
-    # Let's use the standard "0-index is center" approach.
-    # Shifts in Axial Coords (q, r):
-    # Center (0,0)
-    # And the 6 neighbors... but Spaced out by the Fractal Basis?
-    #
-    # Matrix M for doubling level (Scale sqrt(7), Rot ~19deg):
-    # M = [[2, 1], [-1, 3]] ? (Determinant 7)
-    #
-    # Wait, simpler:
-    # A Level N tile contains 7 Level N-1 tiles.
-    # The N-1 tiles are located at specific offsets relative to the center.
-    # These offsets are calculated using the integer power basis.
-    
-    # Let's hardcode the 7 relative "shift vectors" for the children.
-    # In the specific "Flow Snake" configuration:
-    shifts = [
-        (0, 0),    # Center
-        (0, -1),   # N
-        (1, -1),   # NE
-        (1, 0),    # SE
-        (0, 1),    # S
-        (-1, 1),   # SW
-        (-1, 0)    # NW
-    ]
-    # Wait, these are just neighbors. 
-    # The SHIFT magnitude depends on the level.
-    # BUT, we can also define it recursively:
-    # "Replace every hex with a flower of 7 hexes" logic (L-system).
-    
-    # We need the transformation Matrix 'M' that maps Level N-1 coords to Level N grid.
-    # M = [[3, -1], [1, 2]] ?? (Det = 6+1=7)
-    # Let's try M = [[2, 2], [-1, 1]]? Det = 2--2=4. No.
-    #
-    # Used in previous project:
-    # q_new = 3*q - r
-    # r_new = q + 2*r
-    # Det = 6 - (-1) = 7. 
-    # Check: (1,0) -> (3,1). Length sq = 9+1+3 = 13? No.
-    #
-    # Let's assume for this MVP we use the simple "Hex Flake" approximation 
-    # if we can't derive the perfect Gosper shifts instantly.
-    # Actually, if we use the Matrix from our 'waffle_maker' config:
-    # M^5 = [[-87...]]
-    # That was derived from a base M.
-    # Let's derive M from the 5th root.
-    # 
-    # Let's try a simpler approach for the offsets:
-    # Just standard neighbors relative to the 'Level Scale'?
-    #
-    # Let's defer to a robust recursion:
-    # A level N tile is effectively "Dilated" by M, then checks neighbors?
-    #
-    # Correct Logic:
-    # 1. Take the shape at Level N-1.
-    # 2. Iterate 7 copies of it, shifted by the 7 basis vectors of Level N-1?
-    
-    # To keep this safe and not waste tokens guessing the matrix:
-    # We will generate a "Dense Hexagon" (Level 5 radius ~ 7^5 is huge).
-    # We will just fill a radius of ~80 hexes?
-    #
-    # No, user wants the tree logic.
-    # We will use the [0,0] + 6 Neighbors recursion, applying the Matrix M rotation each step.
-    # M = [[2, 1], [-1, 3]] (Det=7).
-    
-    M = [[2, 1], [-1, 3]] # This is a valid base-7 transform
-    
-    # Transform previous offsets by M
-    rotated_offsets = []
-    for (q, r) in prev_offsets:
-        nq = 2*q + 1*r
-        nr = -1*q + 3*r
-        rotated_offsets.append((nq, nr))
-        
-    # Now duplicate this cloud 7 times? No.
-    # The Gosper iteration is: Take the unit, replace with 7 units.
-    # 
-    # Let's stick to the simplest "Cluster" logic which works for averaging:
-    # We want 7 "groups".
-    # Group 0 is centered at (0,0).
-    # Group 1 is centered at (Offset1).
-    # ...
-    #
-    # The offset for Group K at Level L is determined by applying M^(L-1) to the unit neighbor vectors.
-    
-    # Unit neighbor vectors
-    neighbors = [
-        (0,0), (1,0), (1,-1), (0,-1), (-1,0), (-1,1), (0,1) 
-        # Note: ordering matters for rotation, but for a "Set of Points" it's ok.
-    ]
-    
-    # Calculate M^(level-1) basics
-    def apply_matrix_power(vec, power):
-        q, r = vec
-        for _ in range(power):
-             nq = 2*q + 1*r
-             nr = -1*q + 3*r
-             q, r = nq, nr
-        return q, r
+def get_sector_center(sx, sy):
+    min_x, min_y, max_x, max_y = sector_id_to_bounds_meters(sx, sy)
+    return (min_x + max_x) * 0.5, (min_y + max_y) * 0.5
 
-    final_list = []
-    
-    # For each of the 7 "macro positions"
-    for i in range(7):
-        base_shift = neighbors[i]
-        # Scale this shift by the Level
-        # Actually, the shift is just the neighbor vector transformed by M^(level-1)?
-        # No, simpler:
-        # Offsets(Level) = Offsets(Level-1) + (Shift_i * M^(Level-1) ??)
-        
-        # Let's trust the "Replace with 7" logic.
-        # If we have a list of points for Level L-1.
-        # We assume those are centered at 0.
-        # We explicitly shift 7 copies of that cloud.
-        # The shift magnitude is determined by the "stride" of Level L-1.
-        
-        # Approximate Stride for Level L-1 is sqrt(7)^(L-1).
-        # We use the matrix power to get the exact integer vector.
-        
-        shift_q, shift_r = apply_matrix_power(base_shift, level - 1)
+def get_hexes_in_bbox(min_x, max_x, min_y, max_y, padding_m=0.0):
+    min_x -= padding_m
+    max_x += padding_m
+    min_y -= padding_m
+    max_y += padding_m
+    corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)]
+    qs, rs = [], []
+    for cx, cy in corners:
+        fq, fr = world_meters_to_axial_approx(cx, cy)
+        qs.append(fq); rs.append(fr)
+    for q in range(int(min(qs)) - 2, int(max(qs)) + 2):
+        for r in range(int(min(rs)) - 2, int(max(rs)) + 2):
+            wx, wy = axial_to_world_meters(q, r)
+            if min_x <= wx <= max_x and min_y <= wy <= max_y: yield (q, r)
 
-        if debug and level == 5:
-            print(f"Level {level}, neighbor {i}: base{base_shift} -> shift({shift_q},{shift_r})")
+def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor):
+    eff_h = UNIT_HEX_WIDTH_METERS * scale_factor
+    A = (math.sqrt(3)/2 * eff_h)
+    def to_prime(x, y):
+         q = x / A
+         r = (y - (q * 0.5 * eff_h)) / eff_h
+         return q, r
+    corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)]
+    qs, rs = [], []
+    for cx, cy in corners:
+        q, r = to_prime(cx, cy)
+        qs.append(q); rs.append(r)
+    found = []
+    for q in range(int(min(qs)) - 2, int(max(qs)) + 2):
+        for r in range(int(min(rs)) - 2, int(max(rs)) + 2):
+            wx = q * dx_dq_scaled(scale_factor)
+            wy = r * dy_dr_scaled(scale_factor) + q * dy_dq_scaled(scale_factor)
+            if min_x <= wx <= max_x and min_y <= wy <= max_y:
+                found.append((q, r, wx, wy))
+    return found
 
-        for (pq, pr) in prev_offsets:
-            final_list.append((pq + shift_q, pr + shift_r))
-
-    if debug and level == 5:
-        print("=== PYTHON GOSPER OFFSET DEBUG ===")
-        print(f"First 7 offsets: {final_list[:7]}")
-        print(f"Offsets 2401-2407: {final_list[2401:2408]}")
-        print(f"Last 7 offsets: {final_list[-7:]}")
-        print(f"Total offsets: {len(final_list)}")
-
-    return final_list
-
-def compute_gosper_neighbors(level):
-    """
-    Returns a lookup table (Dict or Array) mapping:
-    Index -> [N_idx, NE_idx, SE_idx, S_idx, SW_idx, NW_idx]
-    
-    For a Gosper curve of a given level.
-    If a neighbor is outside the set (border), returns -1.
-    """
-    offsets = generate_gosper_offsets(level)
-    
-    # Build Map: (q, r) -> Index
-    coord_to_idx = { (q,r): i for i, (q,r) in enumerate(offsets) }
-    
-    neighbor_dirs = [
-        (0, -1),   # N
-        (1, -1),   # NE
-        (1, 0),    # SE
-        (0, 1),    # S
-        (-1, 1),   # SW
-        (-1, 0)    # NW
-    ]
-    
-    neighbor_table = []
-    
-    for (q, r) in offsets:
-        row = []
-        for (dq, dr) in neighbor_dirs:
-            nq, nr = q + dq, r + dr
-            if (nq, nr) in coord_to_idx:
-                row.append(coord_to_idx[(nq, nr)])
-            else:
-                row.append(-1) # Border
-        neighbor_table.append(row)
-        
-    return np.array(neighbor_table, dtype=np.int32)
+def dx_dq_scaled(s): return (math.sqrt(3)/2) * (UNIT_HEX_WIDTH_METERS * s)
+def dy_dq_scaled(s): return 0.5 * (UNIT_HEX_WIDTH_METERS * s)
+def dy_dr_scaled(s): return UNIT_HEX_WIDTH_METERS * s

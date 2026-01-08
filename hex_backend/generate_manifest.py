@@ -18,7 +18,7 @@ def generate_manifest():
     files = os.listdir(BINARY_DIR)
     sectors = []
     
-    # Pattern: sector_Q_R.bin ("sector_277_-234.bin")
+    # Pattern: sector_SX_SY.bin
     pattern = re.compile(r'sector_(-?\d+)_(-?\d+)\.bin')
     
     min_x = float('inf')
@@ -29,17 +29,18 @@ def generate_manifest():
     for f in files:
         match = pattern.match(f)
         if match:
-            # Parse Q, R
-            Q = int(match.group(1))
-            R = int(match.group(2))
+            # Parse SX, SY
+            SX = int(match.group(1))
+            SY = int(match.group(2))
             
-            # Convert to World Center (for Frontend positioning)
-            cx, cy = coord_util.sector_to_world_meters(Q, R)
+            # Convert to World Center
+            cx, cy = coord_util.get_sector_center(SX, SY)
             
             # Append to list
+            # We map sx->q, sy->r for compatibility with frontend structure
             sectors.append({
-                'q': Q,
-                'r': R,
+                'q': SX,
+                'r': SY,
                 'x': cx,
                 'y': cy
             })
@@ -50,24 +51,31 @@ def generate_manifest():
             if cy > max_y: max_y = cy
             
     # Calculate approx bounds size for camera
-    margin = 1000.0
+    margin = 2000.0
+    
+    # Handle empty case
+    if min_x == float('inf'):
+        min_x = 0
+        max_x = 0
+        min_y = 0
+        max_y = 0
             
     manifest = {
         'tiles': sectors, 
-        'type': 'sector_hex',
+        'type': 'sector_rect',
         'bounds': {
             'min_x': min_x - margin,
             'max_x': max_x + margin,
             'min_y': min_y - margin,
             'max_y': max_y + margin
         },
-        'sector_radius_m': coord_util.SECTOR_WIDTH_METERS / 2.0
+        'sector_size_m': coord_util.SECTOR_SIZE_METERS
     }
     
     with open(OUTPUT_FILE, 'w') as f:
         json.dump(manifest, f, indent=4)
         
-    print(f"✅ Generated manifest for {len(sectors)} sectors.")
+    print(f"✅ Generated manifest for {len(sectors)} rectangular sectors.")
     print(f"   Bounds: X[{min_x:.0f}, {max_x:.0f}], Y[{min_y:.0f}, {max_y:.0f}]")
     print(f"   Saved to: {OUTPUT_FILE}")
 
