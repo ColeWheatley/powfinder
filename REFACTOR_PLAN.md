@@ -34,9 +34,33 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
     *   **The Reveal**: Use the `uHeightFactor` to "shatter" the flat map into individual pistons that rise to their real elevations.
 *   **Overshoot Texturing (WebP Optimization)**: 
     *   **Justification**: WebP uses 16x16 macroblocks. High-contrast edges (Satellite vs. Black padding) cause artifacts if they fall mid-block.
-    *   **Implementation**: Crop satellite textures with a **32px overshoot** past the hex boundary. The 3D hex mesh acts as a clean "cookie cutter," hiding the compression-muddled edge while gaining the file-size benefits of the black padding.
-    *   **Compression Note**: We utilize an aggressive **10% quality** WebP setting to keep mobile loads fast. Interestingly, tests show that **Original Resolution TIFs are actually smaller** than 90% quality WebPs, though WebP remains the target for browser compatibility.
-*   **Instancing**: Use `InstancedMesh` with an "Ideal Hex" and `aNeighborSlot` attribute.
+    *  
+### 4. Implementation: "Safety Skirts" & Gradients (PENDING)
+**Objective**: Visualizing terrain danger (slope) on hex sides ("skirts") while maintaining aesthetic quality.
+
+**The "Skier's Slope" Algorithm (Waffle Iron)**:
+- **Max-Descent Probe**: For each hex, sample all underlying 5m DEM pixels within its radius.
+- **Calculation**: Compute gradient vector $(dz/dx, dz/dy)$ for every pixel.
+    - Slope $\theta = \arctan(\sqrt{(dz/dx)^2 + (dz/dy)^2})$.
+- **Aggregation**: Take the **90th Percentile** of valid pixel slopes to represent hex danger (avoids noise, captures chutes).
+- **Binary Packing**: Store this `Slope` value (0-90) as a single byte (or part of the existing struct) in the binary format.
+- **LOD Strategy**: Bake Slope for **L0 (Unit)** and **L1** only. Ignore for L2/L3 (Texture only).
+
+**Frontend Visualization**:
+- **Palette (Skier Safety)**:
+    - **Green**: 30° - 35°
+    - **Yellow**: 35° - 40°
+    - **Orange**: 40° - 45°
+    - **Red**: 45° - 55°
+    - **Violet**: > 55° (Unskiable)
+- **Skirt Geometry**:
+    - Current: Vertices dropped to Y=0.
+    - New Plan: Smart Skirts dropped to neighbor height (or simplified floor for now).
+- **Gradient Logic**:
+    - Experiment with interpolating slope colors between neighbors on the skirt faces.
+    - Or fading from Safety Color (Top) to Terrain/Dark (Bottom).
+- **UI**: Add toggle to switch between "Terrain Mode" (Pure Texture) and "Safety Mode" (Slope Colors).
+- **Debug**: Set background to **Hot Pink** to identify leaks/holes.
 *   **Ideal Hex**: Optimized indexed geometry (~19 vertices vs ~36).
     *   **Flat Tops**: Strictly horizontal tops (Normal: 0,1,0). No tilting or cross-product calculations on geometry.
     *   **Baked Normals**: Use a single integer `FaceID (0-5)` attribute per vertex. Shader looks up cardinal normals from a constant table instead of storing 3 floats per vertex.

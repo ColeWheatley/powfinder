@@ -223,11 +223,13 @@ class PistonViewer {
             offset += 4;
             const layer = [];
             for (let i = 0; i < count; i++) {
+                // New Format: dq(2), dr(2), hn(2), slope(1) = 7 bytes
                 const dq = view.getInt16(offset, true);
                 const dr = view.getInt16(offset + 2, true);
                 const hn = view.getUint16(offset + 4, true);
-                offset += 6;
-                layer.push({ dq, dr, h: minZ + (hn / scale) });
+                const slope = view.getUint8(offset + 6); // 0-255 degrees (approx)
+                offset += 7;
+                layer.push({ dq, dr, h: minZ + (hn / scale), s: slope });
             }
             layers.push(layer);
         }
@@ -256,8 +258,11 @@ class PistonViewer {
 
         const mesh = new THREE.InstancedMesh(geometry, material, num);
         const matrix = new THREE.Matrix4();
-        const nz1 = new Float32Array(num * 4);
-        const nz2 = new Float32Array(num * 4);
+
+        // Buffers
+        const nz1 = new Float32Array(num * 4); // h, h, h, h
+        const nz2 = new Float32Array(num * 4); // h, h, h, 0
+        const slopes = new Float32Array(num);  // Single float per instance
 
         const h = UNIT_HEX_WIDTH_METERS;
         const dx_dq = (Math.sqrt(3) / 2) * (h * scale);
@@ -273,16 +278,19 @@ class PistonViewer {
             matrix.makeTranslation(lx, 0, -ly);
             mesh.setMatrixAt(i, matrix);
 
-            nz1[i * 4] = d.h; nz1[i * 4 + 1] = d.h; nz1[i * 4 + 2] = d.h; nz1[i * 4 + 3] = d.h;
-            nz2[i * 4] = d.h; nz2[i * 4 + 1] = d.h; nz2[i * 4 + 2] = d.h; nz2[i * 4 + 3] = 0.0;
+            const hh = d.h;
+            nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
+            nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
+
+            // Slope is degree 0-255. Normalize if needed or pass raw.
+            // Shader expects degrees? Let's verify palette.
+            slopes[i] = d.s;
         }
         mesh.instanceMatrix.needsUpdate = true;
+
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-
-        mesh.geometry.setAttribute('instanceSlope_1', new THREE.InstancedBufferAttribute(new Float32Array(num * 4), 4));
-        mesh.geometry.setAttribute('instanceSlope_2', new THREE.InstancedBufferAttribute(new Float32Array(num * 4), 4));
-        mesh.geometry.setAttribute('instanceBorder', new THREE.InstancedBufferAttribute(new Float32Array(num), 1));
+        mesh.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
 
         mesh.frustumCulled = true;
         return mesh;
@@ -308,21 +316,40 @@ class PistonViewer {
                 uniform float uFloorOffset;
                 attribute vec4 instanceNZ_1;
                 attribute vec4 instanceNZ_2;
+                attribute float instanceSlope;
                 varying vec3 vLocalPos;
-                varying float vGrad;
+                varying float vSlope;
+                varying float vIsSide;
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
-                if (position.y > 0.0) transformed.y = animH;
-                else transformed.y = 0.0;
+                
+                // If y > 0 (Top), apply height. If y=0 (Bottom), stay flat.
+                // But wait, skirt vertices are at Y=0 relative to instance.
+                // We want Skirts to drop.
+                // Simple version: Top vertices move up to animH. Bottom vertices stay at 0 (or floor).
+                // Actually, let's keep it simple: Top = animH, Bottom = 0 relative to camera floor?
+                // The current code does: 
+                
+                if (position.y > 0.0) {
+                    transformed.y = animH;
+                    vIsSide = 0.0;
+                } else {
+                    transformed.y = 0.0; // Anchored to base
+                    vIsSide = 1.0;
+                }
 
                 #ifdef USE_INSTANCING
                     vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
                 #else
                     vLocalPos = transformed;
                 #endif
-                vGrad = (position.y > 0.5) ? 1.0 : 0.0;
+                
+                // Robust Top Detection: Top face has normal (0,1,0). Sides have normal.y = 0.
+                // We use a safe threshold > 0.9 to catch the top.
+                vIsSide = (normal.y > 0.9) ? 0.0 : 1.0;
+                vSlope = instanceSlope;
             `);
 
             shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
@@ -331,13 +358,45 @@ class PistonViewer {
                 uniform float uUvScale;
                 uniform float uUvOffset;
                 varying vec3 vLocalPos;
+                varying float vSlope;
+                varying float vIsSide;
+                
+                vec3 safetyColor(float s) {
+                    // Green: 30-35
+                    // Yellow: 35-40
+                    // Orange: 40-45
+                    // Red: 45-55
+                    // Violet: > 55
+                    
+                    if (s < 30.0) return vec3(0.0); // Transparent/Texture?
+                    if (s < 35.0) return vec3(0.2, 0.8, 0.2); // Green
+                    if (s < 40.0) return vec3(0.9, 0.9, 0.2); // Yellow
+                    if (s < 45.0) return vec3(1.0, 0.6, 0.0); // Orange
+                    if (s < 55.0) return vec3(0.9, 0.2, 0.2); // Red
+                    return vec3(0.6, 0.2, 0.8); // Violet
+                }
             `).replace('#include <map_fragment>', `
                 float u = (vLocalPos.x / uTileSize) + 0.5;
                 float v = (-vLocalPos.z / uTileSize) + 0.5;
                 
                 u = clamp(u * uUvScale + uUvOffset, 0.0, 1.0);
                 v = clamp(v * uUvScale + uUvOffset, 0.0, 1.0);
-                diffuseColor = texture2D(map, vec2(u, v));
+                vec4 texColor = texture2D(map, vec2(u, v));
+                
+                // Mix in Safety Colors if it's a side (skirt)
+                if (vIsSide > 0.5) {
+                    if (vSlope >= 30.0) {
+                        diffuseColor = vec4(safetyColor(vSlope), 1.0);
+                    } else {
+                        // Terrain Gradient for low slopes?
+                        // Just darken the texture for now to show depth
+                        diffuseColor = texColor * 0.5; 
+                    }
+                    // Debug borders?
+                    // diffuseColor = mix(diffuseColor, vec4(0.0,0.0,0.0,1.0), 0.1); 
+                } else {
+                   diffuseColor = texColor;
+                }
             `);
         };
     }

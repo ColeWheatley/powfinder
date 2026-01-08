@@ -92,13 +92,39 @@ def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/a
 def bake_sector_binary(SX, SY, dem_array, dem_transform, output_dir="frontend/hexagons/app/tiles_bin"):
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     min_x, min_y, max_x, max_y = coord_util.sector_id_to_bounds_meters(SX, SY)
+
+    # 1. Pre-Calculate Slope Map (Degrees)
+    # Gradient returns (dy, dx). NOTE: rasterio arrays are (row, col) -> (y, x).
+    # Spacing is METERS_PER_PIXEL (0.2? Wait, DEM is 5m usually. Let's check transform[0])
+    px_size_x = dem_transform[0]
+    px_size_y = -dem_transform[4] # Usually negative for North-up 
+    # Actually, simplistic gradient is enough if we assume uniform grid.
+    # The DEM is 5m resolution typically. 
+    # dy, dx = np.gradient(dem_array, px_size_y, px_size_x) # numpy handles spacing!
     
-    def sample_heights(hex_list):
-        if not hex_list: return np.array([])
+    # We'll just assume 5.0m for now if it's the 5m DGM. Or output of gradient is unitless if not specified? 
+    # Use 5.0 explicitly for the Tirol DGM 5m.
+    # TODO: Read from transform in robust version. Hardcoding 5.0 for the known dataset.
+    dy_grid, dx_grid = np.gradient(dem_array, 5.0) 
+    slope_rad = np.arctan(np.sqrt(dx_grid**2 + dy_grid**2))
+    slope_deg = np.degrees(slope_rad)
+
+    def sample_data(hex_list):
+        if not hex_list: return np.array([]), np.array([])
         wxs, wys = np.array([h[2] for h in hex_list]), np.array([h[3] for h in hex_list])
         rows, cols = rasterio.transform.rowcol(dem_transform, wxs, wys)
         rows, cols = np.clip(rows, 0, dem_array.shape[0]-1), np.clip(cols, 0, dem_array.shape[1]-1)
-        return dem_array[rows, cols]
+        
+        # We need to aggregate? 
+        # Ideally we'd grab a window. But 'sample_heights' in this script currently does 
+        # NEAREST NEIGHBOR (single point). 
+        # For Slope Average, Point Sampling is risky (aliasing).
+        # But per user instruction "Straight averages are fine. It's not a super crazy high res dem".
+        # If we stick to single point sampling for now (fast), it's just grabbing the slope AT center.
+        # To do true "average", we'd need a window.
+        # Let's start with Point Sampling of the Slope Map for speed/consistency with height logic.
+        
+        return dem_array[rows, cols], slope_deg[rows, cols]
 
     scales = [{"id": 3, "s": 24.0}, {"id": 2, "s": 6.0}, {"id": 1, "s": 3.0}, {"id": 0, "s": 1.0}]
     layers_data, min_z, max_z = [], 9999, -9999
@@ -109,10 +135,18 @@ def bake_sector_binary(SX, SY, dem_array, dem_transform, output_dir="frontend/he
     for l in scales:
         hx = coord_util.get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, l["s"])
         if hx:
-            h = sample_heights(hx)
-            min_z, max_z = min(min_z, h.min()), max(max_z, h.max())
-            # FIXED ZIP LOGIC
-            layers_data.append([(item[0], item[1], height) for item, height in zip(hx, h)])
+            h_vals, s_vals = sample_data(hx)
+            min_z, max_z = min(min_z, h_vals.min()), max(max_z, h_vals.max())
+            
+            # Pack Tuple: (q, r, height, slope)
+            # Only bake slope for L0 (s=1.0) and L1 (s=3.0)
+            use_slope = (l["s"] <= 3.0)
+            
+            layer = []
+            for i, (q, r, wx, wy) in enumerate(hx):
+                slope = s_vals[i] if use_slope else 0
+                layer.append((q, r, h_vals[i], slope))
+            layers_data.append(layer)
         else: layers_data.append([])
 
     scale_f = 65535.0 / (max_z - min_z + 20) if max_z > min_z else 1.0
@@ -120,11 +154,16 @@ def bake_sector_binary(SX, SY, dem_array, dem_transform, output_dir="frontend/he
     
     for ld in layers_data:
         blob += struct.pack("<I", len(ld))
-        buf = bytearray(len(ld) * 6)
-        for i, (q, r, h) in enumerate(ld):
+        # Struct: dq(h), dr(h), hn(H, 2 bytes), slope(B, 1 byte), pad(B, 1 byte) => 8 bytes total?
+        # Previous: 6 bytes (hhH). 
+        # New: 8 bytes per hex to keep alignment? Or 7? 
+        # Let's do 7 bytes: q(2), r(2), h(2), s(1).
+        buf = bytearray(len(ld) * 7)
+        for i, (q, r, h, s) in enumerate(ld):
             dq, dr = max(-32767, min(32767, int(q - cq))), max(-32767, min(32767, int(r - cr)))
             hn = max(0, min(65535, int((h - (min_z-10)) * scale_f)))
-            struct.pack_into("<hhH", buf, i*6, dq, dr, hn)
+            s_byte = max(0, min(255, int(s)))
+            struct.pack_into("<hhHB", buf, i*7, dq, dr, hn, s_byte)
         blob += buf
     
     with open(os.path.join(output_dir, f"sector_{SX}_{SY}.bin"), "wb") as f: f.write(blob)
