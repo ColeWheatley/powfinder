@@ -39,13 +39,13 @@ const LIGHTING_DEFAULTS = {
 
 class PistonViewer {
     constructor() {
-        console.log("Initializing PistonViewer (HexRect V3)...");
+        console.log("Initializing PistonViewer (Priority Radial + LOD)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
-        this.camera.position.set(0, 5000, 0);
+        this.camera.position.set(0, 800, 0);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -65,9 +65,13 @@ class PistonViewer {
         dirLight.position.set(500, 2000, 500);
         this.scene.add(dirLight);
 
-        // DEBUG: Setting thresholds very high (20km+) to prevent any LOD-based culling or 
-        // downsampling while we diagnose why the pistons aren't raising.
-        this.lodThresholds = [20000, 20001, 20002, 20003];
+        // [Geo-Close, Geo-Mid, Geo-Far, Geo-Horizon]
+        // Corresponding to Binary Layers: 3 (Unit), 2 (Scale 3), 1 (Scale 6), 0 (Scale 24)
+        this.geoThresholds = [1500, 3000, 6000, 12000];
+
+        // Texture High-Res Load Distance
+        this.texThreshold = 2000;
+
         window.addEventListener('resize', this.onResize.bind(this));
 
         // Shared Geometry
@@ -76,11 +80,12 @@ class PistonViewer {
         this.flatGeometry = new THREE.PlaneGeometry(TILE_WIDTH_WORLD, TILE_HEIGHT_WORLD);
         this.flatGeometry.rotateX(-Math.PI / 2);
 
-        this.tiles = [];
+        this.tiles = new Map(); // Key: "q_r" -> Tile Object
         this.manifest = null;
         this.loadingTiles = new Set();
-        this.essentialTilesLoaded = 0;
-        this.essentialTilesTarget = 0;
+        this.loadQueue = [];
+        this.isProcessingQueue = false;
+
         this.loaderHidden = false;
         this.materialsToUpdate = [];
         this.heightFactor = 0.0;
@@ -96,11 +101,9 @@ class PistonViewer {
         // Debug/Stats
         this.fpsState = { lastSample: performance.now(), frames: 0 };
         this.fpsEl = document.getElementById('fps-counter');
-        this.tilesLoadedCount = 0;
         this.hexCountEl = document.getElementById('hex-count');
         this.tileHeightEl = document.getElementById('tile-height');
         this.cameraHeightEl = document.getElementById('camera-height');
-        this.lastFrameTime = performance.now();
         this.statsUpdateState = { lastUpdate: 0, interval: 500 };
 
         this.initDebugConsole();
@@ -137,10 +140,33 @@ class PistonViewer {
     }
 
     initLODSliders() {
+        // Geo LODs
         ['geo-lod0', 'geo-lod1', 'geo-lod2', 'geo-lod3'].forEach((id, i) => {
             const s = document.getElementById(`${id}-slider`);
-            if (s) s.addEventListener('change', () => this.lodThresholds[i] = parseInt(s.value));
+            const v = document.getElementById(`${id}-val`);
+            if (s) {
+                // Initialize UI
+                s.value = this.geoThresholds[i];
+                if (v) v.textContent = s.value + "m";
+
+                s.addEventListener('input', () => {
+                    this.geoThresholds[i] = parseInt(s.value);
+                    if (v) v.textContent = s.value + "m";
+                });
+            }
         });
+
+        // Tex LOD
+        const tSlider = document.getElementById('tex-lod0-slider');
+        const tVal = document.getElementById('tex-lod0-val');
+        if (tSlider) {
+            tSlider.value = this.texThreshold;
+            if (tVal) tVal.textContent = tSlider.value + "m";
+            tSlider.addEventListener('input', () => {
+                this.texThreshold = parseInt(tSlider.value);
+                if (tVal) tVal.textContent = tSlider.value + "m";
+            });
+        }
     }
 
     createHexGeometry(radius) {
@@ -175,7 +201,7 @@ class PistonViewer {
 
             const centerX = (min_x + max_x) / 2 - min_x;
             const centerZ = -((min_y + max_y) / 2 - min_y);
-            this.camera.position.set(centerX, 2000, centerZ);
+            this.camera.position.set(centerX, 800, centerZ);
             this.controls.target.set(centerX, 0, centerZ);
             this.controls.update();
 
@@ -184,75 +210,14 @@ class PistonViewer {
         } catch (e) { this.log("Manifest error: " + e.message, "error"); }
     }
 
-    async loadSingleTile(tileDef) {
-        const { x, y, q, r } = tileDef;
-        const tileKey = `${q}_${r}`;
-        if (this.loadingTiles.has(tileKey)) return;
-        this.loadingTiles.add(tileKey);
-
-        const localX = x - this.worldOrigin.x;
-        const localZ = -(y - this.worldOrigin.y);
-
-        try {
-            const cb = Date.now();
-            const fullTexUrl = `aerial_tiles/full/sector_${q}_${r}.webp?v=${cb}`;
-            const binUrl = `tiles_bin/sector_${q}_${r}.bin?v=${cb}`;
-
-            const texLoader = new THREE.TextureLoader();
-            const texture = await texLoader.loadAsync(fullTexUrl);
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.flipY = true; // FIXED: Use natural GL orientation
-
-            const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-            this.setupMaterialShader(material);
-            this.materialsToUpdate.push(material);
-
-            const buffer = await (await fetch(binUrl)).arrayBuffer();
-            const parsed = this.parseBinaryV3(buffer);
-
-            const flatMesh = new THREE.Mesh(this.flatGeometry, material);
-            flatMesh.position.set(localX, 0, localZ);
-            this.scene.add(flatMesh);
-
-            const mesh = this.createInstancedMeshV3(parsed.hexes, material);
-            mesh.position.set(localX, 0, localZ);
-            this.scene.add(mesh);
-
-            const half = TILE_WIDTH_WORLD / 2;
-            const bounds = new THREE.Box3(
-                new THREE.Vector3(localX - half, TILE_BOUNDS_MIN_Y, localZ - half),
-                new THREE.Vector3(localX + half, TILE_BOUNDS_MAX_Y, localZ + half)
-            );
-
-            const tileObj = {
-                q, r, x, y, mesh, flatMesh, material, bounds,
-                stats: parsed.stats, center: { x: localX, z: localZ }
-            };
-            this.tiles.push(tileObj);
-            this.updateGlobalStats(parsed.stats);
-            this.tilesLoadedCount++;
-            this.hideLoader();
-        } catch (e) {
-            console.error(e);
-            this.log(`Error loading tile ${q},${r}`, "error");
-        } finally {
-            this.loadingTiles.delete(tileKey);
-        }
-    }
-
-    hideLoader() {
-        if (this.loaderHidden) return;
-        const loader = document.getElementById('loader');
-        if (loader) { loader.style.display = 'none'; this.loaderHidden = true; }
-    }
-
     parseBinaryV3(buffer) {
         const view = new DataView(buffer);
         const minZ = view.getFloat32(12, true);
         const maxZ = view.getFloat32(16, true);
         const scale = view.getFloat32(20, true);
         let offset = 32;
-        const layers = [];
+        const layers = []; // [L3(Coarse), L2, L1, L0(Fine)]
+
         for (let l = 0; l < 4; l++) {
             const count = view.getUint32(offset, true);
             offset += 4;
@@ -266,26 +231,45 @@ class PistonViewer {
             }
             layers.push(layer);
         }
-        return { hexes: layers[3], stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ } };
+        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ } };
     }
 
-    createInstancedMeshV3(hexes, material) {
+    createInstancedMeshV3(allLayers, lodIndex, material) {
+        // lodIndex: 0=Fine(1x), 1=3x, 2=6x, 3=24x.
+        // allLayers: [24x, 6x, 3x, 1x] (from backend)
+
+        // Map LOD to Layer Index
+        // LOD 0 (Fine) -> Layer 3 (Scale 1)
+        // LOD 1        -> Layer 2 (Scale 3)
+        // LOD 2        -> Layer 1 (Scale 6)
+        // LOD 3 (Far)  -> Layer 0 (Scale 24)
+        const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
+        const hexes = allLayers[layerIdx];
+
+        const scaleTable = [24.0, 6.0, 3.0, 1.0];
+        const scale = scaleTable[layerIdx];
         const num = hexes.length;
+
+        // Clone geometry and SCALE it
         const geometry = this.hexGeometry.clone();
+        geometry.scale(scale, 1, scale);
+
         const mesh = new THREE.InstancedMesh(geometry, material, num);
         const matrix = new THREE.Matrix4();
         const nz1 = new Float32Array(num * 4);
         const nz2 = new Float32Array(num * 4);
 
         const h = UNIT_HEX_WIDTH_METERS;
-        const dx_dq = (Math.sqrt(3) / 2) * h;
-        const dy_dq = 0.5 * h;
-        const dy_dr = h;
+        const dx_dq = (Math.sqrt(3) / 2) * (h * scale);
+        const dy_dq = 0.5 * (h * scale);
+        const dy_dr = (h * scale);
 
         for (let i = 0; i < num; i++) {
             const d = hexes[i];
             const lx = d.dq * dx_dq;
             const ly = d.dr * dy_dr + d.dq * dy_dq;
+
+            // Backend Y is North. Frontend -Z is North.
             matrix.makeTranslation(lx, 0, -ly);
             mesh.setMatrixAt(i, matrix);
 
@@ -295,10 +279,12 @@ class PistonViewer {
         mesh.instanceMatrix.needsUpdate = true;
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-        // Dummies
+
         mesh.geometry.setAttribute('instanceSlope_1', new THREE.InstancedBufferAttribute(new Float32Array(num * 4), 4));
         mesh.geometry.setAttribute('instanceSlope_2', new THREE.InstancedBufferAttribute(new Float32Array(num * 4), 4));
         mesh.geometry.setAttribute('instanceBorder', new THREE.InstancedBufferAttribute(new Float32Array(num), 1));
+
+        mesh.frustumCulled = true;
         return mesh;
     }
 
@@ -369,31 +355,234 @@ class PistonViewer {
         if (now - this.statsUpdateState.lastUpdate < 500) return;
         this.statsUpdateState.lastUpdate = now;
         let count = 0;
-        for (const t of this.tiles) if (t.mesh && t.mesh.visible) count += t.mesh.count;
+        for (const t of this.tiles.values()) if (t.mesh && t.mesh.visible) count += t.mesh.count;
         const countEl = document.getElementById('hex-count');
         if (countEl) countEl.textContent = count.toLocaleString() + " VISIBLE";
     }
 
+    // --- CORE LOOP ---
+
     updateLOD() {
         if (!this.manifest) return;
+
         const target = this.controls.target;
-        const distSq = this.renderSettings.renderDistance ** 2;
-        for (const t of this.manifest.tiles) {
+        const distSqLimit = this.renderSettings.renderDistance ** 2;
+
+        // 1. Sort Manifest by Distance to Camera
+        const sortedManifest = this.manifest.tiles.map(t => {
             const lx = t.x - this.worldOrigin.x;
             const lz = -(t.y - this.worldOrigin.y);
-            const d = (target.x - lx) ** 2 + (target.z - lz) ** 2;
-            if (d < distSq) {
-                if (!this.tiles.some(tile => tile.q === t.q && tile.r === t.r)) {
-                    this.loadSingleTile(t);
+            const dx = target.x - lx;
+            const dz = target.z - lz;
+            return { ...t, d2: dx * dx + dz * dz, lx, lz };
+        }).sort((a, b) => a.d2 - b.d2);
+
+        // 2. Identify Tasks
+        for (const t of sortedManifest) {
+            const key = `${t.q}_${t.r}`;
+            const tile = this.tiles.get(key);
+            const dist = Math.sqrt(t.d2);
+
+            if (t.d2 > distSqLimit) {
+                if (tile) this.unloadTile(key); // Out of range
+                continue;
+            }
+
+            // Determine Desired Geometry LOD
+            // 0=High(Close), 1=Mid, 2=Low, 3=Lowest(Far)
+            let desiredGeoLOD = 3;
+            if (dist < this.geoThresholds[0]) desiredGeoLOD = 0;
+            else if (dist < this.geoThresholds[1]) desiredGeoLOD = 1;
+            else if (dist < this.geoThresholds[2]) desiredGeoLOD = 2;
+
+            // Determine Desired Texture LOD
+            const desiredTexFull = (dist < this.texThreshold);
+
+            if (!tile) {
+                // Not loaded? Queue it.
+                if (!this.loadQueue.find(q => q.key === key)) {
+                    this.loadQueue.push({ key, t, desiredGeoLOD, desiredTexFull });
+                }
+            } else {
+                // Already loaded. Check updates.
+                // Geo Swap?
+                if (tile.currentGeoLOD !== desiredGeoLOD && !tile.isTransitioning) {
+                    this.swapGeometry(tile, desiredGeoLOD);
+                }
+                // Texture Upgrade?
+                if (desiredTexFull && !tile.isFullTex && !tile.loadingTex) {
+                    this.upgradeTexture(tile);
                 }
             }
         }
+
+        this.processQueue();
+        this.checkInitialLoad(sortedManifest);
+    }
+
+    checkInitialLoad(sorted) {
+        if (this.loaderHidden) return;
+        // Are the closest 4 tiles visual?
+        let operational = 0;
+        for (let i = 0; i < Math.min(4, sorted.length); i++) {
+            const t = sorted[i];
+            const tile = this.tiles.get(`${t.q}_${t.r}`);
+            if (tile && tile.mesh) operational++;
+        }
+        if (operational >= Math.min(4, sorted.length)) this.hideLoader();
+    }
+
+    processQueue() {
+        if (this.isProcessingQueue || this.loadQueue.length === 0) return;
+
+        // Ensure queue is limited and we pick sorted
+        // The queue might have mixed push orders if camera jumps. 
+        // Ideally we'd sort, but shifting is fast. The main loop fills it sorted.
+        if (this.loadQueue.length > 50) this.loadQueue = this.loadQueue.slice(0, 50);
+
+        const task = this.loadQueue.shift();
+        this.isProcessingQueue = true;
+
+        this.loadNewTile(task.t, task.desiredGeoLOD, task.desiredTexFull).then(() => {
+            this.isProcessingQueue = false;
+            if (this.loadQueue.length > 0) requestAnimationFrame(() => this.processQueue());
+        });
+    }
+
+    async loadNewTile(t, geoLOD, loadFullTexNow) {
+        const key = `${t.q}_${t.r}`;
+        if (this.tiles.has(key)) return;
+
+        try {
+            // 1. Initial Texture (Low Res for speed)
+            const lowTexUrl = `aerial_tiles/low/sector_${t.q}_${t.r}.webp`;
+            const texLoader = new THREE.TextureLoader();
+            const texture = await texLoader.loadAsync(lowTexUrl);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.flipY = true;
+
+            const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+            this.setupMaterialShader(material);
+            this.materialsToUpdate.push(material);
+
+            // 2. Binary Data
+            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin`;
+            const buffer = await (await fetch(binUrl)).arrayBuffer();
+            const parsed = this.parseBinaryV3(buffer);
+
+            // 3. Create Geometry
+            const flatMesh = new THREE.Mesh(this.flatGeometry, material);
+            flatMesh.position.set(t.lx, 0, t.lz);
+            this.scene.add(flatMesh);
+
+            const mesh = this.createInstancedMeshV3(parsed.layers, geoLOD, material);
+            mesh.position.set(t.lx, 0, t.lz);
+            this.scene.add(mesh);
+
+            const half = TILE_WIDTH_WORLD / 2;
+            const bounds = new THREE.Box3(
+                new THREE.Vector3(t.lx - half, TILE_BOUNDS_MIN_Y, t.lz - half),
+                new THREE.Vector3(t.lx + half, TILE_BOUNDS_MAX_Y, t.lz + half)
+            );
+
+            const tileObj = {
+                q: t.q, r: t.r, lx: t.lx, lz: t.lz,
+                mesh, flatMesh, material, bounds,
+                hexDataLayers: parsed.layers,
+                stats: parsed.stats,
+                currentGeoLOD: geoLOD,
+                isFullTex: false,
+                loadingTex: false,
+                isTransitioning: false
+            };
+            this.tiles.set(key, tileObj);
+            this.updateGlobalStats(parsed.stats);
+
+            // 5. Upgrade Texture Immediately if close?
+            if (loadFullTexNow) this.upgradeTexture(tileObj);
+
+        } catch (e) { console.error("Tile Load Error", key, e); }
+    }
+
+    async upgradeTexture(tile) {
+        tile.loadingTex = true;
+        const url = `aerial_tiles/full/sector_${tile.q}_${tile.r}.webp`;
+        try {
+            const texLoader = new THREE.TextureLoader();
+            const fullTex = await texLoader.loadAsync(url);
+            fullTex.colorSpace = THREE.SRGBColorSpace;
+            fullTex.flipY = true;
+
+            tile.material.map = fullTex;
+            tile.material.needsUpdate = true;
+            tile.isFullTex = true;
+        } catch (e) { }
+        tile.loadingTex = false;
+    }
+
+    swapGeometry(tile, newLOD) {
+        tile.isTransitioning = true;
+        if (tile.mesh) {
+            this.scene.remove(tile.mesh);
+            tile.mesh.geometry.dispose();
+        }
+
+        const mesh = this.createInstancedMeshV3(tile.hexDataLayers, newLOD, tile.material);
+        mesh.position.set(tile.lx, 0, tile.lz);
+
+        // Ensure visibility state matches current animation frame
+        const angle = this.controls.getPolarAngle() * 180 / Math.PI;
+        mesh.visible = (angle >= 5.5);
+
+        this.scene.add(mesh);
+        tile.mesh = mesh;
+        tile.currentGeoLOD = newLOD;
+        tile.isTransitioning = false;
+    }
+
+    unloadTile(key) {
+        const tile = this.tiles.get(key);
+        if (!tile) return;
+
+        this.scene.remove(tile.mesh);
+        this.scene.remove(tile.flatMesh);
+        tile.mesh.geometry.dispose();
+        tile.flatMesh.geometry.dispose();
+        tile.material.map.dispose();
+        tile.material.dispose();
+
+        this.tiles.delete(key);
+    }
+
+    hideLoader() {
+        if (this.loaderHidden) return;
+        const loader = document.getElementById('loader');
+        if (loader) { loader.style.display = 'none'; this.loaderHidden = true; }
     }
 
     maintainCameraAltitudeDuringAnimation(h) {
         const target = this.controls.target;
-        const q_r = worldToSectorID(target.x + this.worldOrigin.x, this.worldOrigin.y - target.z);
-        const tile = this.tiles.find(t => t.q === q_r.Q && t.r === q_r.R);
+        const wx = target.x + this.worldOrigin.x;
+        const wy = this.worldOrigin.y - target.z;
+
+        const q_r = worldToSectorID(wx, wy);
+        const key = `${q_r.Q}_${q_r.R}`;
+        const tile = this.tiles.get(key);
+
+        // Update Readouts
+        const secEl = document.getElementById('sector-val');
+        if (secEl) secEl.textContent = `${q_r.Q}, ${q_r.R}`;
+
+        const worldEl = document.getElementById('world-val');
+        if (worldEl) worldEl.textContent = `${wx.toFixed(0)}, ${wy.toFixed(0)}`;
+
+        // Approximate Hex (Axial)
+        const h_size = UNIT_HEX_WIDTH_METERS;
+        const aq = wx / (Math.sqrt(3) / 2 * h_size);
+        const ar = (wy - (aq * 0.5 * h_size)) / h_size;
+        const hexEl = document.getElementById('hex-val');
+        if (hexEl) hexEl.textContent = `${Math.round(aq)}, ${Math.round(ar)}`;
+
         if (tile && tile.stats) {
             const animatedH = (tile.stats.max - this.floorState.value) * h;
             const minCamY = animatedH + 50.0;
@@ -418,9 +607,9 @@ class PistonViewer {
 
     pickFloorValue() {
         const inView = this.getTilesInView();
-        const tiles = inView.length ? inView : this.tiles;
+        const validTiles = inView.length ? inView : Array.from(this.tiles.values());
         let min = Infinity;
-        for (const t of tiles) if (t.stats && t.stats.min < min) min = t.stats.min;
+        for (const t of validTiles) if (t.stats && t.stats.min < min) min = t.stats.min;
         return Number.isFinite(min) ? min : 0;
     }
 
@@ -428,7 +617,7 @@ class PistonViewer {
         this.camera.updateMatrixWorld();
         this.projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
         this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
-        return this.tiles.filter(t => this.frustum.intersectsBox(t.bounds));
+        return Array.from(this.tiles.values()).filter(t => this.frustum.intersectsBox(t.bounds));
     }
 
     updateFloorUniforms() {
@@ -451,7 +640,7 @@ class PistonViewer {
         this.updateFloorState(h);
         this.maintainCameraAltitudeDuringAnimation(h);
 
-        for (const t of this.tiles) {
+        for (const t of this.tiles.values()) {
             if (t.flatMesh) t.flatMesh.visible = flat;
             if (t.mesh) t.mesh.visible = !flat;
         }

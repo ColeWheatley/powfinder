@@ -80,6 +80,18 @@
                         <span class="value" id="draw-stats">-- | G:-- | T:--</span>
                     </div>
                     <div class="hud-item">
+                        <span>SECTOR</span>
+                        <span class="value" id="sector-val">--</span>
+                    </div>
+                    <div class="hud-item">
+                        <span>HEX</span>
+                        <span class="value" id="hex-val">--</span>
+                    </div>
+                    <div class="hud-item">
+                        <span>WORLD XY</span>
+                        <span class="value" id="world-val">--</span>
+                    </div>
+                    <div class="hud-item">
                         <span>TILE HEIGHT</span>
                         <span class="value" id="tile-height">--m</span>
                     </div>
@@ -176,53 +188,52 @@
                         <input type="range" id="tex-lod1-slider" min="0" max="5000" step="100" value="1500"
                             style="width: 100%; pointer-events: auto;">
                     </div>
-                        <input type="range" id="tex-lod0-slider" min="0" max="2000" step="50" value="500"
-                            style="width: 100%; pointer-events: auto;">
+                    <input type="range" id="tex-lod0-slider" min="0" max="2000" step="50" value="500"
+                        style="width: 100%; pointer-events: auto;">
+                </div>
+                <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span>LOW RES (FALLBACK)</span>
+                        <span class="value" id="tex-lod1-val">∞</span>
                     </div>
-                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>LOW RES (FALLBACK)</span>
-                            <span class="value" id="tex-lod1-val">∞</span>
-                        </div>
-                        <!-- Disabled slider just for visual consistency or could be render distance? -->
-                        <div style="font-size: 10px; color: #666;">(Always Loaded)</div>
-                    </div>
-
-                    <div class="hud-item frametime-item">
-                        <canvas id="frametime-graph" width="640" height="80"></canvas>
-                    </div>
+                    <!-- Disabled slider just for visual consistency or could be render distance? -->
+                    <div style="font-size: 10px; color: #666;">(Always Loaded)</div>
                 </div>
 
-                <div class="info-panel">
-                    <div class="tech-header">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="3">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-                        </svg>
-                        Why Bestagons?
-                    </div>
-                    <div class="tech-description">
-                        Utilizing a single GPU Draw Call for the entire terrain.
-                        <span class="tech-spec">
-                            - 1DrawCall / 15k Hexes<br>
-                            - Zero DrawCall Overhead<br>
-                            - 14-Byte Manifold Stream<br>
-                            - Dynamic Piston Animation
-                        </span>
-                    </div>
+                <div class="hud-item frametime-item">
+                    <canvas id="frametime-graph" width="640" height="80"></canvas>
                 </div>
+            </div>
 
-                <div class="console-panel">
-                    <div class="console-header">
-                        <span>STATUS LOG</span>
-                        <button id="copy-log-btn" class="console-btn">COPY</button>
-                    </div>
-                    <div id="console-output" class="console-box">
-                        <div class="log-line">Waiting for system...</div>
-                    </div>
+            <div class="info-panel">
+                <div class="tech-header">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                    </svg>
+                    Why Bestagons?
+                </div>
+                <div class="tech-description">
+                    Utilizing a single GPU Draw Call for the entire terrain.
+                    <span class="tech-spec">
+                        - 1DrawCall / 15k Hexes<br>
+                        - Zero DrawCall Overhead<br>
+                        - 14-Byte Manifold Stream<br>
+                        - Dynamic Piston Animation
+                    </span>
+                </div>
+            </div>
+
+            <div class="console-panel">
+                <div class="console-header">
+                    <span>STATUS LOG</span>
+                    <button id="copy-log-btn" class="console-btn">COPY</button>
+                </div>
+                <div id="console-output" class="console-box">
+                    <div class="log-line">Waiting for system...</div>
                 </div>
             </div>
         </div>
+    </div>
     </div>
 
     <div class="legend glass-panel">
