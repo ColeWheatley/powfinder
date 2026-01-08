@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
-import { TIFFLoader } from 'three/addons/loaders/TIFFLoader.js';
 
 // --- HEX COORDINATE SYSTEM (from coordinate_utility.py) ---
 const UNIT_HEX_PX = 32.0;
@@ -753,14 +752,14 @@ class PistonViewer {
         const cb = Date.now();
         const binUrl = `tiles_bin/sector_${q}_${r}.bin?v=${cb}`;
 
-        // Use 'low_res' (approx 3.2m/px) for standard loading
-        const lowTexUrl = `aerial_tiles/low_res/sector_${q}_${r}.webp?v=${cb}`;
-        const medTexUrl = `aerial_tiles/med_res/sector_${q}_${r}.webp?v=${cb}`;
-        const highTexUrl = `aerial_tiles/high_res/sector_${q}_${r}.webp?v=${cb}`;
+        // Texture paths: full (0.2m), high (~0.8m), low (~3.2m)
+        const fullTexUrl = `aerial_tiles/full/sector_${q}_${r}.webp?v=${cb}`;
+        const highTexUrl = `aerial_tiles/high/sector_${q}_${r}.webp?v=${cb}`;
+        const lowTexUrl = `aerial_tiles/low/sector_${q}_${r}.webp?v=${cb}`;
 
-        // 1. Load Low Res Texture
+        // 1. Load Full Res Texture (0.2m) as default
         const texLoader = new THREE.TextureLoader();
-        const texture = await texLoader.loadAsync(lowTexUrl);
+        const texture = await texLoader.loadAsync(fullTexUrl);
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.flipY = false;
 
@@ -811,9 +810,11 @@ class PistonViewer {
             stats,
             center: { x: centerX, z: centerZ },
             bounds,
-            urls: { low: lowTexUrl, high: highTexUrl },
+            urls: { low: lowTexUrl, high: highTexUrl, full: fullTexUrl },
             highResLoaded: false,
-            highResLoading: false
+            highResLoading: false,
+            mediumResLoaded: false,
+            mediumResLoading: false
         };
         this.tiles.push(tileObj);
         this.updateGlobalStats(stats);
@@ -1402,7 +1403,7 @@ class PistonViewer {
             div.style.height = `${TILE_HEIGHT_WORLD}px`;
 
             // Texture
-            const lowTexUrl = `aerial_tiles/low_res/sector_${tileDef.q}_${tileDef.r}.webp`;
+            const lowTexUrl = `aerial_tiles/low/sector_${tileDef.q}_${tileDef.r}.webp`;
             div.style.backgroundImage = `url(${lowTexUrl})`;
 
             // Position: Map 3D (X,Z) to CSS (X,Y)
@@ -1466,7 +1467,6 @@ class PistonViewer {
         }
 
         const texLoader = new THREE.TextureLoader();
-        const tiffLoader = new TIFFLoader();
 
         // 2. Handle LOD for already loaded tiles
         for (const tile of this.tiles) {
@@ -1483,13 +1483,25 @@ class PistonViewer {
             if (distSq < CAM_HIGH_RES_DIST ** 2) {
                 if (!tile.highResLoaded && !tile.highResLoading) {
                     tile.highResLoading = true;
-                    tiffLoader.load(tile.urls.high, (tex) => {
+                    texLoader.load(tile.urls.full, (tex) => {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.flipY = false;
                         tile.material.map = tex;
                         tile.material.needsUpdate = true;
                         tile.highResLoaded = true;
                         tile.highResLoading = false;
+                    });
+                }
+            } else if (distSq < CAM_MED_RES_DIST ** 2) {
+                if (!tile.mediumResLoaded && !tile.mediumResLoading) {
+                    tile.mediumResLoading = true;
+                    texLoader.load(tile.urls.high, (tex) => {
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.flipY = false;
+                        tile.material.map = tex;
+                        tile.material.needsUpdate = true;
+                        tile.mediumResLoaded = true;
+                        tile.mediumResLoading = false;
                     });
                 }
             }

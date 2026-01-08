@@ -161,10 +161,21 @@
                     </div>
                     <!-- Texture Controls -->
                     <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 10px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>HIGH RES (COMPRESSED)</span>
+                        <div style="display: flex; justify-content: space-between; margin-bottom:5px;">
+                            <span>FULL RES (0.2m)</span>
                             <span class="value" id="tex-lod0-val">500m</span>
                         </div>
+                        <input type="range" id="tex-lod0-slider" min="0" max="2000" step="50" value="500"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
+                    <div class="hud-item" style="flex-direction: column; align-items: stretch; margin-top: 5px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom:5px;">
+                            <span>HIGH RES (~0.8m)</span>
+                            <span class="value" id="tex-lod1-val">∞</span>
+                        </div>
+                        <input type="range" id="tex-lod1-slider" min="0" max="5000" step="100" value="1500"
+                            style="width: 100%; pointer-events: auto;">
+                    </div>
                         <input type="range" id="tex-lod0-slider" min="0" max="2000" step="50" value="500"
                             style="width: 100%; pointer-events: auto;">
                     </div>

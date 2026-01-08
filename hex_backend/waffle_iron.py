@@ -85,9 +85,9 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     Bakes the WebP texture for a single sector and its LOD variants.
 
     Generates 3 files:
-    1. _compressed (0.2m) - Full Res
-    2. _high       (~0.8m) - 1/4 Scale
-    3. _low        (~3.2m) - 1/16 Scale
+    1. _full (0.2m) - Full Res
+    2. _high  (~0.8m) - 1/4 Scale
+    3. _low   (~3.2m) - 1/16 Scale
 
     All saved at Quality=10 (User Request).
     """
@@ -304,9 +304,9 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
 
     # Create Subfolders
     res_dirs = {
-        "compressed": os.path.join(output_dir, "compressed"),
-        "high_res": os.path.join(output_dir, "high_res"),
-        "low_res": os.path.join(output_dir, "low_res"),
+        "full": os.path.join(output_dir, "full"),
+        "high": os.path.join(output_dir, "high"),
+        "low": os.path.join(output_dir, "low"),
     }
     for d in res_dirs.values():
         if not os.path.exists(d):
@@ -315,25 +315,25 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     # 3. Export Variants
     outputs = []
 
-    # Variant 1: Full Res (Source 0.2m) -> "compressed/"
+    # Variant 1: Full Res (Source 0.2m) -> "full/"
     f_full = f"sector_{Q}_{R}.webp"
-    p_full = os.path.join(res_dirs["compressed"], f_full)
+    p_full = os.path.join(res_dirs["full"], f_full)
     canvas.save(p_full, "WEBP", quality=10)
-    outputs.append(("Compressed (0.2m)", p_full, total_w_px))
+    outputs.append(("Full (0.2m)", p_full, total_w_px))
 
-    # Variant 2: High Res (~0.8m) -> "high_res/"
+    # Variant 2: High Res (~0.8m) -> "high/"
     w_high = int(total_w_px / 4)
     h_high = int(total_h_px / 4)
     c_high = canvas.resize((w_high, h_high), Image.LANCZOS)
-    p_high = os.path.join(res_dirs["high_res"], f_full)
+    p_high = os.path.join(res_dirs["high"], f_full)
     c_high.save(p_high, "WEBP", quality=10)
     outputs.append(("High (~0.8m)", p_high, w_high))
 
-    # Variant 4: Low Res (~3.2m) -> "low_res/"
+    # Variant 4: Low Res (~3.2m) -> "low/"
     w_low = int(total_w_px / 16)
     h_low = int(total_h_px / 16)
     c_low = canvas.resize((w_low, h_low), Image.LANCZOS)
-    p_low = os.path.join(res_dirs["low_res"], f_full)
+    p_low = os.path.join(res_dirs["low"], f_full)
     c_low.save(p_low, "WEBP", quality=10)
     outputs.append(("Low (~3.2m)", p_low, w_low))
 
@@ -725,7 +725,7 @@ def main():
                 print(f"   Removed {removed} old .bin files")
 
         if os.path.exists(texture_dir):
-            for subdir in ["compressed", "high_res", "low_res"]:
+            for subdir in ["full", "high", "low"]:
                 subdir_path = os.path.join(texture_dir, subdir)
                 if os.path.exists(subdir_path):
                     webp_files = [
