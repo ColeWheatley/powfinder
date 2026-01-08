@@ -445,7 +445,7 @@ class PistonViewer {
 
         const angle = this.controls.getPolarAngle() * 180 / Math.PI;
         const linear = Math.min(1, Math.max(0, (angle - 6.0) / (25.0 - 6.0)));
-        const h = Math.max(0.001, linear);
+        const h = linear;
         const flat = angle < 5.5;
 
         this.updateFloorState(h);
