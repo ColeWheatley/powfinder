@@ -96,7 +96,7 @@ def bake_sector_binary(SX, SY, dem_array, dem_transform, output_dir="frontend/he
     def sample_heights(hex_list):
         if not hex_list: return np.array([])
         wxs, wys = np.array([h[2] for h in hex_list]), np.array([h[3] for h in hex_list])
-        cols, rows = rasterio.transform.rowcol(dem_transform, wxs, wys)
+        rows, cols = rasterio.transform.rowcol(dem_transform, wxs, wys)
         rows, cols = np.clip(rows, 0, dem_array.shape[0]-1), np.clip(cols, 0, dem_array.shape[1]-1)
         return dem_array[rows, cols]
 
