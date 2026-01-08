@@ -84,15 +84,15 @@ def world_meters_to_sector_approx(x, y):
 # FRACTAL TREE LOGIC
 # =============================================================================
 
-def generate_gosper_offsets(level):
+def generate_gosper_offsets(level, debug=False):
     """
     Generates the list of (q, r) unit hex offsets for a Gosper Tile of 'level'.
-    
+
     The list is HIERARCHICALLY ORDERED.
     - Index 0-6: The 7 unit hexes of the first Level 1 child.
     - Index 7-13: The 7 unit hexes of the second Level 1 child.
     - ...
-    
+
     This allows us to perform "Bottom-Up Aggregation" by simply reshaping the array:
     heights_lvl_0 = [16807]
     heights_lvl_1 = heights_lvl_0.reshape(-1, 7).mean(axis=1) -> [2401]
@@ -116,7 +116,7 @@ def generate_gosper_offsets(level):
     # We build Bottom-Up recursively:
     # Offsets(N) = [ child_pos + (Basis * sub_offset) ]
     
-    prev_offsets = generate_gosper_offsets(level - 1)
+    prev_offsets = generate_gosper_offsets(level - 1, debug)
     
     # The 7 Positions of the sub-tiles in a Gosper level
     # This matrix/offset depends heavily on the specific variation (island index).
@@ -241,10 +241,20 @@ def generate_gosper_offsets(level):
         # We use the matrix power to get the exact integer vector.
         
         shift_q, shift_r = apply_matrix_power(base_shift, level - 1)
-        
+
+        if debug and level == 5:
+            print(f"Level {level}, neighbor {i}: base{base_shift} -> shift({shift_q},{shift_r})")
+
         for (pq, pr) in prev_offsets:
             final_list.append((pq + shift_q, pr + shift_r))
-            
+
+    if debug and level == 5:
+        print("=== PYTHON GOSPER OFFSET DEBUG ===")
+        print(f"First 7 offsets: {final_list[:7]}")
+        print(f"Offsets 2401-2407: {final_list[2401:2408]}")
+        print(f"Last 7 offsets: {final_list[-7:]}")
+        print(f"Total offsets: {len(final_list)}")
+
     return final_list
 
 def compute_gosper_neighbors(level):

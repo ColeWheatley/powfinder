@@ -89,7 +89,11 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     2. _high  (~0.8m) - 1/4 Scale
     3. _low   (~3.2m) - 1/16 Scale
 
-    All saved at Quality=10 (User Request).
+    Output format:
+    - Square canvas containing flat-top hexagon
+    - 32px buffer on all sides for WebP 16px block alignment
+    - BLACK background in corner areas (not transparent) for optimal compression
+    - All saved at Quality=10 (User Request)
     """
     import PIL.Image as Image
     import PIL.ImageDraw as ImageDraw
@@ -98,38 +102,52 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # 1. Define Canvas
-    # Shape: Centered on Sector Center
+    # 1. Define Canvas Dimensions
+    # For a FLAT-TOP hexagon inscribed in a square canvas:
+    # - The hexagon's flat-to-flat height = TEXTURE_SIZE_PX
+    # - The hexagon's vertex-to-vertex width = height * 2 / sqrt(3)
+    # - We use a SQUARE canvas where side = width (the larger dimension)
+    # - Add 32px buffer on each side for WebP block alignment
+
     cen_x, cen_y = coord_util.sector_to_world_meters(Q, R)
 
-    # Canvas Size: Flat-Topped Hexagon + 2x Buffer
     base_px = coord_util.TEXTURE_SIZE_PX  # ~4148.5 (flat-to-flat height)
 
-    # Flat-Topped Hexagon Dimensions:
-    # Height (Flat-to-Flat) = base_px
-    # Width (Vertex-to-Vertex) = base_px * 2 / sqrt(3)
-    # Width > Height, so use width for square canvas
-    hex_width_px = base_px * 2.0 / math.sqrt(3.0)
-    max_dim_px = int(math.ceil(hex_width_px))
+    # For flat-top hex: vertex-to-vertex width > flat-to-flat height
+    # radius (center to vertex) = flat_to_flat_height / sqrt(3)
+    hex_radius_px = base_px / math.sqrt(3.0)
 
-    total_w_px = int(max_dim_px + (BUFFER_PX * 2))
-    total_h_px = int(max_dim_px + (BUFFER_PX * 2))
+    # Add buffer to radius for the mask
+    buffered_radius_px = hex_radius_px + BUFFER_PX
+
+    # Square canvas: side = diameter of buffered hexagon (vertex-to-vertex)
+    canvas_size_px = int(math.ceil(buffered_radius_px * 2.0))
+
+    # Ensure even dimensions for WebP compression efficiency
+    if canvas_size_px % 2 == 1:
+        canvas_size_px += 1
+
+    total_w_px = canvas_size_px
+    total_h_px = canvas_size_px
+
+    # Canvas center in pixel coords
+    cx = total_w_px / 2.0
+    cy = total_h_px / 2.0
 
     # Calculate World Bounds for this Canvas
-    half_w_m = (total_w_px * coord_util.METERS_PER_PIXEL) / 2.0
-    half_h_m = (total_h_px * coord_util.METERS_PER_PIXEL) / 2.0
+    half_extent_m = (total_w_px * coord_util.METERS_PER_PIXEL) / 2.0
 
-    win_min_x = cen_x - half_w_m
-    win_max_x = cen_x + half_w_m
-    win_min_y = cen_y - half_h_m
-    win_max_y = cen_y + half_h_m
+    win_min_x = cen_x - half_extent_m
+    win_max_x = cen_x + half_extent_m
+    win_min_y = cen_y - half_extent_m
+    win_max_y = cen_y + half_extent_m
 
     target_poly = box(win_min_x, win_min_y, win_max_x, win_max_y)
 
-    # Create Transparent Canvas (RGBA)
-    canvas = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 0))
+    # 2. Create Canvas with BLACK background (RGB, not RGBA)
+    # Black corners compress better than transparent for WebP
+    canvas = Image.new("RGB", (total_w_px, total_h_px), (0, 0, 0))
 
-    # 2. Sample Data
     # Find intersecting TIFs
     intersecting = []
     for t in valid_tifs:
@@ -138,9 +156,9 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
 
     if not intersecting:
         print(f"⚠️ Sector {Q},{R}: No intersecting TIFs found.")
-        return []
+        return [], None
 
-    # Paste Data
+    # 3. Sample and Paste Aerial Data
     for t in intersecting:
         with rasterio.open(t["path"]) as src:
             ix_min_x = max(win_min_x, src.bounds.left)
@@ -175,10 +193,7 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
                     continue
 
                 paste_x = int((ix_min_x - win_min_x) / coord_util.METERS_PER_PIXEL)
-                # Y flip because PIL is top-down, Map is bottom-up (usually)
-                # But wait, TIFs are usually top-down in rasterio read?
-                # Actually standard geotiff is +Y up? No, usually +Y down in pixel space, but +Y up in coord space.
-                # Let's stick to the world-coord math:
+                # Y axis: PIL is top-down, geo coords are bottom-up
                 paste_y = int((win_max_y - ix_max_y) / coord_util.METERS_PER_PIXEL)
 
                 canvas.paste(patch, (paste_x, paste_y))
@@ -186,123 +201,35 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
             except Exception as e:
                 print(f"Error reading TIF {t['path']}: {e}")
 
-    # 3. Apply Hexagonal Mask (Crop to Shape + 32px Padding)
-    # create a grayscale image to be the alpha channel
-    mask = Image.new("L", (total_w_px, total_h_px), 0)  # Black (Transparent)
+    # 4. Create Hexagonal Mask (with buffer)
+    # This mask will be used to crop the canvas to hexagonal shape
+    mask = Image.new("L", (total_w_px, total_h_px), 0)  # Black = masked out
     draw = ImageDraw.Draw(mask)
 
-    # Center of Canvas
-    # To determine Canvas Size, we need the Max Dimension of the Flat-Top Hexagon.
-    # Base Dimension (h) = TEXTURE_SIZE_PX (Flat-to-Flat Height)
-    # Radius = h / sqrt(3)
-    # Buffer is added to Radius.
-
-    base_px = coord_util.TEXTURE_SIZE_PX
-    hex_radius_px = (base_px / math.sqrt(3)) + BUFFER_PX
-
-    # Flat Top Hexagon Dimensions:
-    # Height (Flat-Flat) = sqrt(3) * Radius
-    # Width (Point-Point) = 2 * Radius
-    # Width > Height. Max Dim = Width.
-
-    max_dim_px = int(math.ceil(hex_radius_px * 2.0))
-
-    total_w_px = max_dim_px
-    total_h_px = max_dim_px
-
-    cx, cy = total_w_px / 2.0, total_h_px / 2.0
-
-    # Calculate World Bounds for this Canvas
-    half_w_m = (total_w_px * coord_util.METERS_PER_PIXEL) / 2.0
-    half_h_m = (total_h_px * coord_util.METERS_PER_PIXEL) / 2.0
-
-    win_min_x = cen_x - half_w_m
-    win_max_x = cen_x + half_w_m
-    win_min_y = cen_y - half_h_m
-    win_max_y = cen_y + half_h_m
-
-    target_poly = box(win_min_x, win_min_y, win_max_x, win_max_y)
-
-    # Create Transparent Canvas (RGBA)
-    canvas = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 0))
-
-    # 2. Sample Data
-    # Find intersecting TIFs
-    intersecting = []
-    for t in valid_tifs:
-        if t["poly"].intersects(target_poly):
-            intersecting.append(t)
-
-    if not intersecting:
-        print(f"⚠️ Sector {Q},{R}: No intersecting TIFs found.")
-        return []
-
-    # Paste Data
-    for t in intersecting:
-        with rasterio.open(t["path"]) as src:
-            ix_min_x = max(win_min_x, src.bounds.left)
-            ix_max_x = min(win_max_x, src.bounds.right)
-            ix_min_y = max(win_min_y, src.bounds.bottom)
-            ix_max_y = min(win_max_y, src.bounds.top)
-
-            if ix_min_x >= ix_max_x or ix_min_y >= ix_max_y:
-                continue
-
-            window = from_bounds(ix_min_x, ix_min_y, ix_max_x, ix_max_y, src.transform)
-
-            w_px = int((ix_max_x - ix_min_x) / coord_util.METERS_PER_PIXEL)
-            h_px = int((ix_max_y - ix_min_y) / coord_util.METERS_PER_PIXEL)
-
-            if w_px <= 0 or h_px <= 0:
-                continue
-
-            try:
-                data = src.read(
-                    window=window,
-                    out_shape=(src.count, h_px, w_px),
-                    resampling=rasterio.enums.Resampling.lanczos,
-                )
-                img_array = np.moveaxis(data, 0, -1)
-
-                if img_array.shape[2] == 3:
-                    patch = Image.fromarray(img_array.astype("uint8"), "RGB")
-                elif img_array.shape[2] == 4:
-                    patch = Image.fromarray(img_array.astype("uint8"), "RGBA")
-                else:
-                    continue
-
-                paste_x = int((ix_min_x - win_min_x) / coord_util.METERS_PER_PIXEL)
-                # Y flip because PIL is top-down, Map is bottom-up (usually)
-                # But wait, TIFs are usually top-down in rasterio read?
-                # Actually standard geotiff is +Y up? No, usually +Y down in pixel space, but +Y up in coord space.
-                # Let's stick to the world-coord math:
-                paste_y = int((win_max_y - ix_max_y) / coord_util.METERS_PER_PIXEL)
-
-                canvas.paste(patch, (paste_x, paste_y))
-
-            except Exception as e:
-                print(f"Error reading TIF {t['path']}: {e}")
-
-    # 3. Apply Hexagonal Mask (Crop to Shape + 32px Padding)
-    # create a grayscale image to be the alpha channel
-    mask = Image.new("L", (total_w_px, total_h_px), 0)  # Black (Transparent)
-    draw = ImageDraw.Draw(mask)
-
-    # Vertices for Flat-Topped Hexagon
-    # Flat edges at Top (90°) and Bottom (270°)
-    # Vertices at: 30°, 90°, 150°, 210°, 270°, 330°
-
+    # Flat-Top Hexagon vertices
+    # For flat-top: first vertex at 0° (right), flat edges at top/bottom
+    # Vertices at: 0°, 60°, 120°, 180°, 240°, 300°
     verts = []
     for i in range(6):
-        deg = 30 + (60 * i)
+        deg = 0 + (60 * i)
         rad = math.radians(deg)
-        vx = cx + hex_radius_px * math.cos(rad)
-        vy = cy + hex_radius_px * math.sin(rad)
+        vx = cx + buffered_radius_px * math.cos(rad)
+        vy = cy + buffered_radius_px * math.sin(rad)
         verts.append((vx, vy))
 
-    draw.polygon(verts, fill=255)  # White (Opaque)
+    draw.polygon(verts, fill=255)  # White = visible
 
-    # Create Subfolders
+    # 5. Apply Mask - Convert to RGBA and apply alpha
+    canvas_rgba = canvas.convert("RGBA")
+    # Create black background
+    black_bg = Image.new("RGBA", (total_w_px, total_h_px), (0, 0, 0, 255))
+    # Composite: texture where mask is white, black where mask is black
+    canvas_rgba.putalpha(mask)
+    final_canvas = Image.alpha_composite(black_bg, canvas_rgba)
+    # Convert back to RGB (black corners, texture in hex)
+    final_canvas = final_canvas.convert("RGB")
+
+    # 6. Create Output Directories
     res_dirs = {
         "full": os.path.join(output_dir, "full"),
         "high": os.path.join(output_dir, "high"),
@@ -312,32 +239,32 @@ def bake_sector_textures(Q, R, valid_tifs, output_dir="hex_backend/baked_sectors
         if not os.path.exists(d):
             os.makedirs(d)
 
-    # 3. Export Variants
+    # 7. Export Variants
     outputs = []
+    f_name = f"sector_{Q}_{R}.webp"
 
-    # Variant 1: Full Res (Source 0.2m) -> "full/"
-    f_full = f"sector_{Q}_{R}.webp"
-    p_full = os.path.join(res_dirs["full"], f_full)
-    canvas.save(p_full, "WEBP", quality=10)
+    # Full Res (0.2m)
+    p_full = os.path.join(res_dirs["full"], f_name)
+    final_canvas.save(p_full, "WEBP", quality=10)
     outputs.append(("Full (0.2m)", p_full, total_w_px))
 
-    # Variant 2: High Res (~0.8m) -> "high/"
+    # High Res (~0.8m) - 1/4 Scale
     w_high = int(total_w_px / 4)
     h_high = int(total_h_px / 4)
-    c_high = canvas.resize((w_high, h_high), Image.LANCZOS)
-    p_high = os.path.join(res_dirs["high"], f_full)
+    c_high = final_canvas.resize((w_high, h_high), Image.LANCZOS)
+    p_high = os.path.join(res_dirs["high"], f_name)
     c_high.save(p_high, "WEBP", quality=10)
     outputs.append(("High (~0.8m)", p_high, w_high))
 
-    # Variant 4: Low Res (~3.2m) -> "low/"
+    # Low Res (~3.2m) - 1/16 Scale
     w_low = int(total_w_px / 16)
     h_low = int(total_h_px / 16)
-    c_low = canvas.resize((w_low, h_low), Image.LANCZOS)
-    p_low = os.path.join(res_dirs["low"], f_full)
+    c_low = final_canvas.resize((w_low, h_low), Image.LANCZOS)
+    p_low = os.path.join(res_dirs["low"], f_name)
     c_low.save(p_low, "WEBP", quality=10)
     outputs.append(("Low (~3.2m)", p_low, w_low))
 
-    return outputs, canvas
+    return outputs, final_canvas
 
 
 def bake_sector_tifs(Q, R, canvas, output_dir="hex_backend/baked_sectors"):

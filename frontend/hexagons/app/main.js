@@ -1001,14 +1001,59 @@ class PistonViewer {
         };
     }
 
+    // Generates Gosper fractal curve offsets for a given level
+    // Replicates the Python generate_gosper_offsets() logic exactly
+    generateGosperOffsets(level) {
+        if (level === 0) return [{ q: 0, r: 0 }];
+
+        const prevOffsets = this.generateGosperOffsets(level - 1);
+
+        // Matrix M = [[2, 1], [-1, 3]] (determinant = 7)
+        const applyMatrixPower = (q, r, power) => {
+            for (let i = 0; i < power; i++) {
+                const nq = 2 * q + 1 * r;
+                const nr = -1 * q + 3 * r;
+                q = nq;
+                r = nr;
+            }
+            return { q, r };
+        };
+
+        // The 7 positions: Center + 6 Neighbors
+        // MUST match Python exactly: (0,0), (1,0), (1,-1), (0,-1), (-1,0), (-1,1), (0,1)
+        const neighbors = [
+            { q: 0, r: 0 },
+            { q: 1, r: 0 },
+            { q: 1, r: -1 },
+            { q: 0, r: -1 },
+            { q: -1, r: 0 },
+            { q: -1, r: 1 },
+            { q: 0, r: 1 }
+        ];
+
+        const finalList = [];
+
+        for (let i = 0; i < 7; i++) {
+            const baseShift = neighbors[i];
+            const shift = applyMatrixPower(baseShift.q, baseShift.r, level - 1);
+
+            for (const p of prevOffsets) {
+                finalList.push({
+                    q: p.q + shift.q,
+                    r: p.r + shift.r
+                });
+            }
+        }
+
+        return finalList;
+    }
+
     createInstancedMesh(hexes, material, tileYSpacing, gridW, gridH) {
         const numHexes = hexes.length;
-        const currentTileYSpacing = tileYSpacing || this.hexWidth;
-        const currentTileXSpacing = currentTileYSpacing * (Math.sqrt(3) / 2);
 
-        // FIX: Clone geometry so each tile has unique instance attributes
-        // ALSO: Create a fresh hex geometry for this specific spacing
-        const side = currentTileYSpacing / Math.sqrt(3);
+        // Use UNIT_HEX_WIDTH_METERS (6.4m) for geometry - matches Python backend
+        // The hex side length = flat-to-flat width / sqrt(3)
+        const side = UNIT_HEX_WIDTH_METERS / Math.sqrt(3);
         const tileGeom = this.createHexGeometry(side);
         const mesh = new THREE.InstancedMesh(tileGeom, material, numHexes);
 
@@ -1017,92 +1062,69 @@ class PistonViewer {
         const instanceNZ_2 = new Float32Array(numHexes * 4);
         const instanceBorder = new Float32Array(numHexes);
 
-        // Use logic from Binary if available (V3), else fallback to calc (V2)
-        let rowCount, colCount;
+        // Generate Gosper fractal offsets at Level 5 (16,807 hexes)
+        // This matches the Python backend's packing order exactly
+        const offsets = this.generateGosperOffsets(5);
 
-        if (gridW && gridH) {
-            colCount = gridW;
-            rowCount = gridH;
-        } else {
-            const xSteps = [];
-            for (let x = 0; x <= TILE_WIDTH_WORLD + 1; x += currentTileXSpacing) xSteps.push(x);
-            const ySteps = [];
-            for (let y = 0; y <= TILE_HEIGHT_WORLD + 1; y += currentTileYSpacing) ySteps.push(y);
-            colCount = xSteps.length;
-            rowCount = ySteps.length;
-        }
+        // Axial to World coordinate conversion constants
+        // MUST use UNIT_HEX_WIDTH_METERS (6.4m) - this is what Python uses
+        // The Gosper offsets are in unit hex axial coordinates
+        const h = UNIT_HEX_WIDTH_METERS;
+        const sqrt3 = Math.sqrt(3);
+        const qBasisX = sqrt3 / 2 * h;
+        const qBasisY = 0.5 * h;
+        const rBasisY = h;
 
-        for (let col = 0; col < colCount; col++) {
-            const x = col * currentTileXSpacing;
-            const yShift = (col % 2 === 1) ? (currentTileYSpacing / 2.0) : 0;
-            for (let row = 0; row < rowCount; row++) {
-                const instanceIdx = (col * rowCount) + row;
-                if (instanceIdx >= numHexes) continue;
+        for (let i = 0; i < numHexes; i++) {
+            // Stop if we have more offsets than hex data or vice versa
+            if (i >= offsets.length) break;
 
-                // Indexing matches WaffleIron V3
-                const dataIdx = instanceIdx;
-                if (dataIdx >= numHexes) continue;
+            const { q, r } = offsets[i];
+            const hData = hexes[i];
 
-                // Calculate Position
-                const realY = (row * currentTileYSpacing) + yShift;
-                const h = hexes[dataIdx];
+            // Convert Axial (q, r) to Local World (x, z)
+            // Matches Python axial_to_world_meters but relative to sector center
+            const x = q * qBasisX;
+            const z = -(r * rBasisY + q * qBasisY); // Negate Z for 3D world convention
 
-                // --- GEOMETRY CLIP (Vertex Count Fix) ---
-                // Prune hexes outside the sector's hexagonal territory to stop doubling vertex count in overlap zones.
-                const localCx = TILE_WIDTH_WORLD / 2.0;
-                const localCy = TILE_HEIGHT_WORLD / 2.0;
-                const dx = x - localCx;
-                const dy = realY - localCy;
+            // Position this instance
+            matrix.makeTranslation(x, 0, z);
+            mesh.setMatrixAt(i, matrix);
 
-                // For a Pointy-Topped Hexagon (Gosper standard):
-                // Flat-to-Flat Width = W.
-                // Radius (Corner) = W / sqrt(3).
-                // We use a 1.05 safety multiplier to avoid cracks at the edge.
-                const maxRadius = (TILE_WIDTH_WORLD / Math.sqrt(3)) * 1.05;
-                if ((dx * dx + dy * dy) > (maxRadius * maxRadius)) {
-                    // This instance is in the "Padding" zone. Collapse it to zero-scale at 0,0,0
-                    // or just don't set its matrix.
-                    matrix.makeScale(0, 0, 0);
-                    mesh.setMatrixAt(instanceIdx, matrix);
-                    continue;
-                }
+            // Border detection: check if this hex is on the outer edge
+            // For Gosper curve, border hexes have neighbor index = -1 in the bin data
+            // For now, set all to 0 (we can enhance this later using the neighbor data)
+            instanceBorder[i] = 0.0;
 
-                // Position within the tile
-                matrix.makeTranslation(x, 0, -realY);
-                mesh.setMatrixAt(instanceIdx, matrix);
+            // Set neighbor heights for skirt rendering
+            instanceNZ_1[i * 4] = hData.n_n * SCALE_Z;
+            instanceNZ_1[i * 4 + 1] = hData.n_ne * SCALE_Z;
+            instanceNZ_1[i * 4 + 2] = hData.n_se * SCALE_Z;
+            instanceNZ_1[i * 4 + 3] = hData.n_s * SCALE_Z;
 
-                instanceBorder[instanceIdx] = (BORDER_WALLS_ALWAYS && (
-                    row === 0 || row === rowCount - 1 || col === 0 || col === colCount - 1
-                )) ? 1.0 : 0.0;
-
-                instanceNZ_1[instanceIdx * 4] = h.n_n * SCALE_Z;
-                instanceNZ_1[instanceIdx * 4 + 1] = h.n_ne * SCALE_Z;
-                instanceNZ_1[instanceIdx * 4 + 2] = h.n_se * SCALE_Z;
-                instanceNZ_1[instanceIdx * 4 + 3] = h.n_s * SCALE_Z;
-
-                instanceNZ_2[instanceIdx * 4] = h.n_sw * SCALE_Z;
-                instanceNZ_2[instanceIdx * 4 + 1] = h.n_nw * SCALE_Z;
-                instanceNZ_2[instanceIdx * 4 + 2] = h.z * SCALE_Z;
-                instanceNZ_2[instanceIdx * 4 + 3] = 0.0;
-            }
+            instanceNZ_2[i * 4] = hData.n_sw * SCALE_Z;
+            instanceNZ_2[i * 4 + 1] = hData.n_nw * SCALE_Z;
+            instanceNZ_2[i * 4 + 2] = hData.z * SCALE_Z;
+            instanceNZ_2[i * 4 + 3] = 0.0;
         }
 
         mesh.instanceMatrix.needsUpdate = true;
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(instanceNZ_1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(instanceNZ_2, 4));
 
+        // Slope attributes
         const instanceSlope_1 = new Float32Array(numHexes * 4);
         const instanceSlope_2 = new Float32Array(numHexes * 4);
 
         for (let i = 0; i < numHexes; i++) {
-            const h = hexes[i];
-            instanceSlope_1[i * 4] = h.s[0];
-            instanceSlope_1[i * 4 + 1] = h.s[1];
-            instanceSlope_1[i * 4 + 2] = h.s[2];
-            instanceSlope_1[i * 4 + 3] = h.s[3];
+            const hData = hexes[i];
+            instanceSlope_1[i * 4] = hData.s[0];
+            instanceSlope_1[i * 4 + 1] = hData.s[1];
+            instanceSlope_1[i * 4 + 2] = hData.s[2];
+            instanceSlope_1[i * 4 + 3] = hData.s[3];
 
-            instanceSlope_2[i * 4] = h.s[4];
-            instanceSlope_2[i * 4 + 1] = h.s[5];
+            instanceSlope_2[i * 4] = hData.s[4];
+            instanceSlope_2[i * 4 + 1] = hData.s[5];
             instanceSlope_2[i * 4 + 2] = 0.0;
             instanceSlope_2[i * 4 + 3] = 0.0;
         }
