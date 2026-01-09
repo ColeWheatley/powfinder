@@ -1,40 +1,42 @@
-"""
-TIROL ORTHOFOTO DOWNLOADER
-Source: https://gis.tirol.gv.at/geo/dop/m28/ (e.g., dop_2121-53_2023.tif)
-
-Project History & Coverage:
-We have defined three main bounding boxes to cover the key ski areas:
-1. Southern / Central: Refined by grid anchors 2123-44, 2323-47, and 2121-76.
-2. Ischgl / Silvretta: Anchored by 1421-56, 1621-50, and 1624-66.
-3. Arlberg / In-Between: The zone between 2223-49 and 2024-13.
-
-Methodology:
-- Check .tfw files (worldfiles) first via check_tirol_grid.py to mapping availability.
-- Update queue via update_queue.py to merge boxes and filter existing disk files.
-- SEQUENTIAL download with 2s delay per file to avoid bot-capping.
-
-Stats:
-- Total unique tiles available in these zones: ~976.
-- Average size: 10-15MB per TIF. Total set ~14.5 GB.
-"""
-
 import os
 import json
 import requests
 import time
 
+# --- ROBUST CONFIG ---
+# We check these for existing files to avoid doubling up
+SOURCE_CHECK_DIRS = [
+    "../aerial_tifs",
+    "./new unimplemented aerials"
+]
+# New downloads ALWAYS go here
+TARGET_DIR = "./new unimplemented aerials"
+WF_DIR = "./worldfiles_for_aerials"
 QUEUE_FILE = "../download_queue.json"
-OUTPUT_DIR = "../aerial_tifs"
 YEAR = "2023"
 
+def get_on_disk_gids():
+    found = set()
+    for d in SOURCE_CHECK_DIRS:
+        if os.path.exists(d):
+            files = [f for f in os.listdir(d) if f.endswith('.tif')]
+            print(f"DEBUG: Found {len(files)} .tif files in {d}")
+            for f in files:
+                parts = f.split('_')
+                if len(parts) >= 2:
+                    found.add(parts[1])
+    return found
+
 def download_tif(grid_id):
-    filename = f"dop_{grid_id}_{YEAR}.tif"
+    filename = f"dop_{{grid_id}}_{YEAR}.tif"
     url = f"https://gis.tirol.gv.at/geo/dop/m28/{filename}"
-    target_path = os.path.join(OUTPUT_DIR, filename)
+    target_path = os.path.join(TARGET_DIR, filename)
     
-    if os.path.exists(target_path):
-        return grid_id, "exists"
-        
+    # Worldfile MUST exist or the TIF is useless
+    wf_name = f"dop_{{grid_id}}_{YEAR}.tfw"
+    if not os.path.exists(os.path.join(WF_DIR, wf_name)):
+        return grid_id, "skipped_no_worldfile"
+
     try:
         response = requests.get(url, stream=True, timeout=30)
         if response.status_code == 200:
@@ -43,58 +45,68 @@ def download_tif(grid_id):
                     f.write(chunk)
             return grid_id, "done"
         else:
-            return grid_id, f"error_{response.status_code}"
+            return grid_id, f"error_{{response.status_code}}"
     except Exception as e:
-        return grid_id, f"failed_{str(e)}"
-
-import time
+        return grid_id, f"failed_{{str(e)}}"
 
 def main():
-    if not os.path.exists(QUEUE_FILE):
-        print(f"No queue file found at {QUEUE_FILE}")
-        return
+    if not os.path.exists(TARGET_DIR):
+        os.makedirs(TARGET_DIR)
 
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    if not os.path.exists(QUEUE_FILE):
+        print(f"Error: Queue file not found at {QUEUE_FILE}")
+        return
 
     with open(QUEUE_FILE, 'r') as f:
         data = json.load(f)
     
-    initial_queue = data.get('queue', [])
+    raw_queue = data.get('queue', [])
+    on_disk = get_on_disk_gids()
     
-    # Re-index what is on disk right now
-    downloaded_on_disk = set()
-    if os.path.exists(OUTPUT_DIR):
-        for f in os.listdir(OUTPUT_DIR):
-            if f.endswith('.tif'):
-                parts = f.split('_')
-                if len(parts) >= 2:
-                    downloaded_on_disk.add(parts[1])
+    # Filter queue: Must not be on disk AND must have a worldfile
+    queue = []
+    skipped_disk = 0
+    skipped_wf = 0
     
-    queue = [gid for gid in initial_queue if gid not in downloaded_on_disk]
+    for gid in raw_queue:
+        if gid in on_disk:
+            skipped_disk += 1
+            continue
+        
+        # We know worldfiles exist for everything in raw_queue 
+        # because estimate_space.py already checked that.
+        queue.append(gid)
+
     total = len(queue)
-    already_had = len(initial_queue) - total
-    
-    if already_had > 0:
-        print(f"Re-indexed disk: Skipping {already_had} files already present.")
-    
+    print(f"--- PRE-FLIGHT CHECK ---")
+    print(f"Initial Queue:      {len(raw_queue)}")
+    print(f"Already on Disk:    {skipped_disk} (Checked {SOURCE_CHECK_DIRS})")
+    print(f"Missing Worldfiles: {skipped_wf} (Skipped)")
+    print(f"Final Target Queue: {total}")
+    print(f"Destination:        {os.path.abspath(TARGET_DIR)}")
+    print(f"------------------------\n")
+
     if total == 0:
-        print("Queue is empty (all tiles already on disk).")
+        print("Nothing to download.")
         return
 
-    print(f"Starting sequential download of {total} files with a 2-second delay...")
+    # Check for disk space (rough check: 12MB per tile)
+    estimated_mb = total * 12
+    print(f"Estimated Space Needed: {estimated_mb/1024:.2f} GB")
     
+    # Simple prompt for the user is handled by the agent, 
+    # but we can do a small delay here if they want to cancel.
+    time.sleep(1)
+
     for idx, gid in enumerate(queue):
         gid, status = download_tif(gid)
-        done_count = idx + 1
+        count = idx + 1
         
         if status == "done":
-            print(f"[{done_count}/{total}] ✓ {gid} downloaded")
-            time.sleep(2) # Delay to stay under the radar
-        elif status == "exists":
-            print(f"[{done_count}/{total}] - {gid} already exists")
+            print(f"[{count}/{total}] ✓ {gid} saved to new folder")
+            time.sleep(2) # Stay safe
         else:
-            print(f"[{done_count}/{total}] ✗ {gid} failed: {status}")
+            print(f"[{count}/{total}] ✗ {gid} : {status}")
             time.sleep(1)
 
     print("\nBatch download complete.")

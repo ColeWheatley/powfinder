@@ -276,18 +276,111 @@ class PistonViewer {
 
     createHexGeometry(radius) {
         // 1. CAP GEOMETRY (Top Face Only)
-        // CircleGeometry(radius, 6) starts with vertex at (R,0), which after rotateX(-90) 
-        // results in a FLAT TOP hex (sides are North/South/etc).
         const capGeo = new THREE.CircleGeometry(radius, 6);
         capGeo.rotateX(-Math.PI / 2); // Lay flat
 
-        // 2. SKIRT GEOMETRY (Sides Only, Open Ended)
-        // CylinderGeometry(radius, radius, 1, 6, 1, true) starts with vertex at (R,0).
-        const skirtGeo = new THREE.CylinderGeometry(radius, radius, 1, 6, 1, true);
-        // No rotation needed for Flat Top alignment if using CircleGeometry defaults.
+        // Add dummy aSideId to Cap (required for shared shader)
+        const capLen = capGeo.attributes.position.count;
+        capGeo.setAttribute('aSideId', new THREE.Float32BufferAttribute(new Float32Array(capLen).fill(0), 1));
 
-        // Shift Skirt so top ring is at Y=0, bottom ring is at Y=-1
-        skirtGeo.translate(0, -0.5, 0);
+        // 2. PARTIAL SKIRT GEOMETRY (SE, S, SW Only)
+        // Manual construction to ensure clean Side IDs and no overhead
+        // Flat Top: SE(2), S(3), SW(4).
+        // Angles:
+        // 0: E, 1: SE, 2: SW, 3: W, 4: NW, 5: NE (Standard CircleGeo order??)
+        // Let's verify standard ThreeJS Circle/Cyl order:
+        // Vert 0: (1, 0, 0) -> East
+        // Vert 1: (0.5, 0, 0.866) -> SouthEast (Z+)
+        // Vert 2: (-0.5, 0, 0.866) -> SouthWest
+        // Vert 3: (-1, 0, 0) -> West
+        // Vert 4: (-0.5, 0, -0.866) -> NorthWest
+        // Vert 5: (0.5, 0, -0.866) -> NorthEast
+
+        // Seg 0 (Verts 0-1): East Face (E -> SE). This is SE Face? No, average is ESE.
+        // Wait, Map: N=0, NE=1, SE=2, S=3, SW=4, NW=5.
+        // N is -Z. S is +Z. E is +X.
+        // CircleGeo 0 is +X.
+        // So Vert 0 is "East".
+        // Vert 5 is "NorthEast".
+        // Vert 4 is "NorthWest".
+        // Vert 3 is "West".
+        // Vert 2 is "SouthWest".
+        // Vert 1 is "SouthEast".
+
+        // Segments (Counter-Clockwise in Theta, but indices might be different):
+        // Face 0: 0 -> 1 (East -> SE). This is SE Face? No, average is ESE.
+        // Let's look at the edges required for SE, S, SW neighbors.
+        // Neighbor SE (Index 2): Direction (1, -1) -> Angle ~ -30 deg? (North is +90? No).
+        // Standard Map: N(0,-1) usually? No, here N is -Z.
+        // SE is (+X, +Z).
+        // Edge SE is the edge connecting East Vertex and SouthEast Vertex? No.
+        // It's the edge perpendicular to the SE direction.
+        // SE Direction: (+1, +1) approx.
+        // The Edge "facing" SE is the one between E(0) and S(approx).
+
+        // Let's rely on the visual check:
+        // We want the "Bottom Right", "Bottom", "Bottom Left" faces on screen.
+        // These are Verts 0->1, 1->2, 2->3.
+        // 0->1: East to SouthEast. (SE Face)
+        // 1->2: SouthEast to SouthWest. (South Face)
+        // 2->3: SouthWest to West. (SW Face)
+
+        // This matches our indices 2(SE), 3(S), 4(SW) perfectly if we treat 0 as start.
+        // So we build 3 quads connecting:
+        // Quad 0 (SE): Top(0,1) -> Bottom(0,1)
+        // Quad 1 (S):  Top(1,2) -> Bottom(1,2)
+        // Quad 2 (SW): Top(2,3) -> Bottom(2,3)
+
+        const vertices = [];
+        const indices = [];
+        const sideIDs = [];
+
+        const angles = [
+            0,                  // 0: East
+            Math.PI / 3,        // 1: SE
+            2 * Math.PI / 3,    // 2: SW
+            Math.PI             // 3: West
+        ];
+
+        let vIdx = 0;
+        for (let i = 0; i < 3; i++) {
+            const th1 = angles[i];
+            const th2 = angles[i + 1];
+
+            const x1 = Math.cos(th1) * radius; const z1 = Math.sin(th1) * radius;
+            const x2 = Math.cos(th2) * radius; const z2 = Math.sin(th2) * radius;
+
+            // Top (Y=0), Bottom (Y=-1)
+            // 4 Verts per quad to allow distinct attributes if needed,
+            // though we could share. Separate is safer for flat shading/normals.
+
+            // BL, BR, TR, TL order for CCW face?
+            // Top Edge: (x1,0,z1) -> (x2,0,z2)
+            // Bottom Edge: (x1,-1,z1) -> (x2,-1,z2)
+
+            // Push Vertices
+            vertices.push(x1, 0, z1);   // 0: Top Left (Start)
+            vertices.push(x2, 0, z2);   // 1: Top Right (End)
+            vertices.push(x1, -1, z1);  // 2: Btm Left
+            vertices.push(x2, -1, z2);  // 3: Btm Right
+
+            // Faces (Standard Two-Triangle Quad)
+            // 2, 1, 0
+            // 2, 3, 1
+            indices.push(vIdx + 2, vIdx + 1, vIdx + 0);
+            indices.push(vIdx + 2, vIdx + 3, vIdx + 1);
+
+            // Side ID (0, 1, 2)
+            for (let k = 0; k < 4; k++) sideIDs.push(i);
+
+            vIdx += 4;
+        }
+
+        const skirtGeo = new THREE.BufferGeometry();
+        skirtGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        skirtGeo.setAttribute('aSideId', new THREE.Float32BufferAttribute(sideIDs, 1));
+        skirtGeo.setIndex(indices);
+        skirtGeo.computeVertexNormals(); // Nice to have for lighting
 
         return { capGeo, skirtGeo };
     }
@@ -387,13 +480,11 @@ class PistonViewer {
                 const hn = view.getUint16(offset + 4, true);
                 const slope = view.getUint8(offset + 6);
 
-                // Read 6 neighbor deltas
-                const n0 = view.getUint8(offset + 7);
-                const n1 = view.getUint8(offset + 8);
-                const n2 = view.getUint8(offset + 9);
-                const n3 = view.getUint8(offset + 10);
-                const n4 = view.getUint8(offset + 11);
-                const n5 = view.getUint8(offset + 12);
+                // Read 3 signed neighbor deltas (SE, S, SW) - Int16 (2 bytes each)
+                // Offset 7, 9, 11
+                const dSE = view.getInt16(offset + 7, true);
+                const dS = view.getInt16(offset + 9, true);
+                const dSW = view.getInt16(offset + 11, true);
 
                 offset += 13;
 
@@ -403,7 +494,7 @@ class PistonViewer {
                     q: lcq + dq, r: lcr + dr,
                     h: minZ + (hn / scale),
                     s: slope,
-                    nbs: [n0, n1, n2, n3, n4, n5]
+                    deltas: [dSE, dS, dSW] // 3 Signed Deltas
                 });
             }
             layers.push(layer);
@@ -449,8 +540,7 @@ class PistonViewer {
         const nz1 = new Float32Array(num * 4);
         const nz2 = new Float32Array(num * 4);
         const slopes = new Float32Array(num);
-        const nbA = new Uint8Array(num * 4);
-        const nbB = new Uint8Array(num * 2);
+        const deltasArr = new Float32Array(num * 3); // SE, S, SW
 
         let activeSkirts = 0;
         for (let i = 0; i < num; i++) {
@@ -470,10 +560,13 @@ class PistonViewer {
             nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
             slopes[i] = d.s;
 
-            nbA[i * 4 + 0] = d.nbs[0]; nbA[i * 4 + 1] = d.nbs[1]; nbA[i * 4 + 2] = d.nbs[2]; nbA[i * 4 + 3] = d.nbs[3];
-            nbB[i * 2 + 0] = d.nbs[4]; nbB[i * 2 + 1] = d.nbs[5];
+            // Pass RAW signed deltas to shader. 
+            // Shader will handle the sign logic (Down vs Up).
+            deltasArr[i * 3 + 0] = d.deltas[0];
+            deltasArr[i * 3 + 1] = d.deltas[1];
+            deltasArr[i * 3 + 2] = d.deltas[2];
 
-            const hasDrop = d.nbs.some(n => n > 0);
+            const hasDrop = d.deltas.some(v => v !== 0);
             if (hasDrop) activeSkirts++;
         }
 
@@ -484,8 +577,7 @@ class PistonViewer {
             m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
             m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
             m.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
-            m.geometry.setAttribute('instanceNbA', new THREE.InstancedBufferAttribute(nbA, 4, true));
-            m.geometry.setAttribute('instanceNbB', new THREE.InstancedBufferAttribute(nbB, 2, true));
+            m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(deltasArr, 3));
         });
 
         const group = new THREE.Group();
@@ -525,39 +617,21 @@ class PistonViewer {
                 attribute vec4 instanceNZ_2;
                 attribute float instanceSlope;
                 
-                attribute vec4 instanceNbA; 
-                attribute vec2 instanceNbB;
-                // No aIsTop needed! Geometry decides.
+                // NEW: 3 Signed Deltas (SE, S, SW) and Side ID (0,1,2)
+                attribute vec3 instanceDeltas; 
+                attribute float aSideId;
                 
                 varying vec3 vLocalPos; // Relative to Tile (for UVs)
                 varying vec3 vWorldPos; // Absolute World (for Rings)
                 varying float vSlope;
                 varying float vIsTop; // 1.0 = Cap, 0.0 = Skirt
                 varying vec3 vMyNormal;
-                
-                float getDelta(int idx) {
-                    if (idx == 0) return instanceNbA.x;
-                    if (idx == 1) return instanceNbA.y;
-                    if (idx == 2) return instanceNbA.z;
-                    if (idx == 3) return instanceNbA.w;
-                    if (idx == 4) return instanceNbB.x;
-                    if (idx == 5) return instanceNbB.y;
-                    return 0.0;
-                }
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
                 
-                // SKIRT LOGIC (Only if position.y < -0.1 basically, since we shifted it)
-                // Cap Geo is at Y=0. Skirt Geo is Y=0 to -1.
-                // We can distinguish by Normal? Or simpler:
-                // We can't easily tell mesh apart in ONE shader unless we use a Uniform?
-                // But InstancedMesh shares material.
-                // WE CAN DETECT GEOMETRY.
-                // Cap Geo: Normal.y = 1.0 (approx)
-                // Skirt Geo: Normal.y = 0.0
-                
+                // Detect Geometry Type based on Normal Y (Cap > 0.9)
                 bool isCap = (normal.y > 0.9);
                 vIsTop = isCap ? 1.0 : 0.0;
                 
@@ -565,33 +639,26 @@ class PistonViewer {
                     // CAP: Just elevate.
                     transformed.y = 0.0 + animH; 
                 } else {
-                    // SKIRT: Top edge (y=0) -> animH. Bottom edge (y=-1) -> Drop.
-                    // We shifted skirtGeo: y is 0.0 to -1.0.
+                    // SKIRT (Partial 3-Sided: SE, S, SW)
+                    // Top Edge (y=0) -> animH.
+                    // Bottom Edge (y=-1) -> Displace by Delta.
                     
                     if (position.y > -0.1) {
                          // Skirt Top Edge
                          transformed.y = animH;
                     } else {
                          // Skirt Bottom Edge
-                         float angle = atan(normal.x, normal.z); 
-                         float rawIdx = (angle / 6.28318) * 6.0;
+                         // Select Delta based on Side ID (0=SE, 1=S, 2=SW)
+                         float dVal = 0.0;
+                         if (aSideId < 0.5) dVal = instanceDeltas.x;      // SE
+                         else if (aSideId < 1.5) dVal = instanceDeltas.y; // S
+                         else dVal = instanceDeltas.z;                    // SW
                          
-                         // Correct Flat Top Index Mapping
-                         // North=0, NE=1, SE=2, S=3, SW=4, NW=5
-                         float fIdx = mod(1.5 - rawIdx, 6.0);
-                         if (fIdx < 0.0) fIdx += 6.0;
-                         int neighborIdx = int(fIdx + 0.5) % 6;
-                         
-                         float normD = getDelta(neighborIdx);
-                         float deltaM = normD * 255.0;
-                         
-                         if (deltaM < 0.1) {
-                             transformed.y = animH; 
-                         } else if (deltaM > 254.0) {
-                             transformed.y = 0.0; 
-                         } else {
-                             transformed.y = animH - (deltaM * uHeightFactor);
-                         }
+                         // Apply Delta (Signed)
+                         // Positive dVal (I am Higher) -> Wall goes DOWN (-dVal)
+                         // Negative dVal (I am Lower)  -> Wall goes UP (-(-dVal) = +dVal)
+                         // Result is always: animH - (dVal * Factor)
+                         transformed.y = animH - (dVal * uHeightFactor);
                     }
                 }
 
@@ -864,9 +931,14 @@ class PistonViewer {
             // Dot Product: 1.0 = Front, -1.0 = Back
             const dot = camDir.dot(toTile);
 
-            // "Buffer Cone": +/- 70 degrees (cos(70) ~= 0.34)
-            // If dot < 0.34 (Side/Back), force low res.
-            const isBehind = (dot < 0.34);
+            // 1. GEO Frustum Culling (Aggressive)
+            // +/- 70 degrees (cos(70) ~= 0.34)
+            const isBehindGeo = (dot < 0.34);
+
+            // 2. TEXTURE Frustum Culling (Generous + Buffer)
+            // Widened cone: +/- 100 degrees (cos(100) ~= -0.2)
+            // Plus: 1000m Proximity Buffer (approx 1 tile width)
+            const isEffectivelyFrontTex = (dot > -0.2) || (t.d < 1000);
 
             if (t.d > distLimit) { // Use actual distance for culling
                 if (tile) this.unloadTile(key); // Out of range
@@ -879,17 +951,18 @@ class PistonViewer {
             else if (t.d < this.geoThresholds[1]) nominalLOD = 2;
             else if (t.d < this.geoThresholds[2]) nominalLOD = 1;
 
-            // Frustum Override: Force Large (0) if behind
+            // Frustum Override: Force Large (0) if behind (Geo only)
             let targetLOD = nominalLOD;
-            if (isBehind) {
-                targetLOD = 0; // Force Large
+            if (isBehindGeo) {
+                targetLOD = 0;
             }
 
             // Handle New Loads
             if (!tile && !this.loadingTiles.has(key)) {
                 if (updates < maxUpdates) {
                     this.loadingTiles.add(key);
-                    this.loadNewTile(t, targetLOD, !isBehind);
+                    // Use generous texture bias for initial load
+                    this.loadNewTile(t, targetLOD, isEffectivelyFrontTex);
                     updates++;
                 }
             } else if (tile) {
@@ -899,14 +972,11 @@ class PistonViewer {
                 }
 
                 // Texture Upgrade Logic
-                // Only upgrade if FRONT
-                const desiredTexFull = !isBehind;
-
-                if (desiredTexFull && !tile.isFullTex && !tile.loadingTex) {
+                if (isEffectivelyFrontTex && !tile.isFullTex && !tile.loadingTex) {
                     this.upgradeTexture(tile);
                 }
-                // Optional: Downgrade texture if behind? (Not implemented, usually not worth bandwidth)
             }
+            // Optional: Downgrade texture if behind? (Not implemented, usually not worth bandwidth)
         }
 
         // Queue processing handled by async loaders mostly now, 

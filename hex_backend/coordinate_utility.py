@@ -18,13 +18,13 @@ UNIT_HEX_WIDTH_METERS = UNIT_HEX_PX * METERS_PER_PIXEL  # 6.4 meters exactly
 SECTOR_SIZE_METERS = 819.2 
 SECTOR_PIXELS = 4096 # 819.2 / 0.2
 
-# Directions
-NORTH = 0
-NORTH_EAST = 1
-SOUTH_EAST = 2
-SOUTH = 3
-SOUTH_WEST = 4
-NORTH_WEST = 5
+# Directions (Source of Truth: Flat Top, North Start, Clockwise)
+NORTH = 0      # +r (Axial 0, 1)
+NORTH_EAST = 1 # (Axial 1, 0)
+SOUTH_EAST = 2 # (Axial 1, -1)
+SOUTH = 3      # (Axial 0, -1)
+SOUTH_WEST = 4 # (Axial -1, 0)
+NORTH_WEST = 5 # (Axial -1, 1)
 
 def get_hex_dimensions():
     """
@@ -41,7 +41,9 @@ def get_hex_dimensions():
 def axial_to_world_meters(q, r):
     """
     Converts Universal Unit Axial (q, r) to World Meters (x, y).
-    North-Zero Standard (Flat Top).
+    Standard Flat Top Orientation:
+    - q axis points ~East/South-East
+    - r axis points North
     """
     h = UNIT_HEX_WIDTH_METERS
     world_x = (q * (math.sqrt(3)/2) * h)

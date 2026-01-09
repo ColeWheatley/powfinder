@@ -330,20 +330,26 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
     blob = struct.pack("<4siifffii", b"HEX3", int(SX), int(SY), float(min_z-10), float(max_z+10), float(scale_f), cq, cr)
     
     # REFACTORED LOOP: Process each scale and pack 13-byte hex units
+    # Neighbor Source of Truth (Vectorized): N, NE, SE, S, SW, NW
     for l_idx, ld in enumerate(layers_data):
         S = scales[l_idx]["s"]
         blob += struct.pack("<I", len(ld))
         buf = bytearray(len(ld) * 13)
         
         # Determine neighborhood offsets based on orientation
-        # Scale 1 is Flat-topped (rotated in frontend). 
-        # Large Scales are Pointy-topped (different rotation).
+        # Source of Truth: N=0, Clockwise. We want indices 2(SE), 3(S), 4(SW).
         if S <= 1.1:
-            # Flat-topped (Axial)
-            nb_offsets = [(1, 0), (0, -1), (-1, -1), (-1, 0), (0, 1), (1, 1)] # Approximate cardinal directions
+            # Flat-topped (Axial) - indices 2,3,4
+            # 2=SE(1,-1), 3=S(0,-1), 4=SW(-1,0)
+            target_indices = [2, 3, 4]
+            full_offsets = [(0, 1), (1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1)] # N, NE, SE, S, SW, NW
         else:
-            # Pointy-topped (Axial)
-            nb_offsets = [(1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1)]
+            # Pointy-topped (Axial) - indices 2,3,4 relative to rotation
+            # The indices 2,3,4 in the "list of 6" map to the visual "Bottom-Right, Bottom, Bottom-Left"
+            target_indices = [2, 3, 4]
+            full_offsets = [(1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1)]
+
+        selected_offsets = [full_offsets[i] for i in target_indices]
 
         for i, item in enumerate(ld):
             q, r = item['q'], item['r']
@@ -355,15 +361,16 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
             hn = max(0, min(65535, int((h - (min_z-10)) * scale_f)))
             s_byte = max(0, min(255, int(s)))
             
-            # Neighborhood Sampling for Skirts
+            # Neighborhood Sampling for Skirts (Only SE, S, SW)
+            # Stored as Signed Int16 Deltas (My Height - Neighbor Height)
+            # Fits in same 6 bytes as previous 6xUint8
             deltas = []
             h_eff = coord_util.UNIT_HEX_WIDTH_METERS * S
             
-            for oq, or_ in nb_offsets:
+            for oq, or_ in selected_offsets:
                 nq, nr = q + oq, r + or_
                 
                 # Project back to world-space for DEM sampling
-                # This assumes standard world-to-axial logic
                 if S <= 1.1:
                     # Flat-top projection
                     wx = nq * (math.sqrt(3)/2) * h_eff
@@ -379,12 +386,14 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
                 col = max(0, min(dem_data.shape[1]-1, col))
                 nb_h = dem_data[row, col]
                 
-                # Delta is the "drop distance". Positive if center is higher.
-                # 0-255 range (meters).
-                d_val = max(0, min(255, int(round(h - nb_h))))
+                # Delta: Positive = I am Higher (Wall goes down). Negative = I am Lower (Wall goes up).
+                d_val = int(round(h - nb_h))
+                # Clamp to int16 range just in case
+                d_val = max(-32767, min(32767, d_val))
                 deltas.append(d_val)
                 
-            struct.pack_into("<hhHB6B", buf, i*13, dq, dr, hn, s_byte, *deltas)
+            # Pack 3 signed shorts (3h) instead of 6 bytes (6B)
+            struct.pack_into("<hhHB3h", buf, i*13, dq, dr, hn, s_byte, *deltas)
             
         blob += buf
     
