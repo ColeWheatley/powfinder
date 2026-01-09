@@ -594,6 +594,7 @@ class PistonViewer {
                 mesh, flatMesh, material, bounds,
                 hexDataLayers: parsed.layers,
                 stats: parsed.stats,
+                center: parsed.center,
                 currentGeoLOD: geoLOD,
                 isFullTex: false,
                 loadingTex: false,
