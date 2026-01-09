@@ -26,7 +26,7 @@ def latlon_to_world_meters(lat, lon):
 # =============================================================================
 TEXTURE_PADDING_PX = 64  
 WEB_P_QUALITY = 10 # User Requested
-DEBUG_MODE = True
+DEBUG_MODE = False
 RESAMPLE_DEM = False
 TARGET_LAT = 46.98705560886202
 TARGET_LON = 11.115050838788871
@@ -39,10 +39,11 @@ AERIAL_DIR = "hex_backend/aerial_tifs"
 # BAKING FUNCTIONS
 # =============================================================================
 
-def get_or_create_slope_map(dem_path, output_path, resample=False):
+def get_or_create_slope_map(dem_path, output_path, upsample_factor=1):
     """
     Checks for a cached slope TIF. If missing, generates it from the DEM.
-    Calculates gradient vector magnitude (steepness).
+    Calculates gradient vector magnitude (steepness) using windowed processing
+    to avoid OOM errors on large datasets.
     """
     if os.path.exists(output_path):
         print(f"✅ Found cached slope map: {output_path}")
@@ -52,35 +53,101 @@ def get_or_create_slope_map(dem_path, output_path, resample=False):
     start_time = time.time()
 
     with rasterio.open(dem_path) as src:
-        dem_data = src.read(1)
-        transform = src.transform
+        # Calculate new dimensions
+        new_width = src.width * upsample_factor
+        new_height = src.height * upsample_factor
+        
+        # New transform
+        new_transform = src.transform * src.transform.scale(
+            (src.width / new_width),
+            (src.height / new_height)
+        )
+
+        # Output Profile
         profile = src.profile.copy()
+        profile.update(
+            dtype=rasterio.float32, 
+            count=1, 
+            driver='GTiff',
+            width=new_width,
+            height=new_height,
+            transform=new_transform,
+            compress='lzw',
+            tiled=True,
+            blockxsize=512,
+            blockysize=512,
+            predictor=3
+        )
         
-        # Use absolute resolution for gradient spacing
-        res_x = abs(transform[0])
-        res_y = abs(transform[4])
+        # Grid resolutions
+        res_x = abs(new_transform[0])
+        res_y = abs(new_transform[4])
 
-        # Optional: Upsample Logic (for smoother gradients as requested)
-        if resample:
-            print("   -> Upsampling DEM for smoother gradients...")
-            # TODO: Implement fancy upsampling if 'RESAMPLE_DEM' is True. 
-            # For now, we stick to the 5m grid to save RAM, as 'np.gradient' checks neighbors anyway.
-            pass
-
-        print(f"   -> Calculating Gradient on {dem_data.shape} grid (Spacing: {res_x}m, {res_y}m)...")
-        # np.gradient returns (gradient_along_axis_0, gradient_along_axis_1) -> (dy, dx)
-        dy, dx = np.gradient(dem_data, res_y, res_x)
-        
-        # Calculate Magnitude (Slope in Radians) -> Convert to Degrees
-        slope_rad = np.arctan(np.sqrt(dx**2 + dy**2))
-        slope_deg = np.degrees(slope_rad)
-        
-        # Save Cached TIF
-        profile.update(dtype=rasterio.float32, count=1, driver='GTiff')
+        print(f"   -> Processing in windows (Total: {new_width}x{new_height}, Res: {res_x:.2f}m)...")
         
         with rasterio.open(output_path, 'w', **profile) as dst:
-            dst.write(slope_deg.astype(rasterio.float32), 1)
+            # We process the output in blocks
+            # To calculate gradient at edges, we need a 1-pixel padding from the DEM
+            # But since we are upsampling, we need to be careful.
             
+            # Simpler approach: Process based on destination blocks
+            for jt, window in dst.block_windows(1):
+                # 'window' is in destination coordinates
+                # We need to read slightly more from the source DEM to avoid edge artifacts
+                # 2 pixels padding in source is plenty for np.gradient
+                pad = 2
+                
+                # Back-project window to source coordinates
+                # Since it's a simple scale, we can just divide
+                src_window = rasterio.windows.Window(
+                    window.col_off / upsample_factor - pad,
+                    window.row_off / upsample_factor - pad,
+                    window.width / upsample_factor + 2*pad,
+                    window.height / upsample_factor + 2*pad
+                )
+                
+                # Clamp to src bounds
+                src_window = src_window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                
+                # Read and Resample this small chunk
+                # Calculate the exact shape we expect for this window
+                # Note: window.width/height are the sizes in the DESTINATION file
+                chunk_dem = src.read(
+                    1, 
+                    window=src_window, 
+                    out_shape=(int(src_window.height * upsample_factor), int(src_window.width * upsample_factor)),
+                    resampling=rasterio.enums.Resampling.bilinear
+                )
+                
+                if chunk_dem.size == 0: continue
+
+                # Calculate local gradient
+                dy, dx = np.gradient(chunk_dem, res_y, res_x)
+                slope_rad = np.arctan(np.sqrt(dx**2 + dy**2))
+                slope_deg = np.degrees(slope_rad).astype(np.float32)
+                
+                # We need to crop out the padding we added (if any)
+                # The src_window might have been shifted by 'pad'
+                # Find where the actual destination 'window' starts inside this resampled chunk
+                
+                # Calculate the offset within the resampled chunk_dem
+                # src_window.col_off is the starting column in the original TIF
+                # (src_window.col_off * upsample_factor) is the starting column in 'infinite upsampled space'
+                # window.col_off is the starting column in the actual destination TIF
+                
+                off_x = int(round(window.col_off - (src_window.col_off * upsample_factor)))
+                off_y = int(round(window.row_off - (src_window.row_off * upsample_factor)))
+                
+                # Slice out only the part that belongs in the destination window
+                final_chunk = slope_deg[off_y:off_y+int(window.height), off_x:off_x+int(window.width)]
+                
+                dst.write(final_chunk, 1, window=window)
+                
+                if jt[0] % 20 == 0 and jt[1] == 0:
+                    total_blocks = (dst.height // 512 + 1) * (dst.width // 512 + 1)
+                    current_block = jt[0] * (dst.width // 512 + 1) + jt[1]
+                    print(f"   -> Progress: {100 * current_block / total_blocks:.1f}%")
+
     print(f"✅ Generated Slope Map in {time.time() - start_time:.2f}s")
     return rasterio.open(output_path)
 
@@ -135,22 +202,7 @@ def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/a
     c_low = canvas.resize((total_size_px // 16, total_size_px // 16), Image.LANCZOS)
     c_low.save(os.path.join(res_dirs["low"], f_name), "WEBP", quality=WEB_P_QUALITY)
 
-def bake_sector_binary(SX, SY, dem_ds, slope_ds, output_dir="frontend/hexagons/app/tiles_bin"):
-    if not os.path.exists(output_dir): os.makedirs(output_dir)
-    min_x, min_y, max_x, max_y = coord_util.sector_id_to_bounds_meters(SX, SY)
-
-    # Access Data & Transforms specifically for this baking op (keeps handles alive in main)
-    dem_array = dem_ds.read(1) # Warning: Reads full DEM into memory every sector if not careful? 
-    # Actually, main() reads it once? No, let's fix the passing.
-    # To avoid repeated reads if we passed the OPEN DATASET, we should read windowed?
-    # For now, assuming dataset is passed, let's just use window reading! Much faster and lighter.
-    
-    # Actually, previous code passed the *array*. Let's stick to passing the array for speed if it fits in RAM.
-    # But wait, we want to optimize. 
-    # Let's revert to passing ARRAY and TRANSFORM to avoid IO bottle necks in the loop.
-    pass 
-
-def bake_sector_binary_fast(SX, SY, dem_data, dem_transform, slope_data, slope_transform, output_dir="frontend/hexagons/app/tiles_bin"):
+def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transform, output_dir="frontend/hexagons/app/tiles_bin"):
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     min_x, min_y, max_x, max_y = coord_util.sector_id_to_bounds_meters(SX, SY)
 
@@ -238,8 +290,9 @@ def main():
         dem_poly = box(*dem.bounds)
 
     # 2. Get/Create Gradient Slope Map
-    print("Loading Slope Map...")
-    slope_ds = get_or_create_slope_map(DEM_PATH, SLOPE_PATH, resample=RESAMPLE_DEM)
+    # Upsample by factor of 2 (5m -> 2.5m) for smoother gradients
+    upsample = 2 if not DEBUG_MODE else 1
+    slope_ds = get_or_create_slope_map(DEM_PATH, SLOPE_PATH, upsample_factor=upsample)
     slope_data = slope_ds.read(1)
     slope_transform = slope_ds.transform
 
@@ -259,7 +312,7 @@ def main():
             if dem_poly.intersects(box(*coord_util.sector_id_to_bounds_meters(sx, sy))):
                 print(f"Cooking Sector {sx}, {sy}...")
                 bake_sector_textures(sx, sy, valid_tifs)
-                bake_sector_binary_fast(sx, sy, dem_data, dem_transform, slope_data, slope_transform)
+                bake_sector_binary(sx, sy, dem_data, dem_transform, slope_data, slope_transform)
 
     generate_manifest.generate_manifest()
     print("Done.")
