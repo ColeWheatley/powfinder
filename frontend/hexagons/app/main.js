@@ -59,20 +59,53 @@ class PistonViewer {
         this.controls.minDistance = 100;
         this.controls.maxDistance = 50000;
         this.controls.maxPolarAngle = Math.PI / 2.1;
-        this.controls.addEventListener('change', () => { this.needsRender = true; });
+
+        // INTERACTION STATE TRACKING
+        this.isUserInteracting = false;
+        this.controls.addEventListener('start', () => {
+            this.isUserInteracting = true;
+            this.resetLODs(); // Immediate downgrade on touch
+            this.log("Interaction Start", "info");
+        });
+        this.controls.addEventListener('end', () => {
+            this.isUserInteracting = false;
+            this.lastInteractionTime = performance.now();
+            this.log("Interaction End", "info");
+        });
+        this.controls.addEventListener('change', () => {
+            this.needsRender = true;
+            // NOTE: We do NOT reset LODs here anymore to avoid oscillation loops
+            // from our own camera altitude adjustments.
+        });
 
         this.needsRender = true;
         this.lastLODCamPos = new THREE.Vector3().copy(this.camera.position);
 
-        // Granular LOD Ranges for Stacked Rendering
-        this.lodRanges = {
-            unitEnd: 400,
-            smallStart: 380,
-            smallEnd: 2000,
-            mediumStart: 1980,
-            mediumEnd: 3500,
-            largeStart: 3480
+        // Platform Detection
+        this.isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        this.log(`Platform: ${this.isMobile ? 'Mobile' : 'Desktop'}`);
+
+        // LOD Configurations
+        this.LOD_CONFIG = {
+            DESKTOP: {
+                MOVING: { unitEnd: 0, smallStart: 0, smallEnd: 2000, mediumStart: 1980, mediumEnd: 3500, largeStart: 3480 },
+                TARGET: { unitEnd: 2000, smallStart: 1980, smallEnd: 5000, mediumStart: 4980, mediumEnd: 10000, largeStart: 9980 }
+            },
+            MOBILE: {
+                MOVING: { unitEnd: 0, smallStart: 0, smallEnd: 1000, mediumStart: 980, mediumEnd: 2500, largeStart: 2480 },
+                TARGET: { unitEnd: 400, smallStart: 380, smallEnd: 2000, mediumStart: 1980, mediumEnd: 3500, largeStart: 3480 }
+            }
         };
+
+        // Initialize with MOVING preset
+        const preset = this.isMobile ? this.LOD_CONFIG.MOBILE.MOVING : this.LOD_CONFIG.DESKTOP.MOVING;
+        this.lodRanges = { ...preset };
+
+        // Antisintering State
+        this.lastInteractionTime = performance.now();
+        this.isRefining = false;
+        this.refineSpeed = 5000; // Snappy growth: 5km per frame (4 frames for full landscape)
+        this.maxFrameTime = 500; // Allow a 0.5s pause for the "Snap" reward
 
         // Legacy/Sorting Support
         this.geoThresholds = [1200, 3500, 8500, 25000];
@@ -490,7 +523,7 @@ class PistonViewer {
 
 
 
-    createMeshFromWorkerData(lodData, material) {
+    createMeshFromWorkerData(lodData, material, includeSkirts = true) {
         if (!lodData || lodData.matrix.length === 0) return null;
 
         const num = lodData.matrix.length / 16;
@@ -498,40 +531,28 @@ class PistonViewer {
         // Clone material...
         const instMat = material.clone();
         if (!instMat.userData) instMat.userData = {};
-        // We don't have lodIdx here easily unless passed, but it's used for uLodRadii.
-        // We'll set it outside or pass it in. 
         instMat.userData.isClone = true;
         this.setupMaterialShader(instMat);
 
         // Geometries
         const capG = this.capGeometry.clone();
-        const skirtG = this.skirtGeometry.clone();
-        // Scale is already handled by worker? NO. 
-        // Worker only handles position translation. Scale of the geometry itself (the hexagon size) must be applied here.
-        // Wait, worker handles 'matrix' translation. But the geometry itself (capGeo) needs to be scaled?
-        // YES. createInstancedMeshV3 did: capG.scale(scale, 1, scale).
-        // I need to know the scale here. pass 'scale' argument.
-
-        // Actually, let's fix the signature:
-        // createMeshFromWorkerData(lodData, material, scale)
-
-        // We need to scale the geometry based on LOD level.
-        // But how do we know the scale? 
-        // lodData doesn't have it explicitly. 
-        // I should pass it from loadNewTile loop.
+        const skirtG = includeSkirts ? this.skirtGeometry.clone() : null;
 
         return (scale) => {
             capG.scale(scale, 1, scale);
-            skirtG.scale(scale, 1, scale);
+            if (skirtG) skirtG.scale(scale, 1, scale);
 
             const capMesh = new THREE.InstancedMesh(capG, instMat, num);
-            const skirtMesh = new THREE.InstancedMesh(skirtG, instMat, num);
+            const skirtMesh = skirtG ? new THREE.InstancedMesh(skirtG, instMat, num) : null;
 
             // Assign Attributes from Worker
             capMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
-            skirtMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
+            if (skirtMesh) skirtMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
 
-            [capMesh, skirtMesh].forEach(m => {
+            const meshes = [capMesh];
+            if (skirtMesh) meshes.push(skirtMesh);
+
+            meshes.forEach(m => {
                 m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(lodData.nz1, 4));
                 m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(lodData.nz2, 4));
                 m.geometry.setAttribute('instanceSlopes', new THREE.InstancedBufferAttribute(lodData.slopes, 3));
@@ -541,8 +562,9 @@ class PistonViewer {
 
             const group = new THREE.Group();
             group.add(capMesh);
-            group.add(skirtMesh);
-            group.userData.activeSkirts = lodData.activeSkirts;
+            if (skirtMesh) group.add(skirtMesh);
+
+            group.userData.activeSkirts = skirtMesh ? lodData.activeSkirts : 0;
             group.frustumCulled = false;
             return group;
         };
@@ -586,6 +608,8 @@ class PistonViewer {
                 varying vec3 vWorldPos;
                 varying float vSlope;
                 varying float vIsTop;
+                varying float vSkirtY;
+                varying float vSideId;
                 varying vec3 vMyNormal;
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
@@ -599,6 +623,8 @@ class PistonViewer {
                     // CAP
                     transformed.y = 0.0 + animH; 
                     vSlope = 0.0; // Caps follow texture color usually, or flat slope
+                    vSkirtY = 0.0;
+                    vSideId = -1.0;
                     
                     // Decode Normal from [0, 1] -> [-1, 1]
                     float nx = instanceNormal.x * 2.0 - 1.0; 
@@ -610,6 +636,9 @@ class PistonViewer {
                     
                 } else {
                     // SKIRT
+                    vSkirtY = -position.y; // 0 at top, 1 at bottom
+                    vSideId = aSideId;
+
                     if (position.y > -0.1) {
                          transformed.y = animH;
                     } else {
@@ -657,6 +686,8 @@ class PistonViewer {
                 varying vec3 vWorldPos;
                 varying float vSlope;
                 varying float vIsTop;
+                varying float vSkirtY;
+                varying float vSideId;
 
                 vec3 gradientColor(float s) {
                     // Green: 30-35
@@ -691,8 +722,14 @@ class PistonViewer {
                 // Fallback for huge hexes exceeding padding (Debug Pink)
                 if (outOfBounds) texColor = vec4(1.0, 0.0, 1.0, 1.0);
 
-                // --- LIGHTING (Simplified for Performance) ---
-                float lighting = 1.0;
+                // --- LIGHTING (Fake AO + Side Jitter) ---
+                float ao = 1.0 - (vSkirtY * 0.4); 
+                float jitter = 1.0;
+                if (vIsTop < 0.5) {
+                    // Apply subtle difference per face (SE, S, SW)
+                    jitter = 0.92 + (vSideId * 0.04); 
+                }
+                float lighting = ao * jitter;
 
                 if (vIsTop < 0.5) {
                     // SIDE / SKIRT
@@ -732,7 +769,7 @@ class PistonViewer {
             if (t.mesh && t.mesh.isGroup) {
                 // Caps are always first child, skirts second
                 const capMesh = t.mesh.children[0];
-                const skirtMesh = t.mesh.children[1];
+                const skirtMesh = t.mesh.children[1]; // Might be undefined now
 
                 if (capMesh && capMesh.visible) capCount += capMesh.count;
                 if (skirtMesh && skirtMesh.visible) skirtCount += (t.mesh.userData.activeSkirts || 0);
@@ -1064,7 +1101,11 @@ class PistonViewer {
                     const layerIdx = 3 - level;
                     const meshScale = scaleTable[layerIdx];
 
-                    const makeMesh = this.createMeshFromWorkerData(lodData, material);
+                    // scaleTable[0] is Large (24.0). DISABLE skirts for Large.
+                    // scaleTable[3] is Unit (1.0). ENABLE skirts for Unit.
+                    const includeSkirts = (layerIdx !== 0);
+
+                    const makeMesh = this.createMeshFromWorkerData(lodData, material, includeSkirts);
                     const meshGroup = makeMesh(meshScale);
 
                     if (meshGroup && meshGroup.children.length > 0) {
@@ -1321,17 +1362,126 @@ class PistonViewer {
         }
     }
 
+    resetLODs() {
+        const preset = this.isMobile ? this.LOD_CONFIG.MOBILE.MOVING : this.LOD_CONFIG.DESKTOP.MOVING;
+        // Reset if we deviate from "moving" preset or if we are in the middle of refinement
+        if (this.lodRanges.unitEnd !== preset.unitEnd || this.isRefining) {
+            this.lodRanges = { ...preset };
+            this.isRefining = false;
+            this.needsRender = true;
+        }
+    }
+
+    refineLODs() {
+        // Stop if sustained framerate is tanking (use average of last 5 frames)
+        const sampleCount = 5;
+        const recentFrames = this.frametimeBuffer.slice(-sampleCount);
+        const avgFrameTime = recentFrames.reduce((a, b) => a + b, 0) / recentFrames.length;
+
+        if (avgFrameTime > this.maxFrameTime) {
+            if (this.isRefining) {
+                this.log(`Antisintering capped by performance (${avgFrameTime.toFixed(1)}ms avg)`, "warn");
+                this.isRefining = false;
+            }
+            return false;
+        }
+
+        const target = this.isMobile ? this.LOD_CONFIG.MOBILE.TARGET : this.LOD_CONFIG.DESKTOP.TARGET;
+        let changed = false;
+
+        // Helper to nudge value
+        const nudge = (current, goal) => {
+            if (current < goal) {
+                return Math.min(current + this.refineSpeed, goal);
+            }
+            return current;
+        };
+
+        const oldUnitEnd = this.lodRanges.unitEnd;
+        const oldSmallEnd = this.lodRanges.smallEnd;
+        const oldMedEnd = this.lodRanges.mediumEnd;
+
+        this.lodRanges.unitEnd = nudge(this.lodRanges.unitEnd, target.unitEnd);
+
+        // BACKGROUND POPULATION: Keep small hexes covering the foreground (0m start) 
+        // until unit hexes have mostly populated.
+        if (this.lodRanges.unitEnd >= target.unitEnd * 0.95) {
+            this.lodRanges.smallStart = Math.max(0, this.lodRanges.unitEnd - 50);
+        } else {
+            this.lodRanges.smallStart = 0;
+        }
+
+        this.lodRanges.smallEnd = nudge(this.lodRanges.smallEnd, target.smallEnd);
+
+        // Similar strategy for medium
+        if (this.lodRanges.smallEnd >= target.smallEnd * 0.95) {
+            this.lodRanges.mediumStart = Math.max(0, this.lodRanges.smallEnd - 50);
+        } else {
+            this.lodRanges.mediumStart = 0;
+        }
+
+        this.lodRanges.mediumEnd = nudge(this.lodRanges.mediumEnd, target.mediumEnd);
+
+        if (this.lodRanges.mediumEnd >= target.mediumEnd * 0.95) {
+            this.lodRanges.largeStart = Math.max(0, this.lodRanges.mediumEnd - 50);
+        } else {
+            this.lodRanges.largeStart = 0;
+        }
+
+        // Check for meaningful changes
+        if (this.lodRanges.unitEnd !== oldUnitEnd ||
+            this.lodRanges.smallEnd !== oldSmallEnd ||
+            this.lodRanges.mediumEnd !== oldMedEnd) {
+            changed = true;
+        }
+
+        // Check if we are fully done/reached targets
+        const isDone = (this.lodRanges.unitEnd >= target.unitEnd &&
+            this.lodRanges.smallEnd >= target.smallEnd &&
+            this.lodRanges.mediumEnd >= target.mediumEnd);
+
+        if (changed) {
+            this.isRefining = true;
+            this.needsRender = true; // Force a frame
+            this.needsLODUpdate = true; // FORCE LOD check to recognize new ranges
+        } else if (isDone && this.isRefining) {
+            this.log("Antisintering Complete: Maximum Resolution Reached.", "success");
+            this.isRefining = false;
+        }
+
+        return !isDone;
+    }
+
     animate() {
         requestAnimationFrame(() => this.animate());
 
-        // --- BACKGROUND MAINTENANCE (Always run even if static) ---
+        // --- BACKGROUND MAINTENANCE ---
         this.processInstantiationQueue();
         this.processQueues();
+
+        const now = performance.now();
+        const timeSinceInteraction = now - this.lastInteractionTime;
+
+        // --- ANTISINTERING REFINEMENT ---
+        // Only refine if user is NOT interacting and we've waited for damping/settling
+        if (!this.isUserInteracting && timeSinceInteraction > 200) {
+            if (!this.isRefining && !this.isRefinementDone) {
+                this.log("Antisintering: Sharpening world...", "info");
+                this.isRefining = true;
+            }
+            const stillRefining = this.refineLODs();
+            if (!stillRefining) this.isRefinementDone = true;
+        } else {
+            // If user is interacting or just stopped, ensure we are reset
+            if (this.isUserInteracting) { // Only force reset if active, otherwise let it dwell
+                this.isRefinementDone = false;
+            }
+        }
 
         // Decide if we should update LOD (only if camera moved > 50m)
         // FORCE update if loader is visible (to ensure initial check runs)
         const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
-        if (camDist > 50 || this.needsLODUpdate || !this.loaderHidden) {
+        if (camDist > 50 || this.isRefining || this.needsLODUpdate || !this.loaderHidden) {
             this.updateLOD();
             if (camDist > 50) this.lastLODCamPos.copy(this.camera.position);
             this.needsLODUpdate = false;
@@ -1341,9 +1491,9 @@ class PistonViewer {
 
         // --- RENDER CHECK ---
         // If damping is active (moved=true) or logic set a flag, proceed.
+        // If refinedLODs set needsRender, we process it here.
         if (!moved && !this.needsRender) return;
 
-        const now = performance.now();
         this.updateRenderStats(now);
         this.updateFps();
         this.updateFrametimeGraph();
@@ -1362,7 +1512,24 @@ class PistonViewer {
                 if (t.mesh) t.mesh.visible = false;
             } else {
                 if (t.flatMesh) t.flatMesh.visible = false;
-                if (t.mesh) t.mesh.visible = true;
+                if (t.mesh) {
+                    t.mesh.visible = true;
+                    // CPU-SIDE LOD CULLING (True "Display None")
+                    // Iterate LOD layers and hide those with 0 range
+                    t.mesh.children.forEach(meshGroup => {
+                        const m = meshGroup.children[0]?.material;
+                        if (m && m.userData.lodIdx !== undefined) {
+                            const idx = m.userData.lodIdx;
+                            let active = false;
+                            if (idx === 3) active = (this.lodRanges.unitEnd > 0);
+                            else if (idx === 2) active = (this.lodRanges.smallEnd > 0);
+                            else if (idx === 1) active = (this.lodRanges.mediumEnd > 0);
+                            else if (idx === 0) active = true; // Large always active or handled by tile culling
+
+                            meshGroup.visible = active;
+                        }
+                    });
+                }
             }
         }
 
