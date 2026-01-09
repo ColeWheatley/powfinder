@@ -466,9 +466,6 @@ class PistonViewer {
             m.geometry.setAttribute('instanceNbB', new THREE.InstancedBufferAttribute(nbB, 2, true));
         });
 
-        capMesh.frustumCulled = false;
-        skirtMesh.frustumCulled = false;
-
         const group = new THREE.Group();
         group.add(capMesh);
         group.add(skirtMesh);
@@ -860,46 +857,87 @@ class PistonViewer {
             return t;
         }).sort((a, b) => a.d - b.d);
 
-        // 2. Identify Tasks
+        // Limit updates per frame
+        const maxUpdates = 1;
+        let updates = 0;
+
+        // Camera Direction for Frustum Weighting
+        const camDir = new THREE.Vector3();
+        this.camera.getWorldDirection(camDir);
+        camDir.y = 0; // Horizontal bias
+        camDir.normalize();
+
+        // 2. Identify Tasks with Directional Bias
         for (const t of sortedManifest) {
             const key = `${t.q}_${t.r}`;
             const tile = this.tiles.get(key);
-            const dist = t.d;
 
-            if (dist > distLimit) {
+            // Calculate Box Center for Direction Check
+            const boxCenter = new THREE.Vector3(
+                t.x - this.worldOrigin.x + SECTOR_WIDTH_METERS * 0.5,
+                0,
+                -(t.y - this.worldOrigin.y) - SECTOR_WIDTH_METERS * 0.5
+            );
+
+            // Direction to Tile
+            const toTile = new THREE.Vector3().subVectors(boxCenter, camPos);
+            toTile.y = 0;
+            toTile.normalize();
+
+            // Dot Product: 1.0 = Front, -1.0 = Back
+            const dot = camDir.dot(toTile);
+
+            // "Buffer Cone": +/- 70 degrees (cos(70) ~= 0.34)
+            // If dot < 0.34 (Side/Back), force low res.
+            const isBehind = (dot < 0.34);
+
+            if (t.d > distLimit) { // Use actual distance for culling
                 if (tile) this.unloadTile(key); // Out of range
                 continue;
             }
 
-            // Determine Desired Geometry LOD
-            // 0=High(Close), 1=Mid, 2=Low, 3=Lowest(Far)
-            let desiredGeoLOD = 3;
-            if (dist < this.geoThresholds[0]) desiredGeoLOD = 0;
-            else if (dist < this.geoThresholds[1]) desiredGeoLOD = 1;
-            else if (dist < this.geoThresholds[2]) desiredGeoLOD = 2;
+            // Determine Nominal LOD based on Distance
+            let nominalLOD = 0;
+            if (t.d < this.geoThresholds[0]) nominalLOD = 3;
+            else if (t.d < this.geoThresholds[1]) nominalLOD = 2;
+            else if (t.d < this.geoThresholds[2]) nominalLOD = 1;
 
-            // Determine Desired Texture LOD
-            const desiredTexFull = (dist < this.texThreshold);
+            // Frustum Override: Force Large (0) if behind
+            let targetLOD = nominalLOD;
+            if (isBehind) {
+                targetLOD = 0; // Force Large
+            }
 
+            // Handle New Loads
             if (!tile) {
-                // Not loaded? Queue it.
-                if (!this.loadQueue.find(q => q.key === key)) {
-                    this.loadQueue.push({ key, t, desiredGeoLOD, desiredTexFull });
+                if (updates < maxUpdates) {
+                    // When loading a new tile, we always start with low-res texture
+                    // and then upgrade if needed.
+                    this.loadNewTile(t, targetLOD, false);
+                    updates++;
                 }
             } else {
-                // Already loaded. Check updates.
-                // Geo Swap?
-                if (tile.currentGeoLOD !== desiredGeoLOD && !tile.isTransitioning) {
-                    this.swapGeometry(tile, desiredGeoLOD);
+                // Geo Swap Logic
+                if (!tile.isTransitioning && tile.currentGeoLOD !== targetLOD) {
+                    if (updates < maxUpdates) {
+                        this.transitionTile(key, targetLOD);
+                        updates++;
+                    }
                 }
-                // Texture Upgrade?
+
+                // Texture Upgrade Logic
+                // Only upgrade if FRONT and CLOSE
+                const desiredTexFull = (!isBehind && t.d < this.texThreshold);
+
                 if (desiredTexFull && !tile.isFullTex && !tile.loadingTex) {
                     this.upgradeTexture(tile);
                 }
+                // Optional: Downgrade texture if behind? (Not implemented, usually not worth bandwidth)
             }
         }
 
-        this.processQueue();
+        // Queue processing handled by async loaders mostly now, 
+        // but we still have an initial load checker.
         this.checkInitialLoad(sortedManifest);
     }
 
@@ -937,7 +975,7 @@ class PistonViewer {
         if (this.tiles.has(key)) return;
 
         try {
-            // 1. Initial Texture (Low Res for speed)
+            // 1. Initial Texture
             const lowTexUrl = `aerial_tiles/low/sector_${t.q}_${t.r}.webp`;
             const texLoader = new THREE.TextureLoader();
             const texture = await texLoader.loadAsync(lowTexUrl);
@@ -953,14 +991,27 @@ class PistonViewer {
             const buffer = await (await fetch(binUrl)).arrayBuffer();
             const parsed = this.parseBinaryV3(buffer);
 
-            // 3. Create Geometry
+            // 3. Create Stacked Geometry (All 4 Layers)
             const flatMesh = new THREE.Mesh(this.flatGeometry, material);
             flatMesh.position.set(t.lx, 0, t.lz);
             this.scene.add(flatMesh);
 
-            const mesh = this.createInstancedMeshV3(parsed.layers, geoLOD, material);
-            mesh.position.set(t.lx, 0, t.lz);
-            this.scene.add(mesh);
+            const containerGroup = new THREE.Group();
+            containerGroup.position.set(t.lx, 0, t.lz);
+
+            // Load ALL 4 Scales (3=Unit, 2=Small, 1=Med, 0=Large)
+            // They will be radially culled by shader
+            [0, 1, 2, 3].forEach(level => {
+                const meshGroup = this.createInstancedMeshV3(parsed.layers, level, material);
+                if (meshGroup) containerGroup.add(meshGroup);
+            });
+
+            // Initial Visibility Check
+            const angle = this.controls.getPolarAngle() * 180 / Math.PI;
+            const isVis = (angle >= 5.5);
+            containerGroup.visible = isVis; // Parent controls all
+
+            this.scene.add(containerGroup);
 
             const half = TILE_WIDTH_WORLD / 2;
             const bounds = new THREE.Box3(
@@ -970,11 +1021,12 @@ class PistonViewer {
 
             const tileObj = {
                 q: t.q, r: t.r, lx: t.lx, lz: t.lz,
-                mesh, flatMesh, material, bounds,
+                mesh: containerGroup,
+                flatMesh, material, bounds,
                 hexDataLayers: parsed.layers,
                 stats: parsed.stats,
                 center: parsed.center,
-                currentGeoLOD: geoLOD,
+                currentGeoLOD: -1, // Stacked mode
                 isFullTex: false,
                 loadingTex: false,
                 isTransitioning: false
@@ -982,7 +1034,6 @@ class PistonViewer {
             this.tiles.set(key, tileObj);
             this.updateGlobalStats(parsed.stats);
 
-            // 5. Upgrade Texture Immediately if close?
             if (loadFullTexNow) this.upgradeTexture(tileObj);
 
         } catch (e) { console.error("Tile Load Error", key, e); }
@@ -1005,40 +1056,12 @@ class PistonViewer {
     }
 
     swapGeometry(tile, newLOD) {
-        tile.isTransitioning = true;
-        if (tile.mesh) {
-            this.scene.remove(tile.mesh);
-            // Properly dispose of Group members
-            if (tile.mesh.isGroup) {
-                tile.mesh.children.forEach(c => {
-                    if (c.geometry) c.geometry.dispose();
-                });
-            } else if (tile.mesh.geometry) {
-                tile.mesh.geometry.dispose();
-            }
-        }
-
-        // Use tile-specific material or global? 
-        // We clone for the dual-mesh approach to avoid shader branch.
-        const mesh = this.createInstancedMeshV3(tile.hexDataLayers, newLOD, tile.material);
-        mesh.position.set(tile.lx, 0, tile.lz);
-
-        // Ensure visibility state matches current animation frame
+        // Stacked Mode: No need to swap geometry!
+        // The shader handles LOD via uLodRadii.
+        // We just ensure visibility matches camera angle.
         const angle = this.controls.getPolarAngle() * 180 / Math.PI;
         const isVis = (angle >= 5.5);
-
-        // Handle Group Visibility by traversing children
-        if (mesh.isGroup) {
-            mesh.children.forEach(c => c.visible = isVis);
-            mesh.visible = true; // Group itself stays active so we can access children
-        } else {
-            mesh.visible = isVis;
-        }
-
-        this.scene.add(mesh);
-        tile.mesh = mesh;
-        tile.currentGeoLOD = newLOD;
-        tile.isTransitioning = false;
+        if (tile.mesh) tile.mesh.visible = isVis;
     }
 
     unloadTile(key) {
@@ -1048,14 +1071,12 @@ class PistonViewer {
         this.scene.remove(tile.mesh);
         this.scene.remove(tile.flatMesh);
 
-        // Cleanup Group
-        if (tile.mesh.isGroup) {
-            tile.mesh.children.forEach(c => {
-                if (c.geometry) c.geometry.dispose();
-            });
-        } else if (tile.mesh.geometry) {
-            tile.mesh.geometry.dispose();
-        }
+        // Deep Cleanup of Stacked Group
+        tile.mesh.traverse(obj => {
+            if (obj.isMesh) {
+                if (obj.geometry) obj.geometry.dispose();
+            }
+        });
 
         if (tile.flatMesh.geometry) tile.flatMesh.geometry.dispose();
         if (tile.material.map) tile.material.map.dispose();
@@ -1063,197 +1084,198 @@ class PistonViewer {
 
         this.tiles.delete(key);
     }
+}
 
-    hideLoader() {
-        if (this.loaderHidden) return;
-        const loader = document.getElementById('loader');
-        if (loader) { loader.style.display = 'none'; this.loaderHidden = true; }
-    }
+hideLoader() {
+    if (this.loaderHidden) return;
+    const loader = document.getElementById('loader');
+    if (loader) { loader.style.display = 'none'; this.loaderHidden = true; }
+}
 
-    maintainCameraAltitudeDuringAnimation(h) {
-        const target = this.controls.target;
-        const wx = target.x + this.worldOrigin.x;
-        const wy = this.worldOrigin.y - target.z;
+maintainCameraAltitudeDuringAnimation(h) {
+    const target = this.controls.target;
+    const wx = target.x + this.worldOrigin.x;
+    const wy = this.worldOrigin.y - target.z;
 
-        const q_r = worldToSectorID(wx, wy);
-        const key = `${q_r.Q}_${q_r.R}`;
-        const tile = this.tiles.get(key);
+    const q_r = worldToSectorID(wx, wy);
+    const key = `${q_r.Q}_${q_r.R}`;
+    const tile = this.tiles.get(key);
 
-        // Update Readouts
-        const secEl = document.getElementById('sector-val');
-        if (secEl) secEl.textContent = `${q_r.Q}, ${q_r.R}`;
+    // Update Readouts
+    const secEl = document.getElementById('sector-val');
+    if (secEl) secEl.textContent = `${q_r.Q}, ${q_r.R}`;
 
-        const worldEl = document.getElementById('world-val');
-        if (worldEl) worldEl.textContent = `${wx.toFixed(0)}, ${wy.toFixed(0)}`;
+    const worldEl = document.getElementById('world-val');
+    if (worldEl) worldEl.textContent = `${wx.toFixed(0)}, ${wy.toFixed(0)}`;
 
-        // Approximate Hex (Axial)
-        const h_size = UNIT_HEX_WIDTH_METERS;
-        const aq = Math.round(wx / (Math.sqrt(3) / 2 * h_size));
-        const ar = Math.round((wy - (aq * 0.5 * h_size)) / h_size);
+    // Approximate Hex (Axial)
+    const h_size = UNIT_HEX_WIDTH_METERS;
+    const aq = Math.round(wx / (Math.sqrt(3) / 2 * h_size));
+    const ar = Math.round((wy - (aq * 0.5 * h_size)) / h_size);
 
-        const hexEl = document.getElementById('hex-val');
-        if (hexEl) hexEl.textContent = `${aq}, ${ar}`;
+    const hexEl = document.getElementById('hex-val');
+    if (hexEl) hexEl.textContent = `${aq}, ${ar}`;
 
-        if (tile && tile.center) {
-            // Find specific hex height
-            const dq = aq - tile.center.q;
-            const dr = ar - tile.center.r;
+    if (tile && tile.center) {
+        // Find specific hex height
+        const dq = aq - tile.center.q;
+        const dr = ar - tile.center.r;
 
-            let groundH = tile.stats.min; // Fallback
-            let found = false;
+        let groundH = tile.stats.min; // Fallback
+        let found = false;
 
-            // Search Active Layers (start from finest L3 -> index 3)
-            // Or just search all? Finest is best.
-            for (let l = 3; l >= 0; l--) {
-                const layer = tile.hexDataLayers[l];
-                if (!layer) continue;
-                // Simple linear search (fast enough for 1 hex per frame)
-                for (const hx of layer) {
-                    if (hx.dq === dq && hx.dr === dr) {
-                        groundH = hx.h;
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) break;
-            }
-
-            // If not found (maybe gap?), fall back to average, not MAX.
-            if (!found) groundH = tile.stats.avg;
-
-            const animatedH = (groundH - this.floorState.value) * h;
-            const minCamY = animatedH + 50.0;
-
-            // Soft constraint: only push if below
-            if (this.camera.position.y < minCamY) this.camera.position.y = minCamY;
-
-            const thEl = document.getElementById('tile-height');
-            if (thEl) thEl.textContent = `${animatedH.toFixed(1)}m`;
-        }
-        const chEl = document.getElementById('camera-height');
-        if (chEl) chEl.textContent = `${this.camera.position.y.toFixed(0)}m`;
-    }
-
-    updateFloorState(h) {
-        const currentMin = this.pickFloorValue();
-
-        if (LOCK_FLOOR_ON_RISE && h > FLOOR_LOCK_THRESHOLD) {
-            // Logic: Only update if we found a LOWER floor (prevent sinking), but don't raise it (prevent jitter).
-            if (!this.floorState.locked || currentMin < this.floorState.value) {
-                this.floorState.value = currentMin;
-            }
-            this.floorState.locked = true;
-            this.updateFloorUniforms();
-        } else if (!LOCK_FLOOR_ON_RISE) {
-            this.floorState.value = currentMin;
-            this.updateFloorUniforms();
-        } else {
-            // Not yet locked (flat mode), just track freely
-            this.floorState.value = currentMin;
-            this.updateFloorUniforms();
-        }
-    }
-
-    pickFloorValue() {
-        const inView = this.getTilesInView();
-        const validTiles = inView.length ? inView : Array.from(this.tiles.values());
-        let min = Infinity;
-        for (const t of validTiles) if (t.stats && t.stats.min < min) min = t.stats.min;
-        return Number.isFinite(min) ? min : 0;
-    }
-
-    getTilesInView() {
-        this.camera.updateMatrixWorld();
-        this.projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
-        this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
-        return Array.from(this.tiles.values()).filter(t => this.frustum.intersectsBox(t.bounds));
-    }
-
-    updateFloorUniforms() {
-        for (const m of this.materialsToUpdate) {
-            if (m.userData.shader) m.userData.shader.uniforms.uFloorOffset.value = this.floorState.value;
-        }
-    }
-
-    animate() {
-        requestAnimationFrame(() => this.animate());
-        this.controls.update();
-        const now = performance.now();
-        this.updateRenderStats(now);
-        this.updateFps();
-        this.updateFrametimeGraph();
-
-        const angle = this.controls.getPolarAngle() * 180 / Math.PI;
-        const linear = Math.min(1, Math.max(0, (angle - 5.5) / (25.0 - 5.5)));
-        const h = linear;
-        const flat = angle < 5.5;
-
-        this.updateFloorState(h);
-        this.maintainCameraAltitudeDuringAnimation(h);
-
-        for (const t of this.tiles.values()) {
-            if (t.flatMesh) t.flatMesh.visible = flat;
-            if (t.mesh) t.mesh.visible = !flat;
-        }
-
-        for (const m of this.materialsToUpdate) {
-            if (m.userData.shader) {
-                m.userData.shader.uniforms.uHeightFactor.value = h;
-                m.userData.shader.uniforms.uGradientMode.value = this.gradientMode;
-                m.userData.shader.uniforms.uCameraPos.value.copy(this.camera.position);
-
-                m.userData.shader.uniforms.uDebugRadii.value.set([
-                    this.geoThresholds[0],
-                    this.geoThresholds[1],
-                    this.geoThresholds[2],
-                    this.renderSettings.renderDistance
-                ]);
-                m.userData.shader.uniforms.uDebugRingsEnabled.value.set(
-                    this.debugRings.unit ? 1 : 0,
-                    this.debugRings.small ? 1 : 0,
-                    this.debugRings.medium ? 1 : 0,
-                    this.debugRings.large ? 1 : 0
-                );
-
-                // Update LOD Radii dynamically (if mesh has LOD index)
-                if (m.userData.lodIdx !== undefined) {
-                    const idx = m.userData.lodIdx;
-                    // Logic:
-                    // LOD0 (3): 0 to T0
-                    // LOD1 (2): T0 to T1
-                    // LOD2 (1): T1 to T2
-                    // LOD3 (0): T2 to Tmax
-
-                    // Note: createInstancedMeshV3 passes newLOD (3=Unit, 2=Small, 1=Med, 0=Large)
-                    // But geoThresholds is [T0, T1, T2]
-
-                    let minD = 0.0, maxD = 100000.0;
-                    const T = this.geoThresholds;
-                    const PAD = 50.0; // Overlap pad
-
-                    if (idx === 3) { // Unit
-                        minD = 0.0;
-                        maxD = T[0] + PAD;
-                    } else if (idx === 2) { // Small
-                        minD = T[0] - PAD;
-                        maxD = T[1] + PAD;
-                    } else if (idx === 1) { // Medium
-                        minD = T[1] - PAD;
-                        maxD = T[2] + PAD;
-                    } else if (idx === 0) { // Large
-                        minD = T[2] - PAD;
-                        maxD = this.renderSettings.renderDistance + PAD;
-                    }
-
-                    m.userData.shader.uniforms.uLodRadii.value.set(minD, maxD);
+        // Search Active Layers (start from finest L3 -> index 3)
+        // Or just search all? Finest is best.
+        for (let l = 3; l >= 0; l--) {
+            const layer = tile.hexDataLayers[l];
+            if (!layer) continue;
+            // Simple linear search (fast enough for 1 hex per frame)
+            for (const hx of layer) {
+                if (hx.dq === dq && hx.dr === dr) {
+                    groundH = hx.h;
+                    found = true;
+                    break;
                 }
             }
+            if (found) break;
         }
 
-        this.updateLOD();
-        this.renderer.render(this.scene, this.camera);
-        this.floorState.lastFactor = h;
+        // If not found (maybe gap?), fall back to average, not MAX.
+        if (!found) groundH = tile.stats.avg;
+
+        const animatedH = (groundH - this.floorState.value) * h;
+        const minCamY = animatedH + 50.0;
+
+        // Soft constraint: only push if below
+        if (this.camera.position.y < minCamY) this.camera.position.y = minCamY;
+
+        const thEl = document.getElementById('tile-height');
+        if (thEl) thEl.textContent = `${animatedH.toFixed(1)}m`;
     }
+    const chEl = document.getElementById('camera-height');
+    if (chEl) chEl.textContent = `${this.camera.position.y.toFixed(0)}m`;
+}
+
+updateFloorState(h) {
+    const currentMin = this.pickFloorValue();
+
+    if (LOCK_FLOOR_ON_RISE && h > FLOOR_LOCK_THRESHOLD) {
+        // Logic: Only update if we found a LOWER floor (prevent sinking), but don't raise it (prevent jitter).
+        if (!this.floorState.locked || currentMin < this.floorState.value) {
+            this.floorState.value = currentMin;
+        }
+        this.floorState.locked = true;
+        this.updateFloorUniforms();
+    } else if (!LOCK_FLOOR_ON_RISE) {
+        this.floorState.value = currentMin;
+        this.updateFloorUniforms();
+    } else {
+        // Not yet locked (flat mode), just track freely
+        this.floorState.value = currentMin;
+        this.updateFloorUniforms();
+    }
+}
+
+pickFloorValue() {
+    const inView = this.getTilesInView();
+    const validTiles = inView.length ? inView : Array.from(this.tiles.values());
+    let min = Infinity;
+    for (const t of validTiles) if (t.stats && t.stats.min < min) min = t.stats.min;
+    return Number.isFinite(min) ? min : 0;
+}
+
+getTilesInView() {
+    this.camera.updateMatrixWorld();
+    this.projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
+    return Array.from(this.tiles.values()).filter(t => this.frustum.intersectsBox(t.bounds));
+}
+
+updateFloorUniforms() {
+    for (const m of this.materialsToUpdate) {
+        if (m.userData.shader) m.userData.shader.uniforms.uFloorOffset.value = this.floorState.value;
+    }
+}
+
+animate() {
+    requestAnimationFrame(() => this.animate());
+    this.controls.update();
+    const now = performance.now();
+    this.updateRenderStats(now);
+    this.updateFps();
+    this.updateFrametimeGraph();
+
+    const angle = this.controls.getPolarAngle() * 180 / Math.PI;
+    const linear = Math.min(1, Math.max(0, (angle - 5.5) / (25.0 - 5.5)));
+    const h = linear;
+    const flat = angle < 5.5;
+
+    this.updateFloorState(h);
+    this.maintainCameraAltitudeDuringAnimation(h);
+
+    for (const t of this.tiles.values()) {
+        if (t.flatMesh) t.flatMesh.visible = flat;
+        if (t.mesh) t.mesh.visible = !flat;
+    }
+
+    for (const m of this.materialsToUpdate) {
+        if (m.userData.shader) {
+            m.userData.shader.uniforms.uHeightFactor.value = h;
+            m.userData.shader.uniforms.uGradientMode.value = this.gradientMode;
+            m.userData.shader.uniforms.uCameraPos.value.copy(this.camera.position);
+
+            m.userData.shader.uniforms.uDebugRadii.value.set([
+                this.geoThresholds[0],
+                this.geoThresholds[1],
+                this.geoThresholds[2],
+                this.renderSettings.renderDistance
+            ]);
+            m.userData.shader.uniforms.uDebugRingsEnabled.value.set(
+                this.debugRings.unit ? 1 : 0,
+                this.debugRings.small ? 1 : 0,
+                this.debugRings.medium ? 1 : 0,
+                this.debugRings.large ? 1 : 0
+            );
+
+            // Update LOD Radii dynamically (if mesh has LOD index)
+            if (m.userData.lodIdx !== undefined) {
+                const idx = m.userData.lodIdx;
+                // Logic:
+                // LOD0 (3): 0 to T0
+                // LOD1 (2): T0 to T1
+                // LOD2 (1): T1 to T2
+                // LOD3 (0): T2 to Tmax
+
+                // Note: createInstancedMeshV3 passes newLOD (3=Unit, 2=Small, 1=Med, 0=Large)
+                // But geoThresholds is [T0, T1, T2]
+
+                let minD = 0.0, maxD = 100000.0;
+                const T = this.geoThresholds;
+                const PAD = 50.0; // Overlap pad
+
+                if (idx === 3) { // Unit
+                    minD = 0.0;
+                    maxD = T[0] + PAD;
+                } else if (idx === 2) { // Small
+                    minD = T[0] - PAD;
+                    maxD = T[1] + PAD;
+                } else if (idx === 1) { // Medium
+                    minD = T[1] - PAD;
+                    maxD = T[2] + PAD;
+                } else if (idx === 0) { // Large
+                    minD = T[2] - PAD;
+                    maxD = this.renderSettings.renderDistance + PAD;
+                }
+
+                m.userData.shader.uniforms.uLodRadii.value.set(minD, maxD);
+            }
+        }
+    }
+
+    this.updateLOD();
+    this.renderer.render(this.scene, this.camera);
+    this.floorState.lastFactor = h;
+}
 }
 
 new PistonViewer();
