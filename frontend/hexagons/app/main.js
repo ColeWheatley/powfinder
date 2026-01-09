@@ -18,8 +18,8 @@ const TILE_WIDTH_WORLD = SECTOR_WIDTH_METERS;
 const TILE_HEIGHT_WORLD = SECTOR_WIDTH_METERS;
 const SCALE_Z = 1.0;
 // --- DEBUG OVERRIDE ---
-// Expanding render distance to 40km to ensure all available tiles are loaded.
-const DEFAULT_RENDER_DISTANCE = 40000;
+// Default render distance: 20km (configurable via UI slider)
+const DEFAULT_RENDER_DISTANCE = 20000;
 const FLOOR_MODE = 'view-min';
 const LOCK_FLOOR_ON_RISE = true;
 const FLOOR_LOCK_THRESHOLD = 0.02;
@@ -42,7 +42,7 @@ class PistonViewer {
         console.log("Initializing PistonViewer (Priority Radial + LOD)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x220011); // Debug Dark Pink
+        this.scene.background = new THREE.Color(0xFF00FF); // Debug Pink
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
         this.camera.position.set(0, 800, 0);
@@ -108,8 +108,18 @@ class PistonViewer {
         this.cameraHeightEl = document.getElementById('camera-height');
         this.statsUpdateState = { lastUpdate: 0, interval: 500 };
 
+        // Frametime Graph
+        this.frametimeCanvas = document.getElementById('frametime-graph');
+        this.frametimeCtx = this.frametimeCanvas ? this.frametimeCanvas.getContext('2d') : null;
+        this.frametimeBuffer = new Array(640).fill(16.67); // 60fps baseline
+        this.frametimeLastTime = performance.now();
+
+        // LOD Pause Toggle
+        this.lodPaused = false;
+
         this.initDebugConsole();
         this.initMinimizeButton();
+        this.initCollapsibleSections();
         this.initLODSliders();
         this.updateFogAndClip();
         this.initWorld();
@@ -141,6 +151,15 @@ class PistonViewer {
         }
     }
 
+    initCollapsibleSections() {
+        document.querySelectorAll('.collapsible-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const section = header.parentElement;
+                section.classList.toggle('collapsed');
+            });
+        });
+    }
+
     initLODSliders() {
         // Geo LODs
         ['geo-lod0', 'geo-lod1', 'geo-lod2', 'geo-lod3'].forEach((id, i) => {
@@ -170,6 +189,19 @@ class PistonViewer {
             });
         }
 
+        // Render Distance
+        const rdSlider = document.getElementById('render-distance-slider');
+        const rdVal = document.getElementById('render-distance-val');
+        if (rdSlider) {
+            rdSlider.value = this.renderSettings.renderDistance / 1000; // Convert to km
+            if (rdVal) rdVal.textContent = (this.renderSettings.renderDistance / 1000) + "km";
+            rdSlider.addEventListener('input', () => {
+                this.renderSettings.renderDistance = parseInt(rdSlider.value) * 1000; // Convert back to meters
+                if (rdVal) rdVal.textContent = rdSlider.value + "km";
+                this.updateFogAndClip();
+            });
+        }
+
         // Safety Toggle
         const sToggle = document.getElementById('safety-toggle');
         if (sToggle) {
@@ -177,12 +209,21 @@ class PistonViewer {
                 this.safetyMode = e.target.checked ? 1.0 : 0.0;
             });
         }
+
+        // LOD Pause Toggle
+        const lodPauseToggle = document.getElementById('lod-pause-toggle');
+        if (lodPauseToggle) {
+            lodPauseToggle.addEventListener('change', (e) => {
+                this.lodPaused = e.target.checked;
+                this.log(this.lodPaused ? "LOD Updates PAUSED" : "LOD Updates RESUMED", "info");
+            });
+        }
     }
 
     createHexGeometry(radius) {
         const geometry = new THREE.CylinderGeometry(radius, radius, 1, 6);
         geometry.rotateY(Math.PI / 6); // Flat top
-        return geometry;
+        return geometry.toNonIndexed(); // Split vertices for sharp skirts
     }
 
     onResize() {
@@ -195,7 +236,7 @@ class PistonViewer {
         const dist = this.renderSettings.renderDistance;
         const fogEnd = dist;
         const fogStart = dist * 0.6;
-        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0x220011, fogStart, fogEnd); // Match Bg
+        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0xFF00FF, fogStart, fogEnd); // Match Bg
         this.scene.fog.near = fogStart;
         this.scene.fog.far = fogEnd;
         this.camera.far = dist + 2000;
@@ -242,7 +283,6 @@ class PistonViewer {
         const scale = view.getFloat32(20, true);
         const sx = view.getInt32(4, true); // Header stores Sector X
         const sy = view.getInt32(8, true); // Header stores Sector Y
-        // cq, cr (Scale 1) are at 24, 28 but we recalculate per layer now
 
         let offset = 32;
         const layers = []; // [L3(Scale24), L2(Scale6), L1(Scale3), L0(Scale1)]
@@ -271,14 +311,24 @@ class PistonViewer {
                 const dr = view.getInt16(offset + 2, true);
                 const hn = view.getUint16(offset + 4, true);
                 const slope = view.getUint8(offset + 6);
-                offset += 7;
+
+                // Read 6 neighbor deltas
+                const n0 = view.getUint8(offset + 7);
+                const n1 = view.getUint8(offset + 8);
+                const n2 = view.getUint8(offset + 9);
+                const n3 = view.getUint8(offset + 10);
+                const n4 = view.getUint8(offset + 11);
+                const n5 = view.getUint8(offset + 12);
+
+                offset += 13;
 
                 // Store accurate reconstructed global Axial if needed
                 layer.push({
                     dq, dr,
                     q: lcq + dq, r: lcr + dr,
                     h: minZ + (hn / scale),
-                    s: slope
+                    s: slope,
+                    nbs: [n0, n1, n2, n3, n4, n5]
                 });
             }
             layers.push(layer);
@@ -291,10 +341,6 @@ class PistonViewer {
         // allLayers: [24x, 6x, 3x, 1x] (from backend)
 
         // Map LOD to Layer Index
-        // LOD 0 (Fine) -> Layer 3 (Scale 1)
-        // LOD 1        -> Layer 2 (Scale 3)
-        // LOD 2        -> Layer 1 (Scale 6)
-        // LOD 3 (Far)  -> Layer 0 (Scale 24)
         const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
         const hexes = allLayers[layerIdx];
 
@@ -314,6 +360,10 @@ class PistonViewer {
         const nz2 = new Float32Array(num * 4); // h, h, h, 0
         const slopes = new Float32Array(num);  // Single float per instance
 
+        // Neighbors
+        const nbA = new Uint8Array(num * 4);
+        const nbB = new Uint8Array(num * 2);
+
         const h = UNIT_HEX_WIDTH_METERS;
         const dx_dq = (Math.sqrt(3) / 2) * (h * scale);
         const dy_dq = 0.5 * (h * scale);
@@ -331,16 +381,20 @@ class PistonViewer {
             const hh = d.h;
             nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
             nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
-
-            // Slope is degree 0-255. Normalize if needed or pass raw.
-            // Shader expects degrees? Let's verify palette.
             slopes[i] = d.s;
+
+            nbA[i * 4 + 0] = d.nbs[0]; nbA[i * 4 + 1] = d.nbs[1]; nbA[i * 4 + 2] = d.nbs[2]; nbA[i * 4 + 3] = d.nbs[3];
+            nbB[i * 2 + 0] = d.nbs[4]; nbB[i * 2 + 1] = d.nbs[5];
         }
         mesh.instanceMatrix.needsUpdate = true;
 
         mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
         mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
         mesh.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
+
+        // Pass Neighbors as Normalized (0-1)
+        mesh.geometry.setAttribute('instanceNbA', new THREE.InstancedBufferAttribute(nbA, 4, true));
+        mesh.geometry.setAttribute('instanceNbB', new THREE.InstancedBufferAttribute(nbB, 2, true));
 
         mesh.frustumCulled = true;
         return mesh;
@@ -368,28 +422,77 @@ class PistonViewer {
                 attribute vec4 instanceNZ_1;
                 attribute vec4 instanceNZ_2;
                 attribute float instanceSlope;
+                
+                attribute vec4 instanceNbA; 
+                attribute vec2 instanceNbB;
+                
                 varying vec3 vLocalPos;
                 varying float vSlope;
                 varying float vIsSide;
                 varying vec3 vMyNormal;
+                
+                float getDelta(int idx) {
+                    if (idx == 0) return instanceNbA.x;
+                    if (idx == 1) return instanceNbA.y;
+                    if (idx == 2) return instanceNbA.z;
+                    if (idx == 3) return instanceNbA.w;
+                    if (idx == 4) return instanceNbB.x;
+                    if (idx == 5) return instanceNbB.y;
+                    return 0.0;
+                }
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
                 
-                // If y > 0 (Top), apply height. If y=0 (Bottom), stay flat.
-                // But wait, skirt vertices are at Y=0 relative to instance.
-                // We want Skirts to drop.
-                // Simple version: Top vertices move up to animH. Bottom vertices stay at 0 (or floor).
-                // Actually, let's keep it simple: Top = animH, Bottom = 0 relative to camera floor?
-                // The current code does: 
+                // Use Normal for Direction (Robust for Split Vertices)
+                // Tangent/Angle of the FACE, not the corner vertex position.
+                // Side normals are purely horizontal.
+                
+                float angle = atan(normal.x, normal.z); 
+                float rawIdx = (angle / 6.28318) * 6.0;
+                
+                // Map CCW Angle to CW Neighbor Index (S->SE->NE...)
+                // Normal S (0,0,1) -> Angle 0 -> Idx 3 (S)
+                // Normal N (0,0,-1) -> Angle PI -> Idx 0 (N)
+                // Normal E (1,0,0) -> Angle PI/2 -> Idx ?
+                // 3 - 1.5 = 1.5. Round -> 2. (SE?). Wait.
+                // S(3), SE(2), NE(1), N(0).
+                // Angle 0 -> 3.
+                // Angle PI/2 (E) -> raw 1.5. 3 - 1.5 = 1.5. Round 2 (SE).
+                // Error. East face is between SE and NE.
+                // Flat Top Hex: East is a POINT, not a face.
+                // Faces are: N, NE, SE, S, SW, NW.
+                // NE Face Normal: angle between N and E? 
+                // N(PI), E(PI/2). Mid = 3PI/4 (135 deg).
+                // 135 / 360 * 6 = 2.25.
+                // 3.0 - 2.25 = 0.75. Round -> 1 (NE). Correct.
+                
+                float fIdx = mod(3.0 - rawIdx, 6.0);
+                if (fIdx < 0.0) fIdx += 6.0;
+                int neighborIdx = int(fIdx + 0.5) % 6;
+                
+                float normD = getDelta(neighborIdx);
+                float deltaM = normD * 255.0;
+                
+                vIsSide = 0.0; // Default Top
                 
                 if (position.y > 0.0) {
+                    // Top
                     transformed.y = animH;
                     vIsSide = 0.0;
                 } else {
-                    transformed.y = 0.0; // Anchored to base
-                    vIsSide = 1.0;
+                    // Bottom / Skirt
+                    vIsSide = 1.0; 
+                    if (deltaM < 0.5) {
+                         // No skirt -> Collapse to Top Height
+                        transformed.y = animH; 
+                    } else if (deltaM > 254.0) {
+                        transformed.y = 0.0; // Floor
+                    } else {
+                        // Drop
+                        transformed.y = animH - (deltaM * uHeightFactor);
+                    }
                 }
 
                 #ifdef USE_INSTANCING
@@ -398,8 +501,8 @@ class PistonViewer {
                     vLocalPos = transformed;
                 #endif
                 
-                // Robust Top Detection and Normals
-                vIsSide = (normal.y > 0.9) ? 0.0 : 1.0;
+                // We trust position.y logic for vIsSide. 
+                // Do NOT override with normal check (which fails for displaced tops).
                 vSlope = instanceSlope;
                 vMyNormal = normal;
             `);
@@ -495,10 +598,78 @@ class PistonViewer {
         if (countEl) countEl.textContent = count.toLocaleString() + " VISIBLE";
     }
 
+    updateFps() {
+        if (!this.fpsEl) return;
+        const now = performance.now();
+        this.fpsState.frames += 1;
+        const elapsed = now - this.fpsState.lastSample;
+        if (elapsed < 500) return;
+        const fps = (this.fpsState.frames * 1000) / elapsed;
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        this.fpsEl.textContent = `FPS: ${fps.toFixed(0)} | Zoom: ${dist.toFixed(0)}`;
+        this.fpsState.frames = 0;
+        this.fpsState.lastSample = now;
+    }
+
+    updateFrametimeGraph() {
+        if (!this.frametimeCtx) return;
+
+        const now = performance.now();
+        const frametime = now - this.frametimeLastTime;
+        this.frametimeLastTime = now;
+
+        // Update buffer (shift left, add new value on right)
+        this.frametimeBuffer.shift();
+        this.frametimeBuffer.push(frametime);
+
+        const ctx = this.frametimeCtx;
+        const width = this.frametimeCanvas.width;
+        const height = this.frametimeCanvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1;
+        // 16.67ms line (60fps)
+        const y60 = height - (16.67 / 50) * height;
+        ctx.beginPath();
+        ctx.moveTo(0, y60);
+        ctx.lineTo(width, y60);
+        ctx.stroke();
+        // 33.33ms line (30fps)
+        const y30 = height - (33.33 / 50) * height;
+        ctx.beginPath();
+        ctx.moveTo(0, y30);
+        ctx.lineTo(width, y30);
+        ctx.stroke();
+
+        // Draw frametime graph
+        ctx.strokeStyle = '#74b9ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < this.frametimeBuffer.length; i++) {
+            const ft = Math.min(this.frametimeBuffer[i], 50); // Cap at 50ms for display
+            const x = i;
+            const y = height - (ft / 50) * height;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Draw labels
+        ctx.fillStyle = '#666';
+        ctx.font = '10px monospace';
+        ctx.fillText('16.67ms (60fps)', 5, y60 - 3);
+        ctx.fillText('33.33ms (30fps)', 5, y30 - 3);
+    }
+
     // --- CORE LOOP ---
 
     updateLOD() {
-        if (!this.manifest) return;
+        if (!this.manifest || this.lodPaused) return;
 
         const camPos = this.camera.position;
         const distLimit = this.renderSettings.renderDistance;
@@ -831,6 +1002,8 @@ class PistonViewer {
         this.controls.update();
         const now = performance.now();
         this.updateRenderStats(now);
+        this.updateFps();
+        this.updateFrametimeGraph();
 
         const angle = this.controls.getPolarAngle() * 180 / Math.PI;
         const linear = Math.min(1, Math.max(0, (angle - 5.5) / (25.0 - 5.5)));
