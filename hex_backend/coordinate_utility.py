@@ -112,16 +112,14 @@ def get_hexes_in_bbox(min_x, max_x, min_y, max_y, padding_m=0.0):
             wx, wy = axial_to_world_meters(q, r)
             if min_x <= wx <= max_x and min_y <= wy <= max_y: yield (q, r)
 
-def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor, padding_m=6.4):
+def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor, padding_m=0.0):
     eff_h = UNIT_HEX_WIDTH_METERS * scale_factor
     A = (math.sqrt(3)/2 * eff_h)
     
-    # Expand bounds check by padding (to allow overlap)
-    p_min_x = min_x - padding_m
-    p_max_x = max_x + padding_m
-    p_min_y = min_y - padding_m
-    p_max_y = max_y + padding_m
-
+    # STRICT BOUNDS: Do not use padding for Center Containment.
+    # Otherwise neighboring sectors generate the same hex multiple times (overlap).
+    # padding_m parameter is kept for signature compatibility but ignored for clipping.
+    
     def to_prime(x, y):
          q = x / A
          r = (y - (q * 0.5 * eff_h)) / eff_h
@@ -132,13 +130,16 @@ def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor, padding
         q, r = to_prime(cx, cy)
         qs.append(q); rs.append(r)
     found = []
+    
+    # Iterate a slightly wider integer range to catch edges, but strict clip on centers
     for q in range(int(min(qs)) - 2, int(max(qs)) + 2):
         for r in range(int(min(rs)) - 2, int(max(rs)) + 2):
             wx = q * dx_dq_scaled(scale_factor)
             wy = r * dy_dr_scaled(scale_factor) + q * dy_dq_scaled(scale_factor)
             
-            # Check against padded bounds
-            if p_min_x <= wx <= p_max_x and p_min_y <= wy <= p_max_y:
+            # STRICT Check against Sector Bounds
+            # Use < max to ensure exclusive upper bound (prevent double ownership at exact boundary)
+            if min_x <= wx < max_x and min_y <= wy < max_y:
                 found.append((q, r, wx, wy))
     return found
 

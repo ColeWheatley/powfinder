@@ -62,13 +62,7 @@ class PistonViewer {
         this.controls.addEventListener('change', () => { this.needsRender = true; });
 
         this.needsRender = true;
-        this.needsLODUpdate = true;
         this.lastLODCamPos = new THREE.Vector3().copy(this.camera.position);
-
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(500, 2000, 500);
-        this.scene.add(dirLight);
 
         // Granular LOD Ranges for Stacked Rendering
         this.lodRanges = {
@@ -98,7 +92,9 @@ class PistonViewer {
         this.manifest = null;
         this.loadingTiles = new Set();
         this.loadQueue = [];
-        this.isProcessingQueue = false;
+        this.upgradeQueue = [];
+        this.isProcessingTile = false;
+        this.isUpgradingTex = false;
 
         this.loaderHidden = false;
         this.materialsToUpdate = [];
@@ -508,10 +504,16 @@ class PistonViewer {
             }
             layers.push(layer);
         }
-        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ }, center: { q: 0, r: 0 } };
+        return {
+            layers,
+            sx, sy,
+            stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ },
+            center: { q: 0, r: 0 }
+        };
     }
 
-    createInstancedMeshV3(allLayers, lodIndex, material) {
+    // Updated signature to accept tileX, tileZ
+    createInstancedMeshV3(allLayers, lodIndex, material, sx, sy) {
         const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
         const hexes = allLayers[layerIdx];
         if (!hexes || hexes.length === 0) return null;
@@ -521,6 +523,14 @@ class PistonViewer {
         const num = hexes.length;
         const h_eff = UNIT_HEX_WIDTH_METERS * scale;
 
+        const dx = (Math.sqrt(3) / 2) * h_eff;
+        const dy = h_eff;
+        const dy_q = 0.5 * h_eff;
+
+        const sectorMinX = sx * SECTOR_WIDTH_METERS;
+        const sectorMaxY = (sy + 1) * SECTOR_WIDTH_METERS;
+
+        // Clone material...
         const instMat = material.clone();
         if (!instMat.userData) instMat.userData = {};
         instMat.userData.lodIdx = layerIdx;
@@ -539,39 +549,44 @@ class PistonViewer {
         const nz1 = new Float32Array(num * 4);
         const nz2 = new Float32Array(num * 4);
 
-        const slopesVec = new Float32Array(num * 3); // 3 Slopes (Vec3)
-        const deltasVec = new Float32Array(num * 3); // 3 Deltas (Vec3)
-        const normsVec = new Float32Array(num * 2);  // Nx, Nz (Vec2)
+        const slopesVec = new Float32Array(num * 3);
+        const deltasVec = new Float32Array(num * 3);
+        const normsVec = new Float32Array(num * 2);
 
         let activeSkirts = 0;
         for (let i = 0; i < num; i++) {
-            const d = hexes[i];
-            const lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
-            const ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
+            const hx = hexes[i];
+            // GLOBAL METER POS
+            const gx = hx.q * dx;
+            const gy = hx.r * dy + hx.q * dy_q;
 
-            matrix.makeTranslation(lx, 0, -ly);
+            // LOCAL POS (Relative to Container Origin)
+            // Container X is Center (minX/t.lx) -> lx must be -409..+409
+            // Container Z is Center (lzVal/t.lz) -> lz must be -409..+409
+
+            const lx = (gx - sectorMinX) - SECTOR_WIDTH_METERS * 0.5;
+            const lz = (sectorMaxY - gy) - SECTOR_WIDTH_METERS * 0.5;
+
+            matrix.makeTranslation(lx, 0, lz);
             capMesh.setMatrixAt(i, matrix);
             skirtMesh.setMatrixAt(i, matrix);
 
-            const hh = d.h;
+            const hh = hx.h;
             nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
             nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
 
-            // Slopes
-            slopesVec[i * 3 + 0] = d.slopes[0];
-            slopesVec[i * 3 + 1] = d.slopes[1];
-            slopesVec[i * 3 + 2] = d.slopes[2];
+            slopesVec[i * 3 + 0] = hx.slopes[0];
+            slopesVec[i * 3 + 1] = hx.slopes[1];
+            slopesVec[i * 3 + 2] = hx.slopes[2];
 
-            // Deltas
-            deltasVec[i * 3 + 0] = d.deltas[0];
-            deltasVec[i * 3 + 1] = d.deltas[1];
-            deltasVec[i * 3 + 2] = d.deltas[2];
+            deltasVec[i * 3 + 0] = hx.deltas[0];
+            deltasVec[i * 3 + 1] = hx.deltas[1];
+            deltasVec[i * 3 + 2] = hx.deltas[2];
 
-            // Normals (Packed 0-255 -> Float 0-1 for shader)
-            normsVec[i * 2 + 0] = d.norm[0] / 255.0;
-            normsVec[i * 2 + 1] = d.norm[1] / 255.0;
+            normsVec[i * 2 + 0] = hx.norm[0] / 255.0;
+            normsVec[i * 2 + 1] = hx.norm[1] / 255.0;
 
-            if (d.deltas.some(v => v !== 0)) activeSkirts++;
+            if (hx.deltas.some(v => v !== 0)) activeSkirts++;
         }
 
         capMesh.instanceMatrix.needsUpdate = true;
@@ -580,8 +595,6 @@ class PistonViewer {
         [capMesh, skirtMesh].forEach(m => {
             m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
             m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-
-            // NEW ATTRIBUTES
             m.geometry.setAttribute('instanceSlopes', new THREE.InstancedBufferAttribute(slopesVec, 3));
             m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(deltasVec, 3));
             m.geometry.setAttribute('instanceNormal', new THREE.InstancedBufferAttribute(normsVec, 2));
@@ -625,7 +638,7 @@ class PistonViewer {
                 // NEW: Vec3 for Slopes/Deltas, Vec2 for Normal
                 attribute vec3 instanceSlopes;
                 attribute vec3 instanceDeltas; 
-                attribute vec2 instanceNormal; // (Nx, Nz) in [0,1]
+                attribute vec2 instanceNormal; // (Nx, Nz)
                 
                 attribute float aSideId;
                 
@@ -648,8 +661,7 @@ class PistonViewer {
                     vSlope = 0.0; // Caps follow texture color usually, or flat slope
                     
                     // Decode Normal from [0, 1] -> [-1, 1]
-                    // val * 2.0 - 1.0 = (val*255 - 127.5)/127.5 approx
-                    float nx = instanceNormal.x * 2.0 - 1.0; // Exact range -1 to 1
+                    float nx = instanceNormal.x * 2.0 - 1.0; 
                     float nz = instanceNormal.y * 2.0 - 1.0;
                     float ny_sq = 1.0 - nx*nx - nz*nz;
                     float ny = sqrt(max(0.0, ny_sq));
@@ -667,7 +679,7 @@ class PistonViewer {
                          
                          // Fix: Convert Decimeters (Int16) to Meters (Float)
                          dVal *= 0.1;
-
+ 
                          transformed.y = animH - (dVal * uHeightFactor);
                     }
                     
@@ -705,7 +717,6 @@ class PistonViewer {
                 varying vec3 vWorldPos;
                 varying float vSlope;
                 varying float vIsTop;
-                varying vec3 vMyNormal;
 
                 vec3 gradientColor(float s) {
                     // Green: 30-35
@@ -740,13 +751,8 @@ class PistonViewer {
                 // Fallback for huge hexes exceeding padding (Debug Pink)
                 if (outOfBounds) texColor = vec4(1.0, 0.0, 1.0, 1.0);
 
-                // --- LIGHTING ---
-                // Sun is approx 15 degrees East of South (South is +Z, East is +X)
-                // sin(15) = 0.258, cos(15) = 0.966
-                vec3 sunDir = normalize(vec3(0.258, 1.0, 0.966));
-                float light = dot(vMyNormal, sunDir);
-                // Ambient + Diffuse
-                float lighting = clamp(light * 0.6 + 0.6, 0.4, 1.0);
+                // --- LIGHTING (Simplified for Performance) ---
+                float lighting = 1.0;
 
                 if (vIsTop < 0.5) {
                     // SIDE / SKIRT
@@ -970,12 +976,8 @@ class PistonViewer {
 
             // Handle New Loads
             if (!tile && !this.loadingTiles.has(key)) {
-                if (updates < maxUpdates) {
-                    this.loadingTiles.add(key);
-                    // Use generous texture bias for initial load
-                    this.loadNewTile(t, targetLOD, isEffectivelyFrontTex);
-                    updates++;
-                }
+                this.loadingTiles.add(key);
+                this.loadQueue.push({ t, targetLOD, loadFullTexNow: isEffectivelyFrontTex });
             } else if (tile) {
                 // Geo Visibility Update
                 if (!tile.isTransitioning) {
@@ -983,12 +985,14 @@ class PistonViewer {
                 }
 
                 // Texture Upgrade Logic
-                if (isEffectivelyFrontTex && !tile.isFullTex && !tile.loadingTex) {
-                    this.upgradeTexture(tile);
+                if (isEffectivelyFrontTex && !tile.isFullTex && !tile.loadingTex && !tile.queuedForUpgrade) {
+                    tile.queuedForUpgrade = true;
+                    this.upgradeQueue.push(tile);
                 }
             }
-            // Optional: Downgrade texture if behind? (Not implemented, usually not worth bandwidth)
         }
+
+        this.processQueues();
 
         // Queue processing handled by async loaders mostly now, 
         // but we still have an initial load checker.
@@ -1007,21 +1011,48 @@ class PistonViewer {
         if (operational >= Math.min(4, sorted.length)) this.hideLoader();
     }
 
-    processQueue() {
-        if (this.isProcessingQueue || this.loadQueue.length === 0) return;
+    processQueues() {
+        if (this.isProcessingTile || this.isUpgradingTex) return;
 
-        // Ensure queue is limited and we pick sorted
-        // The queue might have mixed push orders if camera jumps. 
-        // Ideally we'd sort, but shifting is fast. The main loop fills it sorted.
-        if (this.loadQueue.length > 50) this.loadQueue = this.loadQueue.slice(0, 50);
+        // PRIORITIZE: Load new tiles (low-res) first
+        if (this.loadQueue.length > 0) {
+            const task = this.loadQueue.shift();
+            const key = `${task.t.q}_${task.t.r}`;
 
-        const task = this.loadQueue.shift();
-        this.isProcessingQueue = true;
+            // Hygiene: Skip if already loaded or too far now
+            if (this.tiles.has(key) || task.t.d > this.renderSettings.renderDistance + 1000) {
+                this.loadingTiles.delete(key);
+                return this.processQueues();
+            }
 
-        this.loadNewTile(task.t, task.desiredGeoLOD, task.desiredTexFull).then(() => {
-            this.isProcessingQueue = false;
-            if (this.loadQueue.length > 0) requestAnimationFrame(() => this.processQueue());
-        });
+            this.isProcessingTile = true;
+            this.loadNewTile(task.t, task.targetLOD, task.loadFullTexNow).finally(() => {
+                this.isProcessingTile = false;
+                this.processQueues();
+            });
+            return;
+        }
+
+        // SECONDARY: Upgrade textures (high-res)
+        if (this.upgradeQueue.length > 0) {
+            const tile = this.upgradeQueue.shift();
+            tile.queuedForUpgrade = false;
+            const key = `${tile.q}_${tile.r}`;
+
+            // Hygiene: Skip if tile unloaded or already full
+            if (!this.tiles.has(key) || tile.isFullTex) {
+                return this.processQueues();
+            }
+
+            // Optional: Skip if no longer in "effectively front" zone? 
+            // For now, let's just do it if it's still in the tiles map.
+
+            this.isUpgradingTex = true;
+            this.upgradeTexture(tile).finally(() => {
+                this.isUpgradingTex = false;
+                this.processQueues();
+            });
+        }
     }
 
     async loadNewTile(t, geoLOD, loadFullTexNow) {
@@ -1055,7 +1086,7 @@ class PistonViewer {
             this.setupMaterialShader(material);
 
             // 2. Binary Data
-            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin?v=5`; // CACHE BUST v5
+            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin?v=6`; // CACHE BUST v6
             const buffer = await (await fetch(binUrl)).arrayBuffer();
             const parsed = this.parseBinaryV3(buffer);
 
@@ -1063,7 +1094,7 @@ class PistonViewer {
 
             // Load ALL 4 Scales (3=Unit, 2=Small, 1=Med, 0=Large)
             [0, 1, 2, 3].forEach(level => {
-                const meshGroup = this.createInstancedMeshV3(parsed.layers, level, material);
+                const meshGroup = this.createInstancedMeshV3(parsed.layers, level, material, parsed.sx, parsed.sy);
                 if (meshGroup) {
                     containerGroup.add(meshGroup);
                     // Extract the cloned material from this group and register it for updates
@@ -1097,13 +1128,19 @@ class PistonViewer {
                 currentGeoLOD: -1, // Stacked mode
                 isFullTex: false,
                 loadingTex: false,
+                queuedForUpgrade: false, // NEW
                 isTransitioning: false,
                 clonedMaterials: activeMaterials // Store for cleanup
             };
             this.tiles.set(key, tileObj);
             this.updateGlobalStats(parsed.stats);
 
-            if (loadFullTexNow) this.upgradeTexture(tileObj);
+            if (loadFullTexNow && !tileObj.isFullTex && !tileObj.loadingTex && !tileObj.queuedForUpgrade) {
+                tileObj.queuedForUpgrade = true;
+                this.upgradeQueue.push(tileObj);
+            }
+
+            this.loadingTiles.delete(key); // Cleanup flight tracker on success
 
         } catch (e) {
             console.error("Tile Load Error", key, e);
@@ -1179,6 +1216,7 @@ class PistonViewer {
         tile.material.dispose();
 
         this.tiles.delete(key);
+        this.loadingTiles.delete(key);
     }
 
     hideLoader() {
@@ -1368,9 +1406,12 @@ class PistonViewer {
         const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
         if (camDist > 50 || this.needsLODUpdate || !this.loaderHidden) {
             this.updateLOD();
-            if (camDist > 50) this.lastLODCamPos.copy(this.camera.position); // Only update ref pos if moved
+            if (camDist > 50) this.lastLODCamPos.copy(this.camera.position);
             this.needsLODUpdate = false;
         }
+
+        // Keep the loading pipes moving
+        this.processQueues();
 
         this.renderer.render(this.scene, this.camera);
         this.needsRender = false;
