@@ -99,6 +99,7 @@ class PistonViewer {
         // this.isUpgradingTex = false; // REMOVED
 
         this.loaderHidden = false;
+        this.appStartTime = performance.now();
         this.materialsToUpdate = [];
 
         this.gradientMode = 1.0;
@@ -1076,6 +1077,11 @@ class PistonViewer {
                 }
             });
 
+            containerGroup.visible = true; // Force visible for compilation
+            // Force GPU Upload/Compile of geometry and shaders
+            // This prevents the "Stutter on 3D Switch" by paying the cost now, 1 tile per frame.
+            this.renderer.compile(containerGroup, this.camera);
+
             containerGroup.visible = isVis;
             this.scene.add(containerGroup);
             this.needsRender = true;
@@ -1193,8 +1199,21 @@ class PistonViewer {
 
     hideLoader() {
         if (this.loaderHidden) return;
+
+        // Force a minimum "hero" moment for the loader so it doesn't just flash
+        const elapsed = performance.now() - this.appStartTime;
+        if (elapsed < 900) {
+            setTimeout(() => this.hideLoader(), 900 - elapsed);
+            return;
+        }
+
+        this.loaderHidden = true;
         const loader = document.getElementById('loader');
-        if (loader) { loader.style.display = 'none'; this.loaderHidden = true; }
+        if (loader) {
+            loader.classList.add('hide');
+            // Clean up DOM after fade
+            setTimeout(() => { loader.style.display = 'none'; }, 600);
+        }
     }
 
     maintainCameraAltitudeDuringAnimation(h) {
