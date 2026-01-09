@@ -66,12 +66,12 @@ class PistonViewer {
 
         // Granular LOD Ranges for Stacked Rendering
         this.lodRanges = {
-            unitEnd: 1200,
-            smallStart: 1000,
-            smallEnd: 3500,
-            mediumStart: 3000,
-            mediumEnd: 8500,
-            largeStart: 8000
+            unitEnd: 400,
+            smallStart: 400,
+            smallEnd: 2000,
+            mediumStart: 2000,
+            mediumEnd: 3500,
+            largeStart: 3500
         };
 
         // Legacy/Sorting Support
@@ -93,8 +93,10 @@ class PistonViewer {
         this.loadingTiles = new Set();
         this.loadQueue = [];
         this.upgradeQueue = [];
-        this.isProcessingTile = false;
-        this.isUpgradingTex = false;
+        this.instantiateQueue = []; // NEW: Results ready for main thread
+        this.activeWorkerCount = 0; // NEW: Replaces isProcessingTile
+        // this.isProcessingTile = false; // REMOVED
+        // this.isUpgradingTex = false; // REMOVED
 
         this.loaderHidden = false;
         this.materialsToUpdate = [];
@@ -127,13 +129,58 @@ class PistonViewer {
         // LOD Pause Toggle
         this.lodPaused = false;
 
+        this.lodPaused = false;
+
         this.initDebugConsole();
         this.initMinimizeButton();
         this.initCollapsibleSections();
         this.initLODSliders();
         this.updateFogAndClip();
+
+        // WORKER SYSTEM
+        this.workers = [];
+        this.nextWorkerIdx = 0;
+        this.pendingJobs = new Map(); // ID -> {resolve, reject}
+        this.jobIdCounter = 0;
+        this.initWorkers();
+
         this.initWorld();
         this.animate();
+    }
+
+    initWorkers() {
+        // Create a pool based on concurrency (clamped to 4-6)
+        const count = Math.min(6, Math.max(2, navigator.hardwareConcurrency || 4));
+        console.log(`Initializing ${count} Tile Workers...`);
+
+        for (let i = 0; i < count; i++) {
+            const w = new Worker('./tile_worker.js');
+            w.onmessage = (e) => this.handleWorkerMessage(e);
+            this.workers.push(w);
+        }
+    }
+
+    handleWorkerMessage(e) {
+        const { id, status, result, error } = e.data;
+        const job = this.pendingJobs.get(id);
+        if (!job) return;
+
+        this.pendingJobs.delete(id);
+
+        if (status === 'success') job.resolve(result);
+        else job.reject(new Error(error));
+    }
+
+    postWorkerJob(type, data, transferables = []) {
+        return new Promise((resolve, reject) => {
+            const id = this.jobIdCounter++;
+            this.pendingJobs.set(id, { resolve, reject });
+
+            const w = this.workers[this.nextWorkerIdx];
+            this.nextWorkerIdx = (this.nextWorkerIdx + 1) % this.workers.length;
+
+            w.postMessage({ id, type, data }, transferables);
+        });
     }
 
     log(msg, type = "info") {
@@ -440,172 +487,64 @@ class PistonViewer {
         return { q, r };
     }
 
-    parseBinaryV3(buffer) {
-        const view = new DataView(buffer);
-        // Header: HEX4 check
-        const sig = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-        if (sig !== 'HEX4') {
-            console.error(`Invalid Binary Signature: Expected HEX4, got ${sig}`);
-            return { layers: [[], [], [], []], stats: { min: 0, max: 0, avg: 0, base: 0 }, center: { q: 0, r: 0 } };
-        }
 
-        const minZ = view.getFloat32(12, true);
-        const maxZ = view.getFloat32(16, true);
-        const scale = view.getFloat32(20, true);
-        const sx = view.getInt32(4, true);
-        const sy = view.getInt32(8, true);
 
-        let offset = 32;
-        const layers = [];
-        const scales = [24.0, 6.0, 3.0, 1.0];
+    createMeshFromWorkerData(lodData, material) {
+        if (!lodData || lodData.matrix.length === 0) return null;
 
-        const minX = sx * SECTOR_WIDTH_METERS;
-        const minY = sy * SECTOR_WIDTH_METERS;
-        const cenX = minX + SECTOR_WIDTH_METERS * 0.5;
-        const cenY = minY + SECTOR_WIDTH_METERS * 0.5;
-
-        for (let l = 0; l < 4; l++) {
-            const count = view.getUint32(offset, true);
-            offset += 4;
-            const layer = [];
-            const sc = scales[l];
-            const rawC = this.worldToAxialScale(cenX, cenY, sc);
-            const lcq = Math.round(rawC.q);
-            const lcr = Math.round(rawC.r);
-
-            for (let i = 0; i < count; i++) {
-                // HEX4 16-Byte Layout
-                const dq = view.getInt8(offset);
-                const dr = view.getInt8(offset + 1);
-                const hn = view.getUint16(offset + 2, true);
-
-                const d1 = view.getInt16(offset + 4, true);
-                const d2 = view.getInt16(offset + 6, true);
-                const d3 = view.getInt16(offset + 8, true);
-
-                const s1 = view.getUint8(offset + 10);
-                const s2 = view.getUint8(offset + 11);
-                const s3 = view.getUint8(offset + 12);
-
-                const nx = view.getUint8(offset + 13);
-                const nz = view.getUint8(offset + 14);
-                // offset 15 is pad
-
-                offset += 16;
-
-                layer.push({
-                    dq, dr,
-                    q: lcq + dq, r: lcr + dr,
-                    h: minZ + (hn / scale),
-                    deltas: [d1, d2, d3],
-                    slopes: [s1, s2, s3], // Array of 3
-                    norm: [nx, nz]
-                });
-            }
-            layers.push(layer);
-        }
-        return {
-            layers,
-            sx, sy,
-            stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ },
-            center: { q: 0, r: 0 }
-        };
-    }
-
-    // Updated signature to accept tileX, tileZ
-    createInstancedMeshV3(allLayers, lodIndex, material, sx, sy) {
-        const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
-        const hexes = allLayers[layerIdx];
-        if (!hexes || hexes.length === 0) return null;
-
-        const scaleTable = [24.0, 6.0, 3.0, 1.0];
-        const scale = scaleTable[layerIdx];
-        const num = hexes.length;
-        const h_eff = UNIT_HEX_WIDTH_METERS * scale;
-
-        const dx = (Math.sqrt(3) / 2) * h_eff;
-        const dy = h_eff;
-        const dy_q = 0.5 * h_eff;
-
-        const sectorMinX = sx * SECTOR_WIDTH_METERS;
-        const sectorMaxY = (sy + 1) * SECTOR_WIDTH_METERS;
+        const num = lodData.matrix.length / 16;
 
         // Clone material...
         const instMat = material.clone();
         if (!instMat.userData) instMat.userData = {};
-        instMat.userData.lodIdx = layerIdx;
+        // We don't have lodIdx here easily unless passed, but it's used for uLodRadii.
+        // We'll set it outside or pass it in. 
         instMat.userData.isClone = true;
         this.setupMaterialShader(instMat);
 
+        // Geometries
         const capG = this.capGeometry.clone();
         const skirtG = this.skirtGeometry.clone();
-        capG.scale(scale, 1, scale);
-        skirtG.scale(scale, 1, scale);
+        // Scale is already handled by worker? NO. 
+        // Worker only handles position translation. Scale of the geometry itself (the hexagon size) must be applied here.
+        // Wait, worker handles 'matrix' translation. But the geometry itself (capGeo) needs to be scaled?
+        // YES. createInstancedMeshV3 did: capG.scale(scale, 1, scale).
+        // I need to know the scale here. pass 'scale' argument.
 
-        const capMesh = new THREE.InstancedMesh(capG, instMat, num);
-        const skirtMesh = new THREE.InstancedMesh(skirtG, instMat, num);
-        const matrix = new THREE.Matrix4();
+        // Actually, let's fix the signature:
+        // createMeshFromWorkerData(lodData, material, scale)
 
-        const nz1 = new Float32Array(num * 4);
-        const nz2 = new Float32Array(num * 4);
+        // We need to scale the geometry based on LOD level.
+        // But how do we know the scale? 
+        // lodData doesn't have it explicitly. 
+        // I should pass it from loadNewTile loop.
 
-        const slopesVec = new Float32Array(num * 3);
-        const deltasVec = new Float32Array(num * 3);
-        const normsVec = new Float32Array(num * 2);
+        return (scale) => {
+            capG.scale(scale, 1, scale);
+            skirtG.scale(scale, 1, scale);
 
-        let activeSkirts = 0;
-        for (let i = 0; i < num; i++) {
-            const hx = hexes[i];
-            // GLOBAL METER POS
-            const gx = hx.q * dx;
-            const gy = hx.r * dy + hx.q * dy_q;
+            const capMesh = new THREE.InstancedMesh(capG, instMat, num);
+            const skirtMesh = new THREE.InstancedMesh(skirtG, instMat, num);
 
-            // LOCAL POS (Relative to Container Origin)
-            // Container X is Center (minX/t.lx) -> lx must be -409..+409
-            // Container Z is Center (lzVal/t.lz) -> lz must be -409..+409
+            // Assign Attributes from Worker
+            capMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
+            skirtMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
 
-            const lx = (gx - sectorMinX) - SECTOR_WIDTH_METERS * 0.5;
-            const lz = (sectorMaxY - gy) - SECTOR_WIDTH_METERS * 0.5;
+            [capMesh, skirtMesh].forEach(m => {
+                m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(lodData.nz1, 4));
+                m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(lodData.nz2, 4));
+                m.geometry.setAttribute('instanceSlopes', new THREE.InstancedBufferAttribute(lodData.slopes, 3));
+                m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(lodData.deltas, 3));
+                m.geometry.setAttribute('instanceNormal', new THREE.InstancedBufferAttribute(lodData.norms, 2));
+            });
 
-            matrix.makeTranslation(lx, 0, lz);
-            capMesh.setMatrixAt(i, matrix);
-            skirtMesh.setMatrixAt(i, matrix);
-
-            const hh = hx.h;
-            nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
-            nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
-
-            slopesVec[i * 3 + 0] = hx.slopes[0];
-            slopesVec[i * 3 + 1] = hx.slopes[1];
-            slopesVec[i * 3 + 2] = hx.slopes[2];
-
-            deltasVec[i * 3 + 0] = hx.deltas[0];
-            deltasVec[i * 3 + 1] = hx.deltas[1];
-            deltasVec[i * 3 + 2] = hx.deltas[2];
-
-            normsVec[i * 2 + 0] = hx.norm[0] / 255.0;
-            normsVec[i * 2 + 1] = hx.norm[1] / 255.0;
-
-            if (hx.deltas.some(v => v !== 0)) activeSkirts++;
-        }
-
-        capMesh.instanceMatrix.needsUpdate = true;
-        skirtMesh.instanceMatrix.needsUpdate = true;
-
-        [capMesh, skirtMesh].forEach(m => {
-            m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
-            m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-            m.geometry.setAttribute('instanceSlopes', new THREE.InstancedBufferAttribute(slopesVec, 3));
-            m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(deltasVec, 3));
-            m.geometry.setAttribute('instanceNormal', new THREE.InstancedBufferAttribute(normsVec, 2));
-        });
-
-        const group = new THREE.Group();
-        group.add(capMesh);
-        group.add(skirtMesh);
-        group.userData.activeSkirts = activeSkirts;
-        group.frustumCulled = false;
-        return group;
+            const group = new THREE.Group();
+            group.add(capMesh);
+            group.add(skirtMesh);
+            group.userData.activeSkirts = lodData.activeSkirts;
+            group.frustumCulled = false;
+            return group;
+        };
     }
 
     setupMaterialShader(material) {
@@ -904,16 +843,10 @@ class PistonViewer {
                 new THREE.Vector3(maxX, TILE_BOUNDS_MAX_Y, lzVal)
             );
 
-            // For logic consistency later
+            // Center coordinates for the container
+            t.lx = minX + SECTOR_WIDTH_METERS * 0.5;
+            t.lz = -(t.y - this.worldOrigin.y);
             t.d = box.distanceToPoint(camPos);
-            t.lx = minX;
-            t.lz = lzVal - SECTOR_WIDTH_METERS; // Approximate for placement? No wait, logic uses lx/lz for placement.
-            // Original lx = t.x - origin.x
-            // Original lz = -(t.y - origin.y) = This is the "Top Left" corner in Z?
-            // Let's keep original lx/lz definitions
-
-            t.lx = minX;
-            t.lz = lzVal; // This matches original logic: lz = -(t.y - wy)
 
             return t;
         }).sort((a, b) => a.d - b.d);
@@ -1001,116 +934,151 @@ class PistonViewer {
 
     checkInitialLoad(sorted) {
         if (this.loaderHidden) return;
-        // Are the closest 4 tiles visual?
+        // If we have successfully instantiated at least 1 tile, hide the loader.
+        // The rest will pop in.
         let operational = 0;
-        for (let i = 0; i < Math.min(4, sorted.length); i++) {
-            const t = sorted[i];
-            const tile = this.tiles.get(`${t.q}_${t.r}`);
-            if (tile && tile.mesh) operational++;
+        for (const t of this.tiles.values()) {
+            if (t.mesh) operational++;
         }
-        if (operational >= Math.min(4, sorted.length)) this.hideLoader();
+
+        if (operational >= 1) this.hideLoader();
     }
 
     processQueues() {
-        if (this.isProcessingTile || this.isUpgradingTex) return;
+        // 1. Fill Worker Slots (Concurrency)
+        const maxConcurrent = this.workers.length;
 
-        // PRIORITIZE: Load new tiles (low-res) first
-        if (this.loadQueue.length > 0) {
+        while (this.activeWorkerCount < maxConcurrent && this.loadQueue.length > 0) {
             const task = this.loadQueue.shift();
             const key = `${task.t.q}_${task.t.r}`;
 
-            // Hygiene: Skip if already loaded or too far now
+            // Hygiene
             if (this.tiles.has(key) || task.t.d > this.renderSettings.renderDistance + 1000) {
                 this.loadingTiles.delete(key);
-                return this.processQueues();
+                continue;
             }
 
-            this.isProcessingTile = true;
-            this.loadNewTile(task.t, task.targetLOD, task.loadFullTexNow).finally(() => {
-                this.isProcessingTile = false;
-                this.processQueues();
+            this.activeWorkerCount++;
+            this.fetchTileOnWorker(task).then(result => {
+                this.activeWorkerCount--;
+                if (result) this.instantiateQueue.push(result);
+                this.processQueues(); // Keep the pipe full
             });
-            return;
         }
 
-        // SECONDARY: Upgrade textures (high-res)
-        if (this.upgradeQueue.length > 0) {
+        // 2. Upgrades (Lower Priority, use remaining slots?)
+        // For now, let's keep upgrades separate or allow them if loadQueue is empty.
+        // Let's just allow upgrades if we have free slots.
+        if (this.activeWorkerCount < maxConcurrent && this.loadQueue.length === 0 && this.upgradeQueue.length > 0) {
             const tile = this.upgradeQueue.shift();
             tile.queuedForUpgrade = false;
-            const key = `${tile.q}_${tile.r}`;
+            // ... (Upgrade logic remains similar or can be workerized too)
+            // For texture upgrade, it's fast on worker, but we need to limit main thread impact too?
+            // Existing upgradeTexture uses postWorkerJob.
 
-            // Hygiene: Skip if tile unloaded or already full
-            if (!this.tiles.has(key) || tile.isFullTex) {
-                return this.processQueues();
-            }
-
-            // Optional: Skip if no longer in "effectively front" zone? 
-            // For now, let's just do it if it's still in the tiles map.
-
-            this.isUpgradingTex = true;
+            // We can just call it, but track active count.
+            this.activeWorkerCount++;
             this.upgradeTexture(tile).finally(() => {
-                this.isUpgradingTex = false;
+                this.activeWorkerCount--;
                 this.processQueues();
             });
         }
     }
 
-    async loadNewTile(t, geoLOD, loadFullTexNow) {
+    async fetchTileOnWorker(task) {
+        try {
+            const { t } = task;
+            const lowTexUrl = `aerial_tiles/low/sector_${t.q}_${t.r}.webp`;
+            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin?v=6`;
+
+            const workerData = await this.postWorkerJob('LOAD_TILE', {
+                q: t.q, r: t.r,
+                lx: t.lx, lz: t.lz,
+                texUrl: lowTexUrl,
+                binUrl: binUrl
+            });
+
+            // Return data for instantiation frame
+            return { task, workerData };
+
+        } catch (e) {
+            console.error("Tile Fetch Error", e);
+            this.loadingTiles.delete(`${task.t.q}_${task.t.r}`);
+            return null;
+        }
+    }
+
+    processInstantiationQueue() {
+        // BUDGET: Instantiate 1 tile per frame to maintain 60FPS
+        // Or 2 if we are feeling brave. Start with 1.
+        if (this.instantiateQueue.length === 0) return;
+
+        const job = this.instantiateQueue.shift();
+        this.instantiateTile(job.task, job.workerData);
+    }
+
+    // Moved Mesh Creation Logic Here
+    instantiateTile(task, workerData) {
+        const { t, loadFullTexNow } = task;
         const key = `${t.q}_${t.r}`;
+
+        // Final Hygiene Check (Camera might have moved while worker was working)
         if (this.tiles.has(key)) return;
 
         try {
-            // 1. Initial Texture
-            const lowTexUrl = `aerial_tiles/low/sector_${t.q}_${t.r}.webp`;
-            const texLoader = new THREE.TextureLoader();
-            const texture = await texLoader.loadAsync(lowTexUrl);
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.flipY = true;
+            // ... (Mesh Creation Code mostly identical to previous loadNewTile) ...
+            // 1. Texture
+            let material;
+            if (workerData.texture) {
+                const tex = new THREE.CanvasTexture(workerData.texture);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.flipY = false;
+                material = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+            } else {
+                material = new THREE.MeshBasicMaterial({ color: 0xff00ff, side: THREE.DoubleSide });
+            }
 
-            const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
             const angle = this.controls.getPolarAngle() * 180 / Math.PI;
             const isVis = (angle >= 5.5);
 
+            // Flat Mesh
             const flatMesh = new THREE.Mesh(this.flatGeometry, material);
             flatMesh.position.set(t.lx, 0, t.lz);
-            flatMesh.visible = !isVis; // Hide flat if tilted
+            flatMesh.visible = !isVis;
             this.scene.add(flatMesh);
 
             const containerGroup = new THREE.Group();
             containerGroup.position.set(t.lx, 0, t.lz);
 
             const activeMaterials = [];
-            // Register base material too so flatMesh rises
             this.materialsToUpdate.push(material);
 
-            this.setupMaterialShader(material);
+            this.setupMaterialShader(material); // Apply UV padding correction
 
-            // 2. Binary Data
-            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin?v=6`; // CACHE BUST v6
-            const buffer = await (await fetch(binUrl)).arrayBuffer();
-            const parsed = this.parseBinaryV3(buffer);
-
-
-
-            // Load ALL 4 Scales (3=Unit, 2=Small, 1=Med, 0=Large)
+            // 2. Meshes
+            const scaleTable = [24.0, 6.0, 3.0, 1.0];
             [0, 1, 2, 3].forEach(level => {
-                const meshGroup = this.createInstancedMeshV3(parsed.layers, level, material, parsed.sx, parsed.sy);
-                if (meshGroup) {
-                    containerGroup.add(meshGroup);
-                    // Extract the cloned material from this group and register it for updates
-                    if (meshGroup.children.length > 0) {
+                const lodData = workerData.lods[level];
+                if (lodData) {
+                    const layerIdx = 3 - level;
+                    const meshScale = scaleTable[layerIdx];
+
+                    const makeMesh = this.createMeshFromWorkerData(lodData, material);
+                    const meshGroup = makeMesh(meshScale);
+
+                    if (meshGroup && meshGroup.children.length > 0) {
                         const m = meshGroup.children[0].material;
+                        m.userData.lodIdx = layerIdx;
                         this.materialsToUpdate.push(m);
                         activeMaterials.push(m);
+                        containerGroup.add(meshGroup);
                     }
                 }
             });
 
-
-            containerGroup.visible = isVis; // Parent controls all
-
+            containerGroup.visible = isVis;
             this.scene.add(containerGroup);
-            this.needsRender = true; // Visual change
+            this.needsRender = true;
 
             const half = TILE_WIDTH_WORLD / 2;
             const bounds = new THREE.Box3(
@@ -1122,29 +1090,29 @@ class PistonViewer {
                 q: t.q, r: t.r, lx: t.lx, lz: t.lz,
                 mesh: containerGroup,
                 flatMesh, material, bounds,
-                hexDataLayers: parsed.layers,
-                stats: parsed.stats,
-                center: parsed.center,
-                currentGeoLOD: -1, // Stacked mode
+                hexDataLayers: workerData.layers,
+                stats: workerData.stats,
+                center: workerData.center,
+                currentGeoLOD: -1,
                 isFullTex: false,
                 loadingTex: false,
-                queuedForUpgrade: false, // NEW
+                queuedForUpgrade: false,
                 isTransitioning: false,
-                clonedMaterials: activeMaterials // Store for cleanup
+                clonedMaterials: activeMaterials
             };
             this.tiles.set(key, tileObj);
-            this.updateGlobalStats(parsed.stats);
+            this.updateGlobalStats(workerData.stats);
 
             if (loadFullTexNow && !tileObj.isFullTex && !tileObj.loadingTex && !tileObj.queuedForUpgrade) {
                 tileObj.queuedForUpgrade = true;
                 this.upgradeQueue.push(tileObj);
             }
 
-            this.loadingTiles.delete(key); // Cleanup flight tracker on success
+            this.loadingTiles.delete(key);
 
         } catch (e) {
-            console.error("Tile Load Error", key, e);
-            this.loadingTiles.delete(key); // Allow retry
+            console.error("Instantiation Error", key, e);
+            this.loadingTiles.delete(key);
         }
     }
 
@@ -1152,16 +1120,16 @@ class PistonViewer {
         tile.loadingTex = true;
         const url = `aerial_tiles/full/sector_${tile.q}_${tile.r}.webp`;
         try {
-            const texLoader = new THREE.TextureLoader();
-            const fullTex = await texLoader.loadAsync(url);
+            const result = await this.postWorkerJob('LOAD_TEXTURE', { url });
+
+            const fullTex = new THREE.CanvasTexture(result.bitmap);
             fullTex.colorSpace = THREE.SRGBColorSpace;
-            fullTex.flipY = true;
+            fullTex.flipY = false;
 
             tile.material.map = fullTex;
             tile.material.needsUpdate = true;
-            this.needsRender = true; // Visual change
+            this.needsRender = true;
 
-            // CRITICAL: Also update all cloned materials!
             if (tile.clonedMaterials) {
                 tile.clonedMaterials.forEach(m => {
                     m.map = fullTex;
@@ -1170,9 +1138,13 @@ class PistonViewer {
             }
 
             tile.isFullTex = true;
-        } catch (e) { }
+        } catch (e) {
+            console.error("Texture Upgrade Failed", e);
+        }
         tile.loadingTex = false;
     }
+
+    // parseBinaryV3 removed (handled by worker)
 
     swapGeometry(tile, newLOD) {
         // Stacked Mode: No need to swap geometry!
@@ -1332,9 +1304,23 @@ class PistonViewer {
 
     animate() {
         requestAnimationFrame(() => this.animate());
+
+        // --- BACKGROUND MAINTENANCE (Always run even if static) ---
+        this.processInstantiationQueue();
+        this.processQueues();
+
+        // Decide if we should update LOD (only if camera moved > 50m)
+        // FORCE update if loader is visible (to ensure initial check runs)
+        const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
+        if (camDist > 50 || this.needsLODUpdate || !this.loaderHidden) {
+            this.updateLOD();
+            if (camDist > 50) this.lastLODCamPos.copy(this.camera.position);
+            this.needsLODUpdate = false;
+        }
+
         const moved = this.controls.update();
 
-        // 1. Check if render is actually needed
+        // --- RENDER CHECK ---
         // If damping is active (moved=true) or logic set a flag, proceed.
         if (!moved && !this.needsRender) return;
 
@@ -1401,23 +1387,10 @@ class PistonViewer {
             }
         }
 
-        // 2. Decide if we should update LOD (only if camera moved > 50m)
-        // FORCE update if loader is visible (to ensure initial check runs)
-        const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
-        if (camDist > 50 || this.needsLODUpdate || !this.loaderHidden) {
-            this.updateLOD();
-            if (camDist > 50) this.lastLODCamPos.copy(this.camera.position);
-            this.needsLODUpdate = false;
-        }
-
-        // Keep the loading pipes moving
-        this.processQueues();
-
         this.renderer.render(this.scene, this.camera);
         this.needsRender = false;
         this.floorState.lastFactor = h;
     }
 }
-
 
 new PistonViewer();
