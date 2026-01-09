@@ -137,48 +137,72 @@
                         </div>
                     </div>
 
-                    <!-- Geometry LOD (Collapsible) -->
+                    <!-- Granular LOD Tuning -->
                     <div class="collapsible-section" data-section="geometry">
                         <div class="collapsible-header">
-                            <span class="title">GEOMETRY LOD (VERTEX)</span>
+                            <span class="title">GRANULAR LOD TUNING</span>
                             <span class="arrow">▼</span>
                         </div>
                         <div class="collapsible-content">
-                            <div class="hud-item"
-                                style="flex-direction: column; align-items: stretch; margin-top: 5px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                    <span>UNIT HEX (CLOSE)</span>
-                                    <span class="value" id="geo-lod0-val">200m</span>
+                            <!-- UNIT -->
+                            <div class="hud-item" style="flex-direction: column; margin-top: 5px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>UNIT (0 - <span id="lod-unit-end-val">700</span>m)</span>
+                                    <input type="checkbox" id="ring-unit-toggle" checked>
                                 </div>
-                                <input type="range" id="geo-lod0-slider" min="0" max="1000" step="10" value="200"
-                                    style="width: 100%; pointer-events: auto;">
+                                <input type="range" id="lod-unit-end" min="0" max="2000" step="50" value="700"
+                                    style="width: 100%;">
                             </div>
-                            <div class="hud-item"
-                                style="flex-direction: column; align-items: stretch; margin-top: 5px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                    <span>SMALL HEX</span>
-                                    <span class="value" id="geo-lod1-val">500m</span>
+
+                            <!-- SMALL -->
+                            <div class="hud-item" style="flex-direction: column; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>SMALL</span>
+                                    <input type="checkbox" id="ring-small-toggle" checked>
                                 </div>
-                                <input type="range" id="geo-lod1-slider" min="0" max="2000" step="50" value="500"
-                                    style="width: 100%; pointer-events: auto;">
+                                <div style="display: flex; gap: 5px;">
+                                    <input type="range" id="lod-small-start" min="0" max="3000" step="50" value="600"
+                                        title="Start">
+                                    <input type="range" id="lod-small-end" min="0" max="5000" step="50" value="2100"
+                                        title="End">
+                                </div>
+                                <div
+                                    style="display: flex; justify-content: space-between; font-size: 10px; color: #aaa;">
+                                    <span id="lod-small-start-val">600m</span>
+                                    <span id="lod-small-end-val">2100m</span>
+                                </div>
                             </div>
-                            <div class="hud-item"
-                                style="flex-direction: column; align-items: stretch; margin-top: 5px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                    <span>MEDIUM HEX</span>
-                                    <span class="value" id="geo-lod2-val">1000m</span>
+
+                            <!-- MEDIUM -->
+                            <div class="hud-item" style="flex-direction: column; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>MEDIUM</span>
+                                    <input type="checkbox" id="ring-medium-toggle" checked>
                                 </div>
-                                <input type="range" id="geo-lod2-slider" min="0" max="5000" step="100" value="1000"
-                                    style="width: 100%; pointer-events: auto;">
+                                <div style="display: flex; gap: 5px;">
+                                    <input type="range" id="lod-medium-start" min="0" max="8000" step="100" value="1900"
+                                        title="Start">
+                                    <input type="range" id="lod-medium-end" min="0" max="10000" step="100" value="5100"
+                                        title="End">
+                                </div>
+                                <div
+                                    style="display: flex; justify-content: space-between; font-size: 10px; color: #aaa;">
+                                    <span id="lod-medium-start-val">1900m</span>
+                                    <span id="lod-medium-end-val">5100m</span>
+                                </div>
                             </div>
-                            <div class="hud-item"
-                                style="flex-direction: column; align-items: stretch; margin-top: 5px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                    <span>VIEW DIST (MAX)</span>
-                                    <span class="value" id="geo-lod3-val">2000m</span>
+
+                            <!-- LARGE -->
+                            <div class="hud-item" style="flex-direction: column; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>LARGE (Start)</span>
+                                    <input type="checkbox" id="ring-large-toggle" checked>
                                 </div>
-                                <input type="range" id="geo-lod3-slider" min="0" max="10000" step="100" value="2000"
-                                    style="width: 100%; pointer-events: auto;">
+                                <input type="range" id="lod-large-start" min="0" max="15000" step="100" value="4900"
+                                    style="width: 100%;">
+                                <div style="display: flex; justify-content: flex-start; font-size: 10px; color: #aaa;">
+                                    <span id="lod-large-start-val">4900m</span>
+                                </div>
                             </div>
                         </div>
                     </div>
