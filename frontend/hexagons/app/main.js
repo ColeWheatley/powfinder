@@ -130,7 +130,6 @@ class PistonViewer {
 
         // LOD Pause Toggle
         this.lodPaused = false;
-        this.debugRings = { unit: true, small: true, medium: true, large: true };
 
         this.initDebugConsole();
         this.initMinimizeButton();
@@ -272,15 +271,7 @@ class PistonViewer {
             });
         }
 
-        // Debug Ring Toggles
-        ['unit', 'small', 'medium', 'large'].forEach(key => {
-            const el = document.getElementById(`ring-${key}-toggle`);
-            if (el) {
-                el.addEventListener('change', (e) => {
-                    this.debugRings[key] = e.target.checked;
-                });
-            }
-        });
+
     }
 
     createHexGeometry(radius) {
@@ -515,9 +506,6 @@ class PistonViewer {
             shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
             shader.uniforms.uLodRadii = { value: new THREE.Vector2(0.0, 100000.0) }; // Min, Max
-            // T0, T1, T2, Tmax
-            shader.uniforms.uDebugRadii = { value: new Float32Array([0, 0, 0, 0]) };
-            shader.uniforms.uDebugRingsEnabled = { value: new THREE.Vector4(0, 0, 0, 0) };
 
             // UV Padding correction (64px padding on 4096px base)
             const pad = 64.0;
@@ -635,8 +623,6 @@ class PistonViewer {
                 uniform float uGradientMode;
                 uniform vec3 uCameraPos;
                 uniform vec2 uLodRadii;
-                uniform float uDebugRadii[4];
-                uniform vec4 uDebugRingsEnabled;
                 varying vec3 vLocalPos;
                 varying vec3 vWorldPos;
                 varying float vSlope;
@@ -697,47 +683,6 @@ class PistonViewer {
                 } else {
                    // TOP (Texture)
                    diffuseColor = vec4(texColor.rgb * lighting, 1.0);
-                }
-
-                // RADIAL DEBUG RINGS
-                float dist = distance(vWorldPos, uCameraPos);
-                float ringWidth = 80.0;
-                
-                // Logic Table: 
-                // Unit (x): T0
-                // Small (y): T0 + T1
-                // Medium (z): T1 + T2
-                // Large (w): T2 + Tmax
-                
-                bool shouldDraw = false;
-                float targetRadius = 0.0;
-                vec3 ringColor = vec3(1.0);
-                
-                // Unit (Cyan)
-                if (uDebugRingsEnabled.x > 0.5 && abs(dist - uDebugRadii[0]) < ringWidth) { 
-                    shouldDraw = true; targetRadius = uDebugRadii[0]; ringColor = vec3(0.0, 1.0, 1.0); 
-                }
-                // Small (Green)
-                if (uDebugRingsEnabled.y > 0.5) {
-                    if (abs(dist - uDebugRadii[0]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[0]; ringColor = vec3(0.2, 1.0, 0.2); }
-                    if (abs(dist - uDebugRadii[1]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[1]; ringColor = vec3(0.2, 1.0, 0.2); }
-                }
-                // Medium (Yellow)
-                if (uDebugRingsEnabled.z > 0.5) {
-                    if (abs(dist - uDebugRadii[1]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[1]; ringColor = vec3(1.0, 1.0, 0.2); }
-                    if (abs(dist - uDebugRadii[2]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[2]; ringColor = vec3(1.0, 1.0, 0.2); }
-                }
-                // Large (Red)
-                if (uDebugRingsEnabled.w > 0.5) {
-                    if (abs(dist - uDebugRadii[2]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[2]; ringColor = vec3(1.0, 0.2, 0.2); }
-                    if (abs(dist - uDebugRadii[3]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[3]; ringColor = vec3(1.0, 0.2, 0.2); }
-                }
-                
-                if (shouldDraw) {
-                    float norm = abs(dist - targetRadius) / ringWidth;
-                    float alpha = mix(0.1, 0.6, smoothstep(0.0, 1.0, norm)); 
-                    diffuseColor.rgb = mix(diffuseColor.rgb, ringColor, alpha);
-                    if (norm > 0.94) diffuseColor.rgb += ringColor * 0.5; // Boundary glow
                 }
             `);
         };
@@ -1309,26 +1254,6 @@ class PistonViewer {
                     uCam.value = new THREE.Vector3();
                 }
                 uCam.value.copy(this.camera.position);
-
-                if (!m.userData.shader.uniforms.uDebugRadii || !m.userData.shader.uniforms.uDebugRadii.value || !m.userData.shader.uniforms.uDebugRadii.value.set) {
-                    m.userData.shader.uniforms.uDebugRadii = { value: new Float32Array(4) };
-                }
-                m.userData.shader.uniforms.uDebugRadii.value.set([
-                    this.geoThresholds[0],
-                    this.geoThresholds[1],
-                    this.geoThresholds[2],
-                    this.renderSettings.renderDistance
-                ]);
-
-                if (!m.userData.shader.uniforms.uDebugRingsEnabled || !m.userData.shader.uniforms.uDebugRingsEnabled.value || !m.userData.shader.uniforms.uDebugRingsEnabled.value.set) {
-                    m.userData.shader.uniforms.uDebugRingsEnabled = { value: new THREE.Vector4() };
-                }
-                m.userData.shader.uniforms.uDebugRingsEnabled.value.set(
-                    this.debugRings.unit ? 1 : 0,
-                    this.debugRings.small ? 1 : 0,
-                    this.debugRings.medium ? 1 : 0,
-                    this.debugRings.large ? 1 : 0
-                );
 
                 if (m.userData.lodIdx !== undefined) {
                     const idx = m.userData.lodIdx;
