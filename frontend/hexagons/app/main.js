@@ -730,12 +730,21 @@ class PistonViewer {
     }
 
     updateFloorState(h) {
-        if (LOCK_FLOOR_ON_RISE && h > FLOOR_LOCK_THRESHOLD && !this.floorState.locked) {
-            this.floorState.value = this.pickFloorValue();
+        const currentMin = this.pickFloorValue();
+
+        if (LOCK_FLOOR_ON_RISE && h > FLOOR_LOCK_THRESHOLD) {
+            // Logic: Only update if we found a LOWER floor (prevent sinking), but don't raise it (prevent jitter).
+            if (!this.floorState.locked || currentMin < this.floorState.value) {
+                this.floorState.value = currentMin;
+            }
             this.floorState.locked = true;
             this.updateFloorUniforms();
         } else if (!LOCK_FLOOR_ON_RISE) {
-            this.floorState.value = this.pickFloorValue();
+            this.floorState.value = currentMin;
+            this.updateFloorUniforms();
+        } else {
+            // Not yet locked (flat mode), just track freely
+            this.floorState.value = currentMin;
             this.updateFloorUniforms();
         }
     }
