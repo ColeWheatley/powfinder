@@ -58,6 +58,16 @@ def world_meters_to_axial_approx(x, y):
     r = (y - (q * 0.5 * h)) / h
     return q, r 
 
+def world_meters_to_axial_scale(x, y, s):
+    """
+    Finds the nearest q,r for a given x,y at Scale s.
+    """
+    eff_h = UNIT_HEX_WIDTH_METERS * s
+    A = (math.sqrt(3)/2 * eff_h)
+    q = x / A
+    r = (y - (q * 0.5 * eff_h)) / eff_h
+    return q, r 
+
 def round_axial(q, r):
     x_cube = q
     z_cube = r

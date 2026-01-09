@@ -42,7 +42,7 @@ class PistonViewer {
         console.log("Initializing PistonViewer (Priority Radial + LOD)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000000);
+        this.scene.background = new THREE.Color(0x220011); // Debug Dark Pink
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
         this.camera.position.set(0, 800, 0);
@@ -195,7 +195,7 @@ class PistonViewer {
         const dist = this.renderSettings.renderDistance;
         const fogEnd = dist;
         const fogStart = dist * 0.6;
-        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0x000000, fogStart, fogEnd);
+        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0x220011, fogStart, fogEnd); // Match Bg
         this.scene.fog.near = fogStart;
         this.scene.fog.far = fogEnd;
         this.camera.far = dist + 2000;
@@ -227,32 +227,63 @@ class PistonViewer {
         } catch (e) { this.log("Manifest error: " + e.message, "error"); }
     }
 
+    worldToAxialScale(x, y, s) {
+        const h = UNIT_HEX_WIDTH_METERS * s;
+        const A = (Math.sqrt(3) / 2) * h;
+        const q = x / A;
+        const r = (y - (q * 0.5 * h)) / h;
+        return { q, r };
+    }
+
     parseBinaryV3(buffer) {
         const view = new DataView(buffer);
         const minZ = view.getFloat32(12, true);
         const maxZ = view.getFloat32(16, true);
         const scale = view.getFloat32(20, true);
-        const cq = view.getInt32(24, true);
-        const cr = view.getInt32(28, true);
+        const sx = view.getInt32(4, true); // Header stores Sector X
+        const sy = view.getInt32(8, true); // Header stores Sector Y
+        // cq, cr (Scale 1) are at 24, 28 but we recalculate per layer now
+
         let offset = 32;
-        const layers = []; // [L3(Coarse), L2, L1, L0(Fine)]
+        const layers = []; // [L3(Scale24), L2(Scale6), L1(Scale3), L0(Scale1)]
+        const scales = [24.0, 6.0, 3.0, 1.0];
+
+        // Calculate Sector Center in World Meters
+        const minX = sx * SECTOR_WIDTH_METERS;
+        const minY = sy * SECTOR_WIDTH_METERS;
+        const cenX = minX + SECTOR_WIDTH_METERS * 0.5;
+        const cenY = minY + SECTOR_WIDTH_METERS * 0.5;
 
         for (let l = 0; l < 4; l++) {
             const count = view.getUint32(offset, true);
             offset += 4;
             const layer = [];
+
+            // Calculate Layer Center (lcq, lcr) for this scale
+            const sc = scales[l];
+            const rawC = this.worldToAxialScale(cenX, cenY, sc);
+            const lcq = Math.round(rawC.q);
+            const lcr = Math.round(rawC.r);
+
             for (let i = 0; i < count; i++) {
-                // New Format: dq(2), dr(2), hn(2), slope(1) = 7 bytes
+                // dq, dr are RELATIVE to lcq, lcr
                 const dq = view.getInt16(offset, true);
                 const dr = view.getInt16(offset + 2, true);
                 const hn = view.getUint16(offset + 4, true);
-                const slope = view.getUint8(offset + 6); // 0-255 degrees (approx)
+                const slope = view.getUint8(offset + 6);
                 offset += 7;
-                layer.push({ dq, dr, h: minZ + (hn / scale), s: slope });
+
+                // Store accurate reconstructed global Axial if needed
+                layer.push({
+                    dq, dr,
+                    q: lcq + dq, r: lcr + dr,
+                    h: minZ + (hn / scale),
+                    s: slope
+                });
             }
             layers.push(layer);
         }
-        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ }, center: { q: cq, r: cr } };
+        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ }, center: { q: 0, r: 0 } };
     }
 
     createInstancedMeshV3(allLayers, lodIndex, material) {
@@ -469,25 +500,50 @@ class PistonViewer {
     updateLOD() {
         if (!this.manifest) return;
 
-        const target = this.controls.target;
-        const distSqLimit = this.renderSettings.renderDistance ** 2;
+        const camPos = this.camera.position;
+        const distLimit = this.renderSettings.renderDistance;
 
-        // 1. Sort Manifest by Distance to Camera
+        // 1. Sort Manifest by Distance to Camera (Surface Distance)
         const sortedManifest = this.manifest.tiles.map(t => {
-            const lx = t.x - this.worldOrigin.x;
-            const lz = -(t.y - this.worldOrigin.y);
-            const dx = target.x - lx;
-            const dz = target.z - lz;
-            return { ...t, d2: dx * dx + dz * dz, lx, lz };
-        }).sort((a, b) => a.d2 - b.d2);
+            const minX = t.x - this.worldOrigin.x;
+            const maxX = minX + SECTOR_WIDTH_METERS;
+            // Manifest Y is North (World -Z). 
+            // In ThreeJS: Z goes -inf to +inf. 
+            // t.y is typically huge positive (UTM).
+            // Our World Origin shift: lz = -(t.y - origin.y).
+            // So MinZ = -(t.y - origin.y + SECTOR) -> Further negative? 
+            // Wait, t.y increases North. So more North = More Negative Z.
+            // min_z (Three) = -((t.y + SECTOR) - origin.y)
+            // max_z (Three) = -(t.y - origin.y)
+
+            const lzVal = -(t.y - this.worldOrigin.y);
+
+            const box = new THREE.Box3(
+                new THREE.Vector3(minX, TILE_BOUNDS_MIN_Y, lzVal - SECTOR_WIDTH_METERS),
+                new THREE.Vector3(maxX, TILE_BOUNDS_MAX_Y, lzVal)
+            );
+
+            // For logic consistency later
+            t.d = box.distanceToPoint(camPos);
+            t.lx = minX;
+            t.lz = lzVal - SECTOR_WIDTH_METERS; // Approximate for placement? No wait, logic uses lx/lz for placement.
+            // Original lx = t.x - origin.x
+            // Original lz = -(t.y - origin.y) = This is the "Top Left" corner in Z?
+            // Let's keep original lx/lz definitions
+
+            t.lx = minX;
+            t.lz = lzVal; // This matches original logic: lz = -(t.y - wy)
+
+            return t;
+        }).sort((a, b) => a.d - b.d);
 
         // 2. Identify Tasks
         for (const t of sortedManifest) {
             const key = `${t.q}_${t.r}`;
             const tile = this.tiles.get(key);
-            const dist = Math.sqrt(t.d2);
+            const dist = t.d;
 
-            if (t.d2 > distSqLimit) {
+            if (dist > distLimit) {
                 if (tile) this.unloadTile(key); // Out of range
                 continue;
             }
