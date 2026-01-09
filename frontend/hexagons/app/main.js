@@ -232,6 +232,8 @@ class PistonViewer {
         const minZ = view.getFloat32(12, true);
         const maxZ = view.getFloat32(16, true);
         const scale = view.getFloat32(20, true);
+        const cq = view.getInt32(24, true);
+        const cr = view.getInt32(28, true);
         let offset = 32;
         const layers = []; // [L3(Coarse), L2, L1, L0(Fine)]
 
@@ -250,7 +252,7 @@ class PistonViewer {
             }
             layers.push(layer);
         }
-        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ } };
+        return { layers, stats: { min: minZ, max: maxZ, avg: (minZ + maxZ) / 2, base: minZ }, center: { q: cq, r: cr } };
     }
 
     createInstancedMeshV3(allLayers, lodIndex, material) {
@@ -680,15 +682,45 @@ class PistonViewer {
 
         // Approximate Hex (Axial)
         const h_size = UNIT_HEX_WIDTH_METERS;
-        const aq = wx / (Math.sqrt(3) / 2 * h_size);
-        const ar = (wy - (aq * 0.5 * h_size)) / h_size;
-        const hexEl = document.getElementById('hex-val');
-        if (hexEl) hexEl.textContent = `${Math.round(aq)}, ${Math.round(ar)}`;
+        const aq = Math.round(wx / (Math.sqrt(3) / 2 * h_size));
+        const ar = Math.round((wy - (aq * 0.5 * h_size)) / h_size);
 
-        if (tile && tile.stats) {
-            const animatedH = (tile.stats.max - this.floorState.value) * h;
+        const hexEl = document.getElementById('hex-val');
+        if (hexEl) hexEl.textContent = `${aq}, ${ar}`;
+
+        if (tile && tile.center) {
+            // Find specific hex height
+            const dq = aq - tile.center.q;
+            const dr = ar - tile.center.r;
+
+            let groundH = tile.stats.min; // Fallback
+            let found = false;
+
+            // Search Active Layers (start from finest L3 -> index 3)
+            // Or just search all? Finest is best.
+            for (let l = 3; l >= 0; l--) {
+                const layer = tile.hexDataLayers[l];
+                if (!layer) continue;
+                // Simple linear search (fast enough for 1 hex per frame)
+                for (const hx of layer) {
+                    if (hx.dq === dq && hx.dr === dr) {
+                        groundH = hx.h;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+
+            // If not found (maybe gap?), fall back to average, not MAX.
+            if (!found) groundH = tile.stats.avg;
+
+            const animatedH = (groundH - this.floorState.value) * h;
             const minCamY = animatedH + 50.0;
+
+            // Soft constraint: only push if below
             if (this.camera.position.y < minCamY) this.camera.position.y = minCamY;
+
             const thEl = document.getElementById('tile-height');
             if (thEl) thEl.textContent = `${animatedH.toFixed(1)}m`;
         }

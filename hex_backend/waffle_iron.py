@@ -76,7 +76,8 @@ def get_or_create_slope_map(dem_path, output_path, upsample_factor=1):
             tiled=True,
             blockxsize=512,
             blockysize=512,
-            predictor=3
+            predictor=3,
+            BIGTIFF='YES'
         )
         
         # Grid resolutions
