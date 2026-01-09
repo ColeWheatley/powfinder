@@ -215,32 +215,7 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
 
     # NOTE: Gradient calculation removed from here. Using pre-baked 'slope_data'.
 
-    def sample_data(hex_list):
-        if not hex_list: return np.array([]), np.array([])
-        wxs, wys = np.array([h[2] for h in hex_list]), np.array([h[3] for h in hex_list])
-        
-        # Sample Height
-        rows, cols = rasterio.transform.rowcol(dem_transform, wxs, wys)
-        rows = np.clip(rows, 0, dem_data.shape[0]-1)
-        cols = np.clip(cols, 0, dem_data.shape[1]-1)
-        h_vals = dem_data[rows, cols]
-
-        # Sample Slope (using slope transform in case resolutions differ)
-        s_rows, s_cols = rasterio.transform.rowcol(slope_transform, wxs, wys)
-        s_rows = np.clip(s_rows, 0, slope_data.shape[0]-1)
-        s_cols = np.clip(s_cols, 0, slope_data.shape[1]-1)
-        s_vals = slope_data[s_rows, s_cols]
-        
-        return h_vals, s_vals
-        
-        # We need to aggregate? 
-        # Ideally we'd grab a window. But 'sample_heights' in this script currently does 
-        # NEAREST NEIGHBOR (single point). 
-        # For Slope Average, Point Sampling is risky (aliasing).
-        # But per user instruction "Straight averages are fine. It's not a super crazy high res dem".
-        # If we stick to single point sampling for now (fast), it's just grabbing the slope AT center.
-        # To do true "average", we'd need a window.
-        # Let's start with Point Sampling of the Slope Map for speed/consistency with height logic.
+    # Function sample_data removed as it is superseded by inline vectorized sampling.
         
 
 
@@ -257,35 +232,151 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
         
         hx = coord_util.get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, S)
         if hx:
-            h_vals, s_vals = sample_data(hx)
-            min_z, max_z = min(min_z, h_vals.min()), max(max_z, h_vals.max())
+            # Vectorized Sampling for Center + 6 Neighbors
+            # Neighbor Order: N, NE, SE, S, SW, NW (Aligned with Axial +y=North)
+            n_offsets = [(0, 1), (1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1)]
             
-            # Pack Tuple: (q, r, height, slope)
-            # Only bake slope for L0 (s=1.0) and L1 (s=3.0)
+            # Precompute World Delta per Axial Step for this Scale
+            # Note: This reproduces the axial_to_world logic inline
+            w_h = coord_util.UNIT_HEX_WIDTH_METERS * S
+            dx_dq = (math.sqrt(3)/2) * w_h
+            dy_dq = 0.5 * w_h
+            dy_dr = w_h 
+            
+            # Arrays of Center WX, WY
+            c_wx = np.array([h[2] for h in hx])
+            c_wy = np.array([h[3] for h in hx])
+            
+            # Create list of arrays to sample: [Center, N, NE, SE, S, SW, NW]
+            sample_wxs = [c_wx]
+            sample_wys = [c_wy]
+            
+            for (ndq, ndr) in n_offsets:
+                 # Calculate relative world offset for neighbor
+                 odx = ndq * dx_dq
+                 ody = ndr * dy_dr + ndq * dy_dq
+                 sample_wxs.append(c_wx + odx)
+                 sample_wys.append(c_wy + ody)
+                 
+            # Flatten to sample
+            flat_wxs = np.concatenate(sample_wxs)
+            flat_wys = np.concatenate(sample_wys)
+            
+            # Sample Heights
+            rows, cols = rasterio.transform.rowcol(dem_transform, flat_wxs, flat_wys)
+            rows = np.clip(rows, 0, dem_data.shape[0]-1)
+            cols = np.clip(cols, 0, dem_data.shape[1]-1)
+            all_h = dem_data[rows, cols]
+            
+            # Reshape: (7, N)
+            stacked_h = all_h.reshape(7, len(hx))
+            
+            # Sample Slope (Center only)
+            s_rows, s_cols = rasterio.transform.rowcol(slope_transform, c_wx, c_wy)
+            s_rows = np.clip(s_rows, 0, slope_data.shape[0]-1)
+            s_cols = np.clip(s_cols, 0, slope_data.shape[1]-1)
+            s_vals = slope_data[s_rows, s_cols]
+
+            # Update Min/Max Z from Center vals
+            min_z, max_z = min(min_z, stacked_h[0].min()), max(max_z, stacked_h[0].max())
+            
+            # Process Layers
             use_slope = (S <= 3.0)
             
             layer = []
-            for i, (q, r, wx, wy) in enumerate(hx):
+            num_hexes = len(hx)
+            
+            # Vectorized calc for deltas? 
+            # D = Center - Neighbor.
+            # But we need math.ceil logic.
+            # Can use numpy:
+            # center (1, N) broadcast against neighbors (6, N)
+            
+            c_h_b = stacked_h[0] # (N,)
+            n_h_b = stacked_h[1:] # (6, N)
+            
+            # diffs = c_h - n_h
+            diffs = c_h_b - n_h_b # (6, N)
+            
+            # Logic: if diff <= 0 -> 0. else ceil(diff). Clamp 0-255.
+            # ceil: np.ceil
+            d_ceil = np.ceil(diffs)
+            d_clamped = np.clip(d_ceil, 0, 255).astype(np.uint8)
+            
+            # Handle special floor case? 
+            # If d_ceil >= 254 -> 255. (Infinite/Floor)
+            # Actually user said "bake in neighbor Z".
+            # If the gap is huge (cliff), we probably want to extend to the neighbor.
+            # So 255 is just a max limit.
+            
+            # Transpose to iterate by hex
+            d_final = d_clamped.T # (N, 6)
+            
+            for i in range(num_hexes):
+                q, r = hx[i][0], hx[i][1]
                 slope = s_vals[i] if use_slope else 0
-                layer.append((q, r, h_vals[i], slope, lcq, lcr))
+                layer.append({
+                    'q': q, 'r': r, 
+                    'l': hx[i], # raw tuple
+                    'lcq': lcq, 'lcr': lcr,
+                    'h': stacked_h[0, i],
+                    's': slope,
+                    'deltas': d_final[i] # array of 6 uint8
+                })
             layers_data.append(layer)
         else: layers_data.append([])
 
     scale_f = 65535.0 / (max_z - min_z + 20) if max_z > min_z else 1.0
     blob = struct.pack("<4siifffii", b"HEX3", int(SX), int(SY), float(min_z-10), float(max_z+10), float(scale_f), cq, cr)
     
-    for ld in layers_data:
+    # REFACTORED LOOP
+    for l_idx, ld in enumerate(layers_data):
+        S = scales[l_idx]["s"]
         blob += struct.pack("<I", len(ld))
-        # Struct: dq(h), dr(h), hn(H, 2 bytes), slope(B, 1 byte), pad(B, 1 byte) => 8 bytes total?
-        # Previous: 6 bytes (hhH). 
-        # New: 8 bytes per hex to keep alignment? Or 7? 
-        # Let's do 7 bytes: q(2), r(2), h(2), s(1).
-        buf = bytearray(len(ld) * 7)
-        for i, (q, r, h, s, lcq, lcr) in enumerate(ld):
+        buf = bytearray(len(ld) * 13)
+        # Directions for neighbors (North, NE, SE, South, SW, NW) 
+        # based on Axial (Flat Top): 
+        # N: q, r-1
+        # NE: q+1, r-1
+        # SE: q+1, r
+        # S: q, r+1
+        # SW: q-1, r+1
+        # NW: q-1, r
+        nb_offsets = [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0)]
+        
+        for i, item in enumerate(ld):
+            q, r = item['q'], item['r']
+            h = item['h']
+            s = item['s']
+            lcq, lcr = item['lcq'], item['lcr']
+
             dq, dr = max(-32767, min(32767, int(q - lcq))), max(-32767, min(32767, int(r - lcr)))
             hn = max(0, min(65535, int((h - (min_z-10)) * scale_f)))
             s_byte = max(0, min(255, int(s)))
-            struct.pack_into("<hhHB", buf, i*7, dq, dr, hn, s_byte)
+            
+            # Neighborhood Search
+            deltas = []
+            for oq, or_ in nb_offsets:
+                nq, nr = q + oq, r + or_
+                # Sample DEM at neighbor centered world pos
+                # we can use the formula directly since coord_util has it
+                # world_x = (q * (math.sqrt(3)/2) * h_eff) ...
+                h_eff = coord_util.UNIT_HEX_WIDTH_METERS * S
+                wx = (nq * (math.sqrt(3)/2) * h_eff)
+                wy = (nr * h_eff + nq * 0.5 * h_eff)
+                
+                # Fast sample (Nearest)
+                row, col = rasterio.transform.rowcol(dem_transform, wx, wy)
+                row = max(0, min(dem_data.shape[0]-1, row))
+                col = max(0, min(dem_data.shape[1]-1, col))
+                nb_h = dem_data[row, col]
+                
+                # Delta is positive if WE are higher than NEIGHBOR (skirt drops)
+                # Max drop 255m
+                d_val = max(0, min(255, int(round(h - nb_h))))
+                deltas.append(d_val)
+                
+            struct.pack_into("<hhHB6B", buf, i*13, dq, dr, hn, s_byte, *deltas)
         blob += buf
     
     with open(os.path.join(output_dir, f"sector_{SX}_{SY}.bin"), "wb") as f: f.write(blob)

@@ -89,7 +89,7 @@ class PistonViewer {
         this.loaderHidden = false;
         this.materialsToUpdate = [];
 
-        this.safetyMode = 1.0;
+        this.gradientMode = 1.0;
         this.heightFactor = 0.0;
         this.transSettings = { flatThresh: 5.0, riseStart: 6.0, riseEnd: 25.0, curve: 1.0 };
         this.worldOrigin = { x: 0, y: 0 };
@@ -116,6 +116,7 @@ class PistonViewer {
 
         // LOD Pause Toggle
         this.lodPaused = false;
+        this.debugRings = { unit: true, small: true, medium: true, large: true };
 
         this.initDebugConsole();
         this.initMinimizeButton();
@@ -202,11 +203,25 @@ class PistonViewer {
             });
         }
 
-        // Safety Toggle
-        const sToggle = document.getElementById('safety-toggle');
-        if (sToggle) {
-            sToggle.addEventListener('change', (e) => {
-                this.safetyMode = e.target.checked ? 1.0 : 0.0;
+        // Gradient Toggle
+        const terrainBtn = document.getElementById('gradient-terrain');
+        const gradientBtn = document.getElementById('gradient-slope');
+
+        if (terrainBtn && gradientBtn) {
+            terrainBtn.addEventListener('click', () => {
+                this.gradientMode = 0.0;
+                terrainBtn.style.background = '#74b9ff';
+                terrainBtn.style.color = '#fff';
+                gradientBtn.style.background = 'transparent';
+                gradientBtn.style.color = '#ccc';
+            });
+
+            gradientBtn.addEventListener('click', () => {
+                this.gradientMode = 1.0;
+                gradientBtn.style.background = '#74b9ff';
+                gradientBtn.style.color = '#fff';
+                terrainBtn.style.background = 'transparent';
+                terrainBtn.style.color = '#ccc';
             });
         }
 
@@ -218,12 +233,43 @@ class PistonViewer {
                 this.log(this.lodPaused ? "LOD Updates PAUSED" : "LOD Updates RESUMED", "info");
             });
         }
+
+        // Debug Ring Toggles
+        ['unit', 'small', 'medium', 'large'].forEach(key => {
+            const el = document.getElementById(`ring-${key}-toggle`);
+            if (el) {
+                el.addEventListener('change', (e) => {
+                    this.debugRings[key] = e.target.checked;
+                });
+            }
+        });
     }
 
     createHexGeometry(radius) {
         const geometry = new THREE.CylinderGeometry(radius, radius, 1, 6);
-        geometry.rotateY(Math.PI / 6); // Flat top
-        return geometry.toNonIndexed(); // Split vertices for sharp skirts
+        geometry.rotateY(Math.PI / 6);
+        const nonIndexed = geometry.toNonIndexed();
+
+        // Add "IsTop" Attribute
+        const pos = nonIndexed.attributes.position;
+        const count = pos.count;
+        const isTop = new Float32Array(count);
+
+        for (let i = 0; i < count; i++) {
+            // Logic: Top Cap has y=0.5 (height=1/2). Side Tops have y=0.5. Side Bottoms have y=-0.5.
+            // Wait, Cylinder is centered at 0. Height=1 -> 0.5 to -0.5.
+            // We want Texture on Top Cap. Slope on Sides (including Skirts).
+            // Top Cap vertices usually have Normal.y = 1.
+            // Side Top vertices have Normal.y = 0.
+
+            // Let's rely on Normals from the non-indexed geo?
+            // Actually, we can just use Normal.Y > 0.5 check inside the loop here to bake it.
+            const ny = nonIndexed.attributes.normal.getY(i);
+            isTop[i] = (ny > 0.9) ? 1.0 : 0.0;
+        }
+
+        nonIndexed.setAttribute('aIsTop', new THREE.BufferAttribute(isTop, 1));
+        return nonIndexed;
     }
 
     onResize() {
@@ -404,9 +450,13 @@ class PistonViewer {
         material.onBeforeCompile = (shader) => {
             material.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
-            shader.uniforms.uSafetyMode = { value: 1.0 };
+            shader.uniforms.uGradientMode = { value: 1.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
+            shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
+            // T0, T1, T2, Tmax
+            shader.uniforms.uDebugRadii = { value: new Float32Array([0, 0, 0, 0]) };
+            shader.uniforms.uDebugRingsEnabled = { value: new THREE.Vector4(0, 0, 0, 0) };
 
             // UV Padding correction (64px padding on 4096px base)
             const pad = 64.0;
@@ -425,10 +475,12 @@ class PistonViewer {
                 
                 attribute vec4 instanceNbA; 
                 attribute vec2 instanceNbB;
+                attribute float aIsTop; // 1.0 = Top Cap, 0.0 = Side/Skirt
                 
-                varying vec3 vLocalPos;
+                varying vec3 vLocalPos; // Relative to Tile (for UVs)
+                varying vec3 vWorldPos; // Absolute World (for Rings)
                 varying float vSlope;
-                varying float vIsSide;
+                varying float vIsTop;
                 varying vec3 vMyNormal;
                 
                 float getDelta(int idx) {
@@ -445,28 +497,11 @@ class PistonViewer {
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
                 
-                // Use Normal for Direction (Robust for Split Vertices)
-                // Tangent/Angle of the FACE, not the corner vertex position.
-                // Side normals are purely horizontal.
-                
+                // Angle increases CCW: S(0) -> E(90) -> N(180).
+                // S(3), SE(2), NE(1), N(0).
+                // Using Normal for robust direction on non-indexed geometry
                 float angle = atan(normal.x, normal.z); 
                 float rawIdx = (angle / 6.28318) * 6.0;
-                
-                // Map CCW Angle to CW Neighbor Index (S->SE->NE...)
-                // Normal S (0,0,1) -> Angle 0 -> Idx 3 (S)
-                // Normal N (0,0,-1) -> Angle PI -> Idx 0 (N)
-                // Normal E (1,0,0) -> Angle PI/2 -> Idx ?
-                // 3 - 1.5 = 1.5. Round -> 2. (SE?). Wait.
-                // S(3), SE(2), NE(1), N(0).
-                // Angle 0 -> 3.
-                // Angle PI/2 (E) -> raw 1.5. 3 - 1.5 = 1.5. Round 2 (SE).
-                // Error. East face is between SE and NE.
-                // Flat Top Hex: East is a POINT, not a face.
-                // Faces are: N, NE, SE, S, SW, NW.
-                // NE Face Normal: angle between N and E? 
-                // N(PI), E(PI/2). Mid = 3PI/4 (135 deg).
-                // 135 / 360 * 6 = 2.25.
-                // 3.0 - 2.25 = 0.75. Round -> 1 (NE). Correct.
                 
                 float fIdx = mod(3.0 - rawIdx, 6.0);
                 if (fIdx < 0.0) fIdx += 6.0;
@@ -475,34 +510,31 @@ class PistonViewer {
                 float normD = getDelta(neighborIdx);
                 float deltaM = normD * 255.0;
                 
-                vIsSide = 0.0; // Default Top
-                
                 if (position.y > 0.0) {
-                    // Top
+                    // It's a Top Vertex (includes Cap and Side-Top)
                     transformed.y = animH;
-                    vIsSide = 0.0;
                 } else {
-                    // Bottom / Skirt
-                    vIsSide = 1.0; 
-                    if (deltaM < 0.5) {
-                         // No skirt -> Collapse to Top Height
+                    // Bottom Vertex (Skirt Bottom)
+                    if (deltaM < 0.1) {
+                        // Tightened Threshold (0.5m -> 0.1m)
+                        // If delta < 10cm, collapse skirt.
                         transformed.y = animH; 
                     } else if (deltaM > 254.0) {
-                        transformed.y = 0.0; // Floor
+                        transformed.y = 0.0; 
                     } else {
-                        // Drop
                         transformed.y = animH - (deltaM * uHeightFactor);
                     }
                 }
 
                 #ifdef USE_INSTANCING
                     vLocalPos = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+                    vWorldPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
                 #else
                     vLocalPos = transformed;
+                    vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
                 #endif
                 
-                // We trust position.y logic for vIsSide. 
-                // Do NOT override with normal check (which fails for displaced tops).
+                vIsTop = aIsTop;
                 vSlope = instanceSlope;
                 vMyNormal = normal;
             `);
@@ -512,13 +544,17 @@ class PistonViewer {
                 uniform float uTileSize;
                 uniform float uUvScale;
                 uniform float uUvOffset;
-                uniform float uSafetyMode;
+                uniform float uGradientMode;
+                uniform vec3 uCameraPos;
+                uniform float uDebugRadii[4];
+                uniform vec4 uDebugRingsEnabled;
                 varying vec3 vLocalPos;
+                varying vec3 vWorldPos;
                 varying float vSlope;
-                varying float vIsSide;
+                varying float vIsTop;
                 varying vec3 vMyNormal;
 
-                vec3 safetyColor(float s) {
+                vec3 gradientColor(float s) {
                     // Green: 30-35
                     // Yellow: 35-40
                     // Orange: 40-45
@@ -549,7 +585,7 @@ class PistonViewer {
                 vec4 texColor = texture2D(map, vec2(u, v));
                 
                 // Fallback for huge hexes exceeding padding (Debug Pink)
-                if (outOfBounds) texColor = vec4(1.0, 0.0, 0.8, 1.0);
+                if (outOfBounds) texColor = vec4(1.0, 0.0, 1.0, 1.0);
 
                 // --- LIGHTING ---
                 // Sun is approx 15 degrees East of South (South is +Z, East is +X)
@@ -559,22 +595,60 @@ class PistonViewer {
                 // Ambient + Diffuse
                 float lighting = clamp(light * 0.6 + 0.6, 0.4, 1.0);
 
-                // --- SKIRTS ---
-                if (vIsSide > 0.5) {
-                    // Start Darker for sides immediately
+                if (vIsTop < 0.5) {
+                    // SIDE / SKIRT
                     vec3 baseColor;
-
-                    if (uSafetyMode > 0.5 && vSlope >= 30.0) {
-                        baseColor = safetyColor(vSlope);
+                    if (uGradientMode > 0.5 && vSlope >= 30.0) {
+                        baseColor = gradientColor(vSlope);
                     } else {
                         // Low Slope / Distant LOD: Use texture but darken it significantly
                         baseColor = texColor.rgb * 0.6; 
                     }
-                    
                     diffuseColor = vec4(baseColor * lighting, 1.0);
                 } else {
-                   // TOPS
+                   // TOP (Texture)
                    diffuseColor = vec4(texColor.rgb * lighting, 1.0);
+                }
+
+                // RADIAL DEBUG RINGS
+                float dist = distance(vWorldPos, uCameraPos);
+                float ringWidth = 80.0;
+                
+                // Logic Table: 
+                // Unit (x): T0
+                // Small (y): T0 + T1
+                // Medium (z): T1 + T2
+                // Large (w): T2 + Tmax
+                
+                bool shouldDraw = false;
+                float targetRadius = 0.0;
+                vec3 ringColor = vec3(1.0);
+                
+                // Unit (Cyan)
+                if (uDebugRingsEnabled.x > 0.5 && abs(dist - uDebugRadii[0]) < ringWidth) { 
+                    shouldDraw = true; targetRadius = uDebugRadii[0]; ringColor = vec3(0.0, 1.0, 1.0); 
+                }
+                // Small (Green)
+                if (uDebugRingsEnabled.y > 0.5) {
+                    if (abs(dist - uDebugRadii[0]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[0]; ringColor = vec3(0.2, 1.0, 0.2); }
+                    if (abs(dist - uDebugRadii[1]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[1]; ringColor = vec3(0.2, 1.0, 0.2); }
+                }
+                // Medium (Yellow)
+                if (uDebugRingsEnabled.z > 0.5) {
+                    if (abs(dist - uDebugRadii[1]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[1]; ringColor = vec3(1.0, 1.0, 0.2); }
+                    if (abs(dist - uDebugRadii[2]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[2]; ringColor = vec3(1.0, 1.0, 0.2); }
+                }
+                // Large (Red)
+                if (uDebugRingsEnabled.w > 0.5) {
+                    if (abs(dist - uDebugRadii[2]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[2]; ringColor = vec3(1.0, 0.2, 0.2); }
+                    if (abs(dist - uDebugRadii[3]) < ringWidth) { shouldDraw = true; targetRadius = uDebugRadii[3]; ringColor = vec3(1.0, 0.2, 0.2); }
+                }
+                
+                if (shouldDraw) {
+                    float norm = abs(dist - targetRadius) / ringWidth;
+                    float alpha = mix(0.1, 0.6, smoothstep(0.0, 1.0, norm)); 
+                    diffuseColor.rgb = mix(diffuseColor.rgb, ringColor, alpha);
+                    if (norm > 0.94) diffuseColor.rgb += ringColor * 0.5; // Boundary glow
                 }
             `);
         };
@@ -1021,7 +1095,21 @@ class PistonViewer {
         for (const m of this.materialsToUpdate) {
             if (m.userData.shader) {
                 m.userData.shader.uniforms.uHeightFactor.value = h;
-                m.userData.shader.uniforms.uSafetyMode.value = this.safetyMode;
+                m.userData.shader.uniforms.uGradientMode.value = this.gradientMode;
+                m.userData.shader.uniforms.uCameraPos.value.copy(this.camera.position);
+
+                m.userData.shader.uniforms.uDebugRadii.value.set([
+                    this.geoThresholds[0],
+                    this.geoThresholds[1],
+                    this.geoThresholds[2],
+                    this.renderSettings.renderDistance
+                ]);
+                m.userData.shader.uniforms.uDebugRingsEnabled.value.set(
+                    this.debugRings.unit ? 1 : 0,
+                    this.debugRings.small ? 1 : 0,
+                    this.debugRings.medium ? 1 : 0,
+                    this.debugRings.large ? 1 : 0
+                );
             }
         }
 
