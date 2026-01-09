@@ -35,7 +35,7 @@ Switch from rectangular tiles to hexagonal chunks (LOD-compatible).
 *   **Overshoot Texturing (WebP Optimization)**: 
     *   **Justification**: WebP uses 16x16 macroblocks. High-contrast edges (Satellite vs. Black padding) cause artifacts if they fall mid-block.
     *  
-### 4. Implementation: "Safety Skirts" & Gradients (PENDING)
+### 4. Implementation: Slope Gradients (PENDING)
 **Objective**: Visualizing terrain danger (slope) on hex sides ("skirts") while maintaining aesthetic quality.
 
 **The "Skier's Slope" Algorithm (Waffle Iron)**:

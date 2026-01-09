@@ -1,0 +1,247 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #050505;
+    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* Loading Screen */
+#loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: opacity 0.5s ease;
+}
+
+#loading-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Hexagon background pattern */
+.hex-pattern {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 60px, rgba(255, 107, 157, 0.03) 60px, rgba(255, 107, 157, 0.03) 62px),
+        repeating-linear-gradient(60deg, transparent, transparent 60px, rgba(116, 185, 255, 0.03) 60px, rgba(116, 185, 255, 0.03) 62px),
+        repeating-linear-gradient(120deg, transparent, transparent 60px, rgba(255, 107, 157, 0.03) 60px, rgba(255, 107, 157, 0.03) 62px);
+    opacity: 0.5;
+    /* animation: hexPulse 4s ease-in-out infinite; */
+}
+
+@keyframes hexPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+}
+
+/* Race car animation */
+.race-car {
+    position: relative;
+    /* animation: carZoom 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; */
+    transform: translateX(0);
+    margin-bottom: 40px;
+    opacity: 1;
+}
+
+@keyframes carZoom {
+    0% {
+        transform: translateX(-200px) scale(0.8);
+        opacity: 0;
+    }
+    60% {
+        transform: translateX(20px) scale(1.1);
+    }
+    100% {
+        transform: translateX(0) scale(1);
+        opacity: 1;
+    }
+}
+
+/* Speed lines behind car */
+.speed-lines {
+    position: absolute;
+    left: -60px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 60px;
+    height: 30px;
+}
+
+.speed-lines .line {
+    position: absolute;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #ff6b9d, transparent);
+    animation: speedLine 0.8s ease-out infinite;
+}
+
+.speed-lines .line:nth-child(1) {
+    top: 5px;
+    animation-delay: 0s;
+}
+
+.speed-lines .line:nth-child(2) {
+    top: 15px;
+    animation-delay: 0.2s;
+}
+
+.speed-lines .line:nth-child(3) {
+    top: 25px;
+    animation-delay: 0.4s;
+}
+
+@keyframes speedLine {
+    0% {
+        width: 0;
+        left: 60px;
+        opacity: 1;
+    }
+    100% {
+        width: 60px;
+        left: 0;
+        opacity: 0;
+    }
+}
+
+/* Loading text */
+.loading-text {
+    text-align: center;
+    position: relative;
+}
+
+.main-message {
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -1px;
+    background: linear-gradient(45deg, #ff6b9d, #74b9ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 20px;
+    /* animation: textFadeIn 0.4s ease-out 0.4s forwards; */
+    opacity: 1;
+}
+
+@keyframes textFadeIn {
+    to {
+        opacity: 1;
+    }
+}
+
+.fetching-message {
+    font-size: 1.2rem;
+    font-weight: 400;
+    color: #74b9ff;
+    letter-spacing: 0.5px;
+    /* animation: flash 1s ease-in-out 0.8s infinite; */
+    opacity: 1;
+}
+
+@keyframes flash {
+    0%, 100% {
+        opacity: 0;
+    }
+    10%, 90% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Satellite display */
+#sat-display {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+    perspective: 1000px;
+}
+
+#sat-display.show {
+    display: block;
+    opacity: 1;
+}
+
+#sat-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform-origin: center center;
+    transition: transform 0.1s ease-out;
+    will-change: transform;
+}
+
+.sat-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    background: rgba(20, 20, 20, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 40px 60px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.sat-overlay h1 {
+    font-size: 3rem;
+    font-weight: 700;
+    letter-spacing: -1px;
+    background: linear-gradient(45deg, #ff6b9d, #74b9ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 10px;
+}
+
+.sat-overlay .subtitle {
+    font-size: 1rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main-message {
+        font-size: 1.8rem;
+    }
+
+    .fetching-message {
+        font-size: 1rem;
+    }
+
+    .sat-overlay h1 {
+        font-size: 2rem;
+    }
+
+    .sat-overlay {
+        padding: 30px 40px;
+    }
+}

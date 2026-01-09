@@ -100,9 +100,16 @@ def get_hexes_in_bbox(min_x, max_x, min_y, max_y, padding_m=0.0):
             wx, wy = axial_to_world_meters(q, r)
             if min_x <= wx <= max_x and min_y <= wy <= max_y: yield (q, r)
 
-def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor):
+def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor, padding_m=6.4):
     eff_h = UNIT_HEX_WIDTH_METERS * scale_factor
     A = (math.sqrt(3)/2 * eff_h)
+    
+    # Expand bounds check by padding (to allow overlap)
+    p_min_x = min_x - padding_m
+    p_max_x = max_x + padding_m
+    p_min_y = min_y - padding_m
+    p_max_y = max_y + padding_m
+
     def to_prime(x, y):
          q = x / A
          r = (y - (q * 0.5 * eff_h)) / eff_h
@@ -117,7 +124,9 @@ def get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, scale_factor):
         for r in range(int(min(rs)) - 2, int(max(rs)) + 2):
             wx = q * dx_dq_scaled(scale_factor)
             wy = r * dy_dr_scaled(scale_factor) + q * dy_dq_scaled(scale_factor)
-            if min_x <= wx <= max_x and min_y <= wy <= max_y:
+            
+            # Check against padded bounds
+            if p_min_x <= wx <= p_max_x and p_min_y <= wy <= p_max_y:
                 found.append((q, r, wx, wy))
     return found
 

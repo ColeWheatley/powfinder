@@ -88,6 +88,8 @@ class PistonViewer {
 
         this.loaderHidden = false;
         this.materialsToUpdate = [];
+
+        this.safetyMode = 1.0;
         this.heightFactor = 0.0;
         this.transSettings = { flatThresh: 5.0, riseStart: 6.0, riseEnd: 25.0, curve: 1.0 };
         this.worldOrigin = { x: 0, y: 0 };
@@ -167,6 +169,14 @@ class PistonViewer {
                 if (tVal) tVal.textContent = tSlider.value + "m";
             });
         }
+
+        // Safety Toggle
+        const sToggle = document.getElementById('safety-toggle');
+        if (sToggle) {
+            sToggle.addEventListener('change', (e) => {
+                this.safetyMode = e.target.checked ? 1.0 : 0.0;
+            });
+        }
     }
 
     createHexGeometry(radius) {
@@ -199,10 +209,17 @@ class PistonViewer {
             const { min_x, min_y, max_x, max_y } = this.manifest.bounds;
             this.worldOrigin = { x: min_x, y: min_y };
 
+            /*
             const centerX = (min_x + max_x) / 2 - min_x;
             const centerZ = -((min_y + max_y) / 2 - min_y);
             this.camera.position.set(centerX, 800, centerZ);
             this.controls.target.set(centerX, 0, centerZ);
+            */
+            // DEBUG: Circular Building Fault Line
+            const debugX = 59817 - this.worldOrigin.x;
+            const debugZ = -(206664 - this.worldOrigin.y);
+            this.camera.position.set(debugX, 208, debugZ + 100); // Offset Z slightly to look at it?
+            this.controls.target.set(debugX, 12, debugZ);
             this.controls.update();
 
             this.essentialTilesTarget = 1;
@@ -300,6 +317,7 @@ class PistonViewer {
         material.onBeforeCompile = (shader) => {
             material.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
+            shader.uniforms.uSafetyMode = { value: 1.0 };
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
 
@@ -320,6 +338,7 @@ class PistonViewer {
                 varying vec3 vLocalPos;
                 varying float vSlope;
                 varying float vIsSide;
+                varying vec3 vMyNormal;
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
                 float myH = instanceNZ_2.z - uFloorOffset;
@@ -346,10 +365,10 @@ class PistonViewer {
                     vLocalPos = transformed;
                 #endif
                 
-                // Robust Top Detection: Top face has normal (0,1,0). Sides have normal.y = 0.
-                // We use a safe threshold > 0.9 to catch the top.
+                // Robust Top Detection and Normals
                 vIsSide = (normal.y > 0.9) ? 0.0 : 1.0;
                 vSlope = instanceSlope;
+                vMyNormal = normal;
             `);
 
             shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
@@ -357,10 +376,12 @@ class PistonViewer {
                 uniform float uTileSize;
                 uniform float uUvScale;
                 uniform float uUvOffset;
+                uniform float uSafetyMode;
                 varying vec3 vLocalPos;
                 varying float vSlope;
                 varying float vIsSide;
-                
+                varying vec3 vMyNormal;
+
                 vec3 safetyColor(float s) {
                     // Green: 30-35
                     // Yellow: 35-40
@@ -379,23 +400,45 @@ class PistonViewer {
                 float u = (vLocalPos.x / uTileSize) + 0.5;
                 float v = (-vLocalPos.z / uTileSize) + 0.5;
                 
-                u = clamp(u * uUvScale + uUvOffset, 0.0, 1.0);
-                v = clamp(v * uUvScale + uUvOffset, 0.0, 1.0);
+                // Apply Padding Scale/Offset first
+                u = u * uUvScale + uUvOffset;
+                v = v * uUvScale + uUvOffset;
+                
+                // NOW check bounds. This allows us to use the padding area safeely.
+                bool outOfBounds = (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0);
+                
+                // Clamp to prevent texture wrapping artifacts at the very edge
+                u = clamp(u, 0.0, 1.0);
+                v = clamp(v, 0.0, 1.0);
                 vec4 texColor = texture2D(map, vec2(u, v));
                 
-                // Mix in Safety Colors if it's a side (skirt)
+                // Fallback for huge hexes exceeding padding (Debug Pink)
+                if (outOfBounds) texColor = vec4(1.0, 0.0, 0.8, 1.0);
+
+                // --- LIGHTING ---
+                // Sun is approx 15 degrees East of South (South is +Z, East is +X)
+                // sin(15) = 0.258, cos(15) = 0.966
+                vec3 sunDir = normalize(vec3(0.258, 1.0, 0.966));
+                float light = dot(vMyNormal, sunDir);
+                // Ambient + Diffuse
+                float lighting = clamp(light * 0.6 + 0.6, 0.4, 1.0);
+
+                // --- SKIRTS ---
                 if (vIsSide > 0.5) {
-                    if (vSlope >= 30.0) {
-                        diffuseColor = vec4(safetyColor(vSlope), 1.0);
+                    // Start Darker for sides immediately
+                    vec3 baseColor;
+
+                    if (uSafetyMode > 0.5 && vSlope >= 30.0) {
+                        baseColor = safetyColor(vSlope);
                     } else {
-                        // Terrain Gradient for low slopes?
-                        // Just darken the texture for now to show depth
-                        diffuseColor = texColor * 0.5; 
+                        // Low Slope / Distant LOD: Use texture but darken it significantly
+                        baseColor = texColor.rgb * 0.6; 
                     }
-                    // Debug borders?
-                    // diffuseColor = mix(diffuseColor, vec4(0.0,0.0,0.0,1.0), 0.1); 
+                    
+                    diffuseColor = vec4(baseColor * lighting, 1.0);
                 } else {
-                   diffuseColor = texColor;
+                   // TOPS
+                   diffuseColor = vec4(texColor.rgb * lighting, 1.0);
                 }
             `);
         };
@@ -692,7 +735,7 @@ class PistonViewer {
         this.updateRenderStats(now);
 
         const angle = this.controls.getPolarAngle() * 180 / Math.PI;
-        const linear = Math.min(1, Math.max(0, (angle - 6.0) / (25.0 - 6.0)));
+        const linear = Math.min(1, Math.max(0, (angle - 5.5) / (25.0 - 5.5)));
         const h = linear;
         const flat = angle < 5.5;
 
@@ -705,7 +748,10 @@ class PistonViewer {
         }
 
         for (const m of this.materialsToUpdate) {
-            if (m.userData.shader) m.userData.shader.uniforms.uHeightFactor.value = h;
+            if (m.userData.shader) {
+                m.userData.shader.uniforms.uHeightFactor.value = h;
+                m.userData.shader.uniforms.uSafetyMode.value = this.safetyMode;
+            }
         }
 
         this.updateLOD();

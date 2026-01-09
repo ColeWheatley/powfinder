@@ -1,0 +1,67 @@
+# Large files - keep simple and effective
+# All TIF files (terrain, hillshade, shadow data)
+*.tif
+
+# Generated PNG files from TIF rendering
+*.png
+*.webp
+*.bin
+
+# Tiles folders
+pistons_local_beta/tiles_dem/
+pistons_local_beta/tiles_sat/
+pistons_local_beta/data/
+tiles/
+frontend/hexes_beta/
+frontend/piston_viewer/fuckups.md
+
+# Specific large weather JSON files
+backend/meteo_api/*.json
+resources/meteo_api/weather_data_3hour_backup.json
+
+# ML and Local Data
+backend/ml_interpolator/cache/
+pistons_local_beta/data/
+
+# Node modules and package manager files
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Development and temporary files
+.vscode/
+.idea/
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS and system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Cache directories
+.cache/
+*.cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Documentation and readme backups
+README_*.md.bak
+*.md.backup

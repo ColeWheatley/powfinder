@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PowFinder - Advanced Ski Weather Forecasting</title>
+  <style>
+    /* PowFinder Landing Page Styles */
+    :root {
+      --powfinder-pink: #ff6b9d;
+      --powfinder-dark-pink: #e55a87;
+      --snow-white: #ffffff;
+      --mountain-gray: #2c3e50;
+      --ice-blue: #74b9ff;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Georgia, serif;
+      background: linear-gradient(135deg,
+          var(--mountain-gray) 0%,
+          #34495e 30%,
+          var(--ice-blue) 70%,
+          var(--powfinder-pink) 100%);
+      min-height: 100vh;
+      color: var(--snow-white);
+      line-height: 1.6;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Subtle snow effect */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        radial-gradient(circle at 40% 60%, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 100px 100px, 150px 150px, 80px 80px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      position: relative;
+      z-index: 2;
+      background: rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      margin-top: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    h1 {
+      font-size: 3.5em;
+      text-align: center;
+      margin-bottom: 20px;
+      background: linear-gradient(45deg, var(--snow-white), var(--powfinder-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+      font-weight: 300;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      letter-spacing: -1px;
+    }
+
+    h2 {
+      color: var(--powfinder-pink);
+      font-size: 1.8em;
+      margin: 30px 0 10px 0;
+      padding-bottom: 15px;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    h2::after {
+      content: '';
+      display: block;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(to right,
+          transparent 10%,
+          var(--powfinder-pink) 30%,
+          var(--ice-blue) 70%,
+          transparent 90%);
+      margin-top: 10px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    h3 {
+      color: var(--ice-blue);
+      font-size: 1.4em;
+      margin: 25px 0 15px 0;
+      font-weight: bold;
+    }
+
+    h4 {
+      color: var(--snow-white);
+      font-size: 1.2em;
+      margin: 20px 0 10px 0;
+      font-weight: bold;
+    }
+
+    p {
+      margin: 15px 0;
+      text-align: justify;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    ul,
+    ol {
+      margin: 15px 0;
+      padding-left: 30px;
+    }
+
+    li {
+      margin: 8px 0;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    strong {
+      font-weight: bold;
+      color: var(--powfinder-pink);
+    }
+
+    .foreword-divider {
+      border: none;
+      height: 2px;
+      background: linear-gradient(to right,
+          transparent,
+          var(--powfinder-pink),
+          var(--ice-blue),
+          var(--powfinder-pink),
+          transparent);
+      margin: 30px 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Video player styling */
+    .demo-video {
+      width: 100%;
+      max-width: 100%;
+      border-radius: 15px;
+      margin: 30px 0;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(5px);
+    }
+
+    .demo-video::-webkit-media-controls-panel {
+      background: rgba(255, 107, 157, 0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .demo-video::-webkit-media-controls-play-button,
+    .demo-video::-webkit-media-controls-timeline,
+    .demo-video::-webkit-media-controls-current-time-display,
+    .demo-video::-webkit-media-controls-time-remaining-display {
+      color: var(--powfinder-pink);
+    }
+
+    .demo-video::-webkit-media-controls-timeline {
+      background: rgba(255, 107, 157, 0.2);
+    }
+
+    .demo-video::-webkit-media-controls-timeline::-webkit-slider-thumb {
+      background: var(--powfinder-pink);
+    }
+
+    /* PNG series styling */
+    .png-series {
+      margin: 40px 0;
+      text-align: center;
+    }
+
+    .png-series img {
+      width: 100%;
+      max-width: 100%;
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      margin-bottom: 20px;
+    }
+
+    .png-series h3 {
+      margin-bottom: 20px;
+      color: var(--powfinder-pink);
+      font-size: 1.6em;
+    }
+
+    /* Launch button styling */
+    .launch-btn {
+      display: inline-block;
+      background: linear-gradient(45deg, var(--powfinder-pink), var(--powfinder-dark-pink));
+      color: var(--snow-white);
+      padding: 15px 40px;
+      text-decoration: none;
+      border-radius: 25px;
+      margin: 30px auto;
+      font-size: 1.3em;
+      font-weight: bold;
+      text-align: center;
+      box-shadow: 0 8px 25px rgba(255, 107, 157, 0.4);
+      transition: all 0.3s ease;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+      border: 2px solid transparent;
+    }
+
+    .launch-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 35px rgba(255, 107, 157, 0.6);
+      border-color: var(--snow-white);
+    }
+
+    .launch-btn:active {
+      transform: translateY(-1px);
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+      .container {
+        margin: 10px;
+        padding: 20px 15px;
+      }
+
+      h1 {
+        font-size: 2.5em;
+      }
+
+      h2 {
+        font-size: 1.5em;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div id="foreword-overlay" class="foreword-overlay">
+      <div id="foreword-popup" class="foreword-popup">
+        <h1 class="foreword-title">Foreword</h1>
+        <div class="foreword-content">
+          <h2>Technical Overview of PowFinder Pipeline</h2>
+
+          <p>PowFinder was born from my frustration with existing ski weather forecasting tools. Previously, planning a
+            ski tour required manually cross-referencing multiple weather variables: snowfall but also over the
+            intevening days, temperature, wind, cloud cover. I wanted a single intuitive visualization that combined all
+            these factors into one glanceable map. And while SQH finds powder the attenuation from skiability makes it
+            very clear - the pink splotches are where powder & sun are to be found together.</p>
+
+          <p>Initially, I built a fully client-side prototype that ran a detailed snowpack model directly in JavaScript.
+            While the snowpack physics and modeling logic were robust, the client-side approach was slow, ugly, and
+            impractical. I kept the snowpack physics and rebuilt the pipeline properly as a Python-based backend, which
+            now runs efficiently on my laptop. The entire pipeline—fetching data, interpolating, running snowpack
+            physics, generating visualizations, and compressing outputs—completes in under an hour for the entire Tirol
+            region. The compressed outputs are then uploaded directly to AWS S3 for hosting.</p>
+
+          <video class="demo-video" muted autoplay loop playsinline preload="auto">
+            <source src="clientside.mp4" type="video/mp4">
+            Your browser does not support the video tag
+          </video>
+
+          <hr class="foreword-divider">
+
+          <h2>Technical Pipeline Overview</h2>
+
+          <p>The pipeline consists of these main steps:</p>
+
+          <h3>1. Data Acquisition</h3>
+
+          <p>Every three hours, I fetch weather data from the Open-Meteo API, which provides point-based forecasts
+            across Tirol. Variables include:</p>
+
+          <ul>
+            <li><strong>Temperature (°C)</strong>: Directly from API.</li>
+            <li><strong>Relative Humidity (%)</strong>: Directly from API.</li>
+            <li><strong>Dew Point</strong>: Derived from temperature and relative humidity using the Magnus-Tetens
+              equation.</li>
+            <li><strong>Snowfall (mm)</strong>: Directly from API, enhanced by elevation differences.</li>
+            <li><strong>Wind Speed (m/s)</strong>: Directly from API, interpolated spatially.</li>
+            <li><strong>Cloud Cover (%)</strong>: Directly from API, interpolated spatially.</li>
+            <li><strong>Shortwave Radiation (W/m²)</strong>: Directly from API, adjusted by terrain shading.</li>
+          </ul>
+
+          <h3>2. Spatial Interpolation and Extrapolation</h3>
+
+          <p>I interpolate each weather variable from sparse API points onto a 100m resolution grid covering Tirol using
+            inverse-distance weighting (IDW) interpolation. Specifically:</p>
+
+          <ul>
+            <li><strong>Temperature (°C)</strong>: Interpolated using inverse-distance weighting, then adjusted
+              vertically using a moist adiabatic lapse rate (~6.5°C/km) based on elevation differences.</li>
+            <li><strong>Dew Point (°C)</strong>: Derived from temperature and relative humidity using the Magnus-Tetens
+              approximation.</li>
+            <li><strong>Snowfall (mm)</strong>: Interpolated using inverse-distance weighting, then enhanced
+              orographically by applying a linear elevation-based multiplier (e.g., +10% snowfall per 100m elevation
+              gain).</li>
+            <li><strong>Snow Depth (mm)</strong>: Forward-integrated through time using a simplified snowpack model (see
+              below).</li>
+            <li><strong>Wind Speed (m/s)</strong>: Interpolated using inverse-distance weighting without elevation
+              adjustment.</li>
+            <li><strong>Cloud Cover (%)</strong>: Interpolated using inverse-distance weighting.</li>
+            <li><strong>Shortwave Radiation (W/m²)</strong>: Interpolated spatially, then adjusted for terrain shading
+              using a precomputed shadow map.</li>
+          </ul>
+
+          <h4>K-D Tree Implementation</h4>
+
+          <p>To efficiently interpolate weather data from sparse API points onto my 100m-resolution grid, I build a K-D
+            tree spatial index of all API points. For each grid cell, I query the nearest neighbors using the K-D tree
+            and perform inverse-distance weighting interpolation. Elevation adjustments (lapse rates, orographic
+            enhancements) are applied after interpolation.</p>
+
+          <h3>3. Snowpack Model (4D Integration)</h3>
+
+          <p>The snowpack model integrates snowfall, temperature, radiation, and wind over time, creating a
+            four-dimensional snowpack state (3D spatial + time). At each timestep, the previous snowpack state is
+            updated:</p>
+
+          <ul>
+            <li><strong>Accumulation</strong>: New snowfall (mm) converted to snow depth (cm) using a density factor.
+            </li>
+            <li><strong>Compaction and Melting</strong>: Temperature and radiation-driven melting and compaction reduce
+              snow depth and degrade quality.</li>
+            <li><strong>Wind Scouring</strong>: High wind speeds reduce snow depth and degrade quality.</li>
+            <li><strong>Quality</strong>: Degrades over time due to melting, wind scouring, and solar radiation
+              exposure.</li>
+          </ul>
+
+          <p>This approach closely resembles a simplified 1D snowpack model applied spatially across Tirol, providing
+            realistic powder evolution.</p>
+
+          <h4>Shadow and Hillshade Generation</h4>
+
+          <ul>
+            <li><strong>Hillshade</strong>: Computed from terrain elevation data using the angle between the terrain
+              surface normal and the sun's position (zenith and azimuth angles). Specifically, hillshade intensity is
+              calculated as the cosine of the angle between the terrain surface normal and the sun's zenith and azimuth
+              angles.</li>
+            <li><strong>Shadow Map</strong>: Precomputed binary raster indicating terrain shading based on solar zenith
+              and azimuth angles, used to adjust shortwave radiation.</li>
+          </ul>
+
+          <p>These layers are computationally expensive but rarely change, so they're precomputed and cached.</p>
+
+          <h3>4. Visualization (SQH and Skiability)</h3>
+
+          <p>The Snow Quality Heatmap (SQH) combines snow depth (opacity) and snow quality (color):</p>
+
+          <ul>
+            <li><strong>Opacity</strong>: Directly indicates snow depth. No snow = transparent; deep snow = fully
+              opaque.</li>
+            <li><strong>Color</strong>: Red (poor snow) → Blue (good snow) → Bright Pink (excellent powder). Bright pink
+              opaque splotches indicate deep, high-quality powder.</li>
+          </ul>
+
+          <p>The Skiability index further attenuates SQH based on real-time weather conditions (wind, visibility,
+            precipitation):</p>
+
+          <ul>
+            <li><strong>Skiability</strong> = SQH × Weather Penalties</li>
+            <li>Areas with no snow become transparent (no color)</li>
+            <li>Areas with poor conditions become red (low skiability)</li>
+            <li>Areas with good conditions become blue</li>
+            <li>Areas with excellent powder conditions become bright pink opaque splotches, clearly highlighting the
+              best skiing spots.</li>
+          </ul>
+
+          <p>This intuitive visualization simplifies ski trip planning dramatically.</p>
+
+          <h3>5. Interactive Validation (Point Click)</h3>
+
+          <p>When a user clicks the map:</p>
+
+          <ul>
+            <li>The frontend fetches live weather data from the API at that exact location.</li>
+            <li>It compares this real data to my interpolated values at the same location.</li>
+            <li>It displays the deltas clearly, allowing validation of interpolation accuracy.</li>
+          </ul>
+
+          <hr class="foreword-divider">
+
+          <h2>Future Improvements: Neural Network Interpolation</h2>
+
+          <p>Currently, interpolation uses physics-based extrapolation methods. In the future, I plan to train a neural
+            network to predict real-world station data from Open-Meteo inputs. This neural network will:</p>
+
+          <ul>
+            <li>Use ICON's 2.2km grid data as inputs.</li>
+            <li>Predict precise weather values at finer resolutions (100m).</li>
+            <li>Minimize a loss function based on real station measurements.</li>
+            <li>Provide more accurate forecasts than ICON's native 2.2km grid.</li>
+          </ul>
+
+          <hr class="foreword-divider">
+
+          <h2>Current Limitations and Known Issues</h2>
+
+          <ul>
+            <li><strong>Large JSON files</strong>: Currently mitigated by compression and lazy loading.</li>
+            <li><strong>Static hosting</strong>: Real-time updates are not yet implemented, but the pipeline runs
+              quickly enough (under an hour) to update every three hours manually.</li>
+            <li><strong>Swapped colors on some browsers</strong>: This issue is under investigation. Not really, I have
+              shit to do.</li>
+          </ul>
+
+          <div class="png-series">
+            <h3>Visual Pipeline Overview</h3>
+            <img src="hillshade series.png"
+              alt="Hillshade Series - Visual representation of the PowFinder pipeline processing stages" />
+          </div>
+
+          <div
+            style="text-align: center; margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+            <a href="./app/" class="launch-btn">Launch PowFinder →</a>
+            <a href="./hexagons/"
+              style="color: var(--snow-white); opacity: 0.6; text-decoration: none; font-size: 0.9em; transition: opacity 0.3s;"
+              onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">Find out why hexagons are the
+              bestagons →</a>
+          </div>
+        </div>
+      </div>
+</body>
+
+</html>

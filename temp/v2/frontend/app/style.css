@@ -1,0 +1,2647 @@
+/* ===== Fonts ===== */
+@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Montserrat:wght@400;700&display=swap');
+
+:root{
+    --brand-font:'Permanent Marker', cursive;
+    --body-font: 'Montserrat', sans-serif;
+    --bar-bg:rgba(0,0,0,0.60); /* Match sheet-bg for consistent opacity */
+    --bar-bg-hover:#ff4081;
+    --sep:rgba(255,255,255,0.20);
+    --accent:#ff4081;
+}
+
+/* Hide selected OpenLayers controls */
+.ol-attribution,
+.ol-zoom-in,
+.ol-zoom-out,
+.ol-rotate-reset { display:none!important; }
+
+/* App-like behavior - no text selection, no link cursors */
+* {
+    user-select: none;
+    cursor: default !important;
+}
+
+/* Map takes full screen */
+html,body{
+    height:100%;
+    margin:0;
+    font-family: var(--body-font);
+}
+#map{width:100%;height:100%;}
+
+/* Mobile Brand - Floating Logo (Hidden by default) */
+.mobile-brand {
+    display: none;
+    position: fixed;
+    top: 2vh;
+    left: 2vw;
+    z-index: 2000; /* Above everything */
+    font-family: var(--brand-font);
+    font-size: 2.5vh;
+    color: white;
+    background: var(--bar-bg);
+    backdrop-filter: blur(10px);
+    padding: 0.8vh 1.5vh;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    pointer-events: none; /* Let clicks pass through if needed, though it's just a label */
+}
+
+/* Mobile Date/Time - Floating (Hidden by default) */
+.mobile-datetime {
+    display: none;
+    position: fixed;
+    top: 2vh;
+    right: 2vw;
+    z-index: 2000;
+    font-size: 1.8vh;
+    color: white;
+    background: var(--bar-bg);
+    backdrop-filter: blur(10px);
+    padding: 0.8vh 1.5vh;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    pointer-events: none;
+}
+
+/* Helper classes for visibility toggling */
+.desktop-only { display: block; }
+.mobile-only { display: none; }
+
+/* Legend Overlay Title */
+.legend-overlay-title {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-weight: 500;
+    text-shadow: 0 0 4px black, 0 0 2px black;
+    white-space: nowrap;
+    pointer-events: none;
+    font-family: var(--body-font);
+    font-size: 2.5vh; /* Larger for the taller bar */
+}
+
+.legend-value {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: white;
+    font-weight: 500;
+    text-shadow: 0 0 4px black, 0 0 2px black;
+    font-size: 1.4vh;
+    pointer-events: none;
+    padding: 0 1vh;
+}
+
+.legend-value.left { left: 0; }
+.legend-value.right { right: 0; }
+
+.legend-bar {
+    position: relative;
+    flex-grow: 1; /* Desktop: take remaining space */
+    min-width: 150px; /* Prevent collapse on desktop */
+    height: 6vh; /* Taller bar (was 3vh) */
+    margin: 0 1vw; /* Desktop margin */
+    border-radius: 1vh;
+    border: 1.5px solid rgba(255,255,255);
+    box-sizing: border-box;
+}
+
+/* Drawer container */
+#drawer-container{
+    position:fixed;left:0;bottom:-28vh; /* Updated */
+    width:100%;height:38vh; /* Updated */
+    z-index:1000;
+    transition:bottom .35s ease;
+    background:var(--bar-bg);backdrop-filter:blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5);
+}
+#drawer-container.open{ bottom:0; }
+
+/* Bar (top 10vh) */
+#drawer-bar{
+    height:10vh; /* Increased height */
+    width:100%;
+    display:flex;
+    /* justify-content:space-between; Removed for more granular control */
+    align-items:center;
+    padding:0 2vw; 
+    box-sizing:border-box;
+    cursor:pointer;
+    transition:background .25s;
+}
+#drawer-bar .brand{
+    font-family: var(--brand-font);
+    font-size:4vh; /* Increased font size */
+    color:#fff;
+    margin:0;
+    margin-right: auto; /* Pushes other items to the right */
+}
+/* Info box for clicked grid point - now part of the bar */
+#info-box {
+  flex-grow: 1;
+  margin: 0 1vw;
+  padding: 0.5vh 1vw;
+  background: rgba(var(--accent), 0.8);
+  color: white;
+  border-radius: 0.5vh;
+  display: flex;
+  align-items: center;
+  max-height: 8vh;
+  overflow: hidden;
+  /* New styles for flex layout */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+
+/* New styles for the left and right containers */
+.info-box-left {
+  width: 50%;
+  text-align: left;
+  padding-right: 1vw;
+  font-size: 2vh;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-box-right {
+  flex-grow: 1; /* Allow it to take up space for the legend */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* Pushes legend content to the right */
+}
+
+/* Conditional styling for #info-box when it's used for selection */
+/* Ensure the info-box in selecting mode allows its child row to fill it */
+#info-box.info-box-selecting {
+    display: flex; /* keeps it as a flex container */
+    flex-direction: column; /* Stack rows if multiple were ever added */
+    justify-content: center; /* Center the row vertically */
+    align-items: center; /* Center the row horizontally */
+}
+
+.date-selector-row,
+.time-selector-row {
+    display: flex;
+    justify-content: space-around; /* Distribute buttons */
+    align-items: center;
+    width: 100%;
+    padding: 0.5vh 0; /* Add some vertical padding if needed */
+}
+
+/* Styling for selector items within the new rows */
+#info-box.info-box-selecting .layer-item {
+    font-size: 1.5vh; /* Slightly larger for better readability */
+    padding: 1vh 1vw; /* More padding like other main buttons */
+    flex-basis: var(--selector-basis, 15%); /* Allow JS to override */
+    flex-grow: 0;     /* Don't grow beyond basis */
+    flex-shrink: 0;   /* Don't shrink */
+    margin: 0 1%;     /* Margins between items */
+    /* background, border-radius, active/hover states are inherited from general .layer-item */
+    /* Ensure text is centered if not by default */
+    text-align: center;
+    white-space: nowrap; /* Prevent text wrapping */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
+/* Specific styling for the title text div, if different from other #info-box > div items */
+#info-box .info-box-title-text {
+    font-size: 1.6vh; /* Slightly larger for title */
+    text-align: left; /* Changed to left */
+    width: 100%; /* Ensure it takes full width */
+}
+
+.info-label {
+    font-size: 1.6vh;
+    margin-right: auto;
+}
+
+
+#info-box-close-button {
+    cursor: pointer;
+    font-size: 3vh; 
+    color: #fff;
+    margin-left: 1vw; /* Adjusted margin */
+    padding: 0.5vh; 
+    line-height: 1;
+    display: none; /* Hidden by default */
+}
+#drawer-caret{
+    font-size: 3.5vh; /* Increased font size */
+    color:#fff;
+    transition:transform .3s;
+    margin-left: 1vw; /* Ensures spacing from close button if visible */
+}
+#drawer-container.open #drawer-caret{transform:rotate(180deg);}
+
+
+/* Hover: hot pink background for bar, brand, and caret */
+#drawer-bar:hover {
+    background:var(--bar-bg-hover);
+}
+#drawer-bar:hover .brand, /* Brand color on hover is fine */
+#drawer-bar:hover #drawer-caret,
+#drawer-bar:hover #info-box-close-button { 
+    color:#fff;
+}
+
+/* Content (hidden portion) */
+#drawer-content{
+    height:28vh; /* Updated */
+    width:100%;
+    display:flex; 
+    color:#fff; 
+    padding: 0; /* Base padding, specific padding below */
+    padding-bottom: 4vh; /* Added */
+    box-sizing: border-box; /* Ensured */
+}
+
+/* New Panel Styles */
+#layer-panel {
+    width: 75%; 
+    box-sizing: border-box;
+    padding: 1vh; /* Maintained */
+    border-right: 1px solid white;
+    overflow-y: auto; /* Confirmed */
+    height: 100%; /* Confirmed */
+}
+
+#settings-grid-panel {
+    width: 25%; 
+    box-sizing: border-box;
+    padding: 1vh; /* Maintained */
+    overflow-y: auto; /* Confirmed */
+    height: 100%; /* Confirmed */
+    display: flex; 
+    flex-direction: column;
+}
+
+/* Layer Grid (15 items in layer-panel) */
+#layer-grid {
+    display: grid;
+    width: 100%; 
+    height: 100%; 
+    grid-template-columns: repeat(5, 1fr); /* 5 columns */
+    grid-template-rows: repeat(3, 1fr);    /* 3 rows */
+    gap: 1vh; 
+}
+
+#mobile-selector-grid {
+    display: none;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5vh;
+    width: 100%;
+}
+
+/* Layer Items (General, applies to both grids unless overridden) */
+.layer-item {
+    padding: 0.75vh 1vh; 
+    border-radius: 0.5vh; 
+    cursor: pointer;
+    font-size: 1.8vh; /* Increased font size */
+    transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+    background-color: rgba(0, 0, 0, 0.7); 
+    backdrop-filter: blur(10px); 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    white-space: nowrap; 
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.layer-item:hover {
+    background-color: rgba(255, 255, 255, 0.2); 
+}
+
+.layer-item.active {
+    background-color: var(--accent); 
+    color: white;
+    box-shadow: 0 0 15px var(--accent), inset 0 0 5px rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.5);
+}
+
+/* Not implemented layer items */
+
+/* Settings Grid (3 items in settings-grid-panel) */
+#settings-grid {
+    display: grid;
+    width: 100%;
+    flex-grow: 1; /* Allows it to fill height of settings-grid-panel */
+    grid-template-columns: 1fr; /* Single column */
+    grid-template-rows: repeat(3, 1fr); /* 3 rows */
+    gap: 1vh;
+}
+
+/* Specific overrides for control buttons in settings-grid */
+#settings-grid #day-control-button,
+#settings-grid #time-control-button {
+    background-color: var(--accent); /* Hot pink */
+}
+#settings-grid #day-control-button:hover,
+#settings-grid #time-control-button:hover {
+    background-color: #e03770; /* Slightly darker pink for hover */
+}
+
+/* Toggle Button Styling */
+.toggle-button {
+    position: relative;
+    background-color: rgba(0, 0, 0, 0.7);
+    border-radius: 0.5vh;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font-size: 1.8vh;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 60%;
+    height: 100%;
+    background-color: var(--accent);
+    border-radius: 0.5vh;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+}
+
+.toggle-button.smooth .toggle-slider {
+    left: 40%;
+    width: 60%;
+}
+
+.toggle-label {
+    position: absolute;
+    z-index: 2;
+    color: white;
+    font-weight: bold;
+    transition: color 0.3s ease;
+    pointer-events: none;
+    width: 40%;
+    text-align: center;
+}
+
+.toggle-label.left {
+    left: 0;
+}
+
+.toggle-label.right {
+    right: 0;
+}
+
+.toggle-button.smooth .toggle-label.left {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.toggle-button.smooth .toggle-label.right {
+    color: white;
+}
+
+/* Disabled toggle button styling */
+.toggle-button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+.toggle-button.disabled .toggle-slider {
+    background-color: rgba(128, 128, 128, 0.5);
+}
+
+.toggle-button.disabled .toggle-label {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+
+.brand.flash-error,
+#drawer-caret.flash-error {
+  color: #ff0033 !important;
+  transition: color 0.5s cubic-bezier(.66,.09,1,.42);
+}
+
+/* Info box styling is now part of #drawer-bar section above */
+/* #info-box > div styling is now part of #drawer-bar section above */
+
+/* Map click popup */
+.popup {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.85); /* Updated background opacity */
+    color: white;
+    padding: 1vh 1.5vw; /* Updated padding */
+    border-radius: 0.5vh;
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+    font-size: 1.5vh;
+    width: 35vw; /* Wider popup for residual table */
+    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5); /* Added drop shadow */
+}
+
+.popup::after {
+    content: '';
+    position: absolute;
+    bottom: -10px; /* Adjust to control the arrow's position relative to the popup bottom */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent; /* Size of the arrow */
+    border-right: 10px solid transparent; /* Size of the arrow */
+    border-top: 10px solid rgba(0, 0, 0, 0.85); /* Color of the arrow, matches anticipated popup bg */
+    pointer-events: none; /* Ensure arrow doesn't interfere with clicks */
+}
+
+.popup-close-button {
+    position: absolute;
+    top: 5px; /* Adjust as needed */
+    right: 10px; /* Adjust as needed */
+    color: white;
+    font-size: 20px; /* Adjust as needed */
+    font-weight: bold;
+    cursor: pointer !important; /* Ensure cursor is pointer */
+    z-index: 10; /* Ensure it's above popup-content if content is positioned */
+    pointer-events: auto; /* Make sure it can receive click events */
+}
+.popup-close-button:hover {
+    color: #ff4081; /* Accent color on hover, or any other suitable hover effect */
+}
+
+/* Table inside popup showing residuals */
+.popup-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 0.5vh;
+}
+.popup-table th,
+.popup-table td {
+    border: 1px solid white;
+    padding: 0.2vh 0.5vw;
+    font-size: 1.4vh;
+}
+.popup-table th {
+    font-weight: bold;
+}
+
+/* ===== Foreword Popup ===== */
+.foreword-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(15px);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.foreword-popup {
+    background: rgba(0, 0, 0, 0.4);
+    width: 90vw;
+    max-height: 90vh;
+    border-radius: 10px;
+    padding: 40px;
+    margin: 10px;
+    box-sizing: border-box;
+    position: relative;
+    overflow-y: auto;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 8px 20px rgba(0, 0, 0, 0.6);
+}
+
+.foreword-popup::-webkit-scrollbar {
+    width: 12px;
+}
+
+.foreword-popup::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+
+.foreword-popup::-webkit-scrollbar-thumb {
+    background: white;
+    border-radius: 6px;
+}
+
+.foreword-popup::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.8);
+}
+
+.foreword-close-button {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 24px;
+    font-weight: bold;
+    color: white;
+    cursor: pointer;
+    line-height: 1;
+    padding: 5px;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: background 0.2s;
+}
+
+.foreword-close-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.foreword-title {
+    font-family: 'Georgia', 'Palatino', 'Book Antiqua', serif;
+    font-size: 32px;
+    color: white;
+    margin: 0 0 25px 0;
+    text-align: center;
+    font-weight: bold;
+}
+
+.foreword-content {
+    font-family: 'Georgia', 'Palatino', 'Book Antiqua', serif;
+    font-size: 18px;
+    line-height: 1.7;
+    color: white;
+}
+
+.foreword-content h2 {
+    font-family: 'Georgia', 'Palatino', 'Book Antiqua', serif;
+    font-size: 26px;
+    color: white;
+    margin: 30px 0 18px 0;
+    font-weight: bold;
+}
+
+.foreword-content h3 {
+    font-family: 'Georgia', 'Palatino', 'Book Antiqua', serif;
+    font-size: 22px;
+    color: white;
+    margin: 25px 0 15px 0;
+    font-weight: bold;
+}
+
+.foreword-content h4 {
+    font-family: 'Georgia', 'Palatino', 'Book Antiqua', serif;
+    font-size: 20px;
+    color: white;
+    margin: 20px 0 12px 0;
+    font-weight: bold;
+}
+
+.foreword-content p {
+    margin: 0 0 15px 0;
+}
+
+.foreword-content p:last-child {
+    margin-bottom: 0;
+}
+
+.foreword-content ul {
+    margin: 10px 0 15px 20px;
+    padding-left: 0;
+}
+
+.foreword-content li {
+    margin: 8px 0;
+    list-style-type: disc;
+}
+
+.foreword-content strong {
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.foreword-divider {
+    border: none;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.3);
+    margin: 25px 0;
+}
+
+/* Spinner Styles */
+.spinner {
+  width: 1.5vh;
+  height: 1.5vh;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.cell-source, .cell-map {
+
+  min-width: 4vw;
+
+  text-align: center;
+
+}
+
+
+
+/* ===== Mobile Responsive Styles ===== */
+
+
+
+@media (max-width: 768px) {
+
+
+
+    /* Larger drawer for mobile */
+
+
+
+    #drawer-container {
+
+
+
+        height: 90vh;
+
+
+
+        bottom: -80vh;
+
+
+
+    }
+
+
+
+
+
+
+
+    #drawer-bar {
+
+
+
+        height: 10vh;
+
+
+
+        padding: 0 4vw;
+
+
+
+    }
+
+
+
+
+
+
+
+        #drawer-bar .brand {
+
+
+
+
+
+
+
+            display: none; /* Hide main logo on mobile */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .mobile-brand {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                display: block; /* Show floating logo on mobile */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .mobile-datetime {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                display: block; /* Show floating date/time on mobile */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .desktop-only { display: none !important; }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            .mobile-only { display: block !important; }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #drawer-caret {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+            font-size: 5vh;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #drawer-content {
+
+
+
+
+
+
+
+    
+
+
+
+        height: 80vh;
+
+
+
+        flex-direction: column;
+
+
+
+        padding-bottom: 2vh;
+
+
+
+        overflow-y: auto;
+
+
+
+    }
+
+
+
+
+
+
+
+        /* Stack panels vertically, but put Settings (Time/Day) ON TOP */
+
+
+
+
+
+
+
+        #layer-panel, #settings-grid-panel {
+
+
+
+
+
+
+
+            width: 100%;
+
+
+
+
+
+
+
+            height: auto;
+
+
+
+
+
+
+
+            overflow-y: visible;
+
+
+
+
+
+
+
+            border-right: none;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #settings-grid-panel {
+
+
+
+
+
+
+
+            order: -1; /* Moves this panel to the top */
+
+
+
+
+
+
+
+            padding-top: 1vh;
+
+
+
+
+
+
+
+            padding-bottom: 2vh;
+
+
+
+
+
+
+
+            border-bottom: 1px solid var(--sep);
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        #layer-panel {
+
+
+
+
+
+
+
+            border-bottom: 1px solid var(--sep);
+
+
+
+
+
+
+
+            padding-bottom: 15vh; /* Extra space at bottom for scrolling */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            /* Single column grid for better readability */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #layer-grid, #mobile-selector-grid {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                grid-template-columns: repeat(2, 1fr);
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                grid-template-rows: auto;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                gap: 1.5vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                width: 100%;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #mobile-selector-grid {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                display: none; /* Hidden by default, toggled via JS */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            #settings-grid {
+
+
+
+
+
+
+
+            grid-template-columns: repeat(2, 1fr); /* Also 2 columns for Day/Time buttons */
+
+
+
+
+
+
+
+            grid-template-rows: auto;
+
+
+
+
+
+
+
+            gap: 1.5vh;
+
+
+
+
+
+
+
+            padding-top: 0;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+        /* Make the Toggle button span both columns */
+
+
+
+
+
+
+
+        #settings-grid .toggle-button {
+
+
+
+
+
+
+
+            grid-column: 1 / -1;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+        /* Rounder corners & Centered Text */
+
+
+
+
+
+
+
+        .layer-item, .toggle-button {
+
+
+
+
+
+
+
+            padding: 1.5vh;
+
+
+
+
+
+
+
+            font-size: 2.2vh;
+
+
+
+
+
+
+
+            min-height: 50px;
+
+
+
+
+
+
+
+            white-space: nowrap; /* Prevent wrapping since we shortened text */
+
+
+
+
+
+
+
+            text-align: center;
+
+
+
+
+
+
+
+            justify-content: center;
+
+
+
+
+
+
+
+            border-radius: 25px; /* Far rounder corners */
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        /* Info box adjustments */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        #info-box {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            margin: 0;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            padding: 0; /* Remove padding so bar hits edges */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            max-height: none;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            flex-grow: 0; /* Don't auto-grow, use specific width */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            width: 85%; /* 85% width to leave room for caret */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            background: transparent; /* No background needed, the bar has it */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            border-radius: 1vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            height: 8vh; /* Taller bar (increased from 6vh) */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            display: flex;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            align-items: center;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                            overflow: visible; /* Prevent clipping of the legend border */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                #drawer-bar {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    justify-content: space-between; /* Space out info box and caret */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    padding: 0 2vw; /* Reduced side padding */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                #info-box.info-box-selecting .layer-item {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    font-size: 2vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    padding: 1.5vh 2vw;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                .info-box-right {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    width: 100%; /* Full width for the legend bar container */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    height: 100%;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    display: block; /* Not flex on mobile for this container, just holds the bar */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .info-box-left {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        font-size: 1.8vh;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        white-space: normal;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        line-height: 1.2;
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .legend-overlay-title {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        font-size: 2.2vh; /* Increased from 1.6vh */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .legend-value {
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                        font-size: 1.8vh; /* Increased from 1.4vh */
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+                    .date-selector-row, .time-selector-row {
+
+
+
+        flex-wrap: wrap;
+
+
+
+        justify-content: center;
+
+
+
+    }
+
+
+
+
+
+
+
+            .legend-bar {
+
+
+
+
+
+
+
+                width: 100%;
+
+
+
+
+
+
+
+                height: 100%;
+
+
+
+
+
+
+
+                margin: 0;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+    /* Popup adjustments for mobile */
+
+
+
+    .popup {
+
+
+
+        width: 85vw;
+
+
+
+        font-size: 1.8vh;
+
+
+
+    }
+
+
+
+
+
+
+
+    .popup-table th, .popup-table td {
+
+
+
+        padding: 1vh;
+
+
+
+        font-size: 1.6vh;
+
+
+
+    }
+
+
+
+}
+
+
+
+

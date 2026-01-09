@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-BUCKET_NAME="wheatley.cloud"
+BUCKET_NAME="wheatley-cloud-eu"
 PROJECT_PATH="powfinder"
 
 # Colors for output

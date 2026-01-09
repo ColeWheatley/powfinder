@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Powfinder</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/ol@v7.4.0/dist/ol.js"></script>
+</head>
+<body>
+  <div id="mobile-brand" class="mobile-brand">PowFinder</div>
+  <div id="mobile-datetime" class="mobile-datetime"></div>
+  <!-- Map sits behind everything -->
+  <div id="map"></div>
+  <div id="popup" class="popup" style="display:none;">
+    <span id="popup-close-button" class="popup-close-button">&times;</span>
+    <div id="popup-content"></div>
+  </div>
+
+  <!-- Drawer container: full-width, 32vh tall, only top 8vh showing by default -->
+  <div id="drawer-container">
+    <div id="drawer-bar" onclick="toggleDrawer()">
+        <h1 class="brand">PowFinder</h1>
+        <div id="info-box" style="display:none;"></div>
+        <div id="loading-indicator" style="display:none; color: #666; font-size: 12px;">Loading weather data...</div>
+        <div id="drawer-caret">▲</div>
+    </div>
+
+    <!-- Hidden settings area (24 vh) -->
+    <div id="drawer-content">
+      <div id="layer-panel">
+        <div id="mobile-selector-grid" style="display:none;"></div>
+        <div id="layer-grid">
+          <!-- Priority Layers -->
+          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="skiability">Skiability</div>
+          <div class="layer-item" data-layer-type="snow_composite" data-layer-name="sqh">SQH</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="temperature_2m">Temp. (2m)</div>
+          
+          <!-- Other Weather Variables -->
+          <div class="layer-item" data-layer-type="weather" data-layer-name="relative_humidity_2m">Rel Humidity</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="shortwave_radiation">Radiation</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="cloud_cover">Cloud Cover</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="snow_depth">Snow Depth</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="snowfall">Snowfall</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="wind_speed_10m">Wind (10m)</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="freezing_level_height">Freezing Level</div>
+          <div class="layer-item" data-layer-type="weather" data-layer-name="surface_pressure">Surf. Pressure</div>
+          
+          <!-- Dewpoint -->
+          <div class="layer-item" data-layer-type="weather" data-layer-name="dewpoint_2m">Dewpoint (2m)</div>
+          
+          <!-- Terrain Variables -->
+          <div class="layer-item" data-layer-type="terrain" data-layer-name="elevation">Elevation</div>
+          <div class="layer-item" data-layer-type="terrain" data-layer-name="aspect">Aspect</div>
+          <div class="layer-item" data-layer-type="terrain" data-layer-name="slope">Slope</div>
+        </div>
+      </div>
+      <div id="settings-grid-panel">
+        <div id="settings-grid">
+          <div class="layer-item" id="day-control-button">Day</div>
+          <div class="layer-item" id="time-control-button">Time</div>
+          <div class="toggle-button" id="mode-toggle">
+            <div class="toggle-slider"></div>
+            <span class="toggle-label left">Point</span>
+            <span class="toggle-label right">Smooth</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
