@@ -246,30 +246,20 @@ class PistonViewer {
     }
 
     createHexGeometry(radius) {
-        const geometry = new THREE.CylinderGeometry(radius, radius, 1, 6);
-        geometry.rotateY(Math.PI / 6);
-        const nonIndexed = geometry.toNonIndexed();
+        // 1. CAP GEOMETRY (Top Face Only)
+        // Just a circle (hexagon), 1 segment.
+        const capGeo = new THREE.CircleGeometry(radius, 6);
+        capGeo.rotateX(-Math.PI / 2); // Lay flat
 
-        // Add "IsTop" Attribute
-        const pos = nonIndexed.attributes.position;
-        const count = pos.count;
-        const isTop = new Float32Array(count);
+        // 2. SKIRT GEOMETRY (Sides Only, Open Ended)
+        const skirtGeo = new THREE.CylinderGeometry(radius, radius, 1, 6, 1, true);
+        skirtGeo.rotateY(Math.PI / 6); // Rotated to align points with cap flats
 
-        for (let i = 0; i < count; i++) {
-            // Logic: Top Cap has y=0.5 (height=1/2). Side Tops have y=0.5. Side Bottoms have y=-0.5.
-            // Wait, Cylinder is centered at 0. Height=1 -> 0.5 to -0.5.
-            // We want Texture on Top Cap. Slope on Sides (including Skirts).
-            // Top Cap vertices usually have Normal.y = 1.
-            // Side Top vertices have Normal.y = 0.
+        // Shift Skirt so top ring is at Y=0, bottom ring is at Y=-1
+        // Cylinder is centered. Height 1. Top at 0.5.
+        skirtGeo.translate(0, -0.5, 0);
 
-            // Let's rely on Normals from the non-indexed geo?
-            // Actually, we can just use Normal.Y > 0.5 check inside the loop here to bake it.
-            const ny = nonIndexed.attributes.normal.getY(i);
-            isTop[i] = (ny > 0.9) ? 1.0 : 0.0;
-        }
-
-        nonIndexed.setAttribute('aIsTop', new THREE.BufferAttribute(isTop, 1));
-        return nonIndexed;
+        return { capGeo, skirtGeo };
     }
 
     onResize() {
@@ -308,6 +298,15 @@ class PistonViewer {
             this.camera.position.set(debugX, 208, debugZ + 100); // Offset Z slightly to look at it?
             this.controls.target.set(debugX, 12, debugZ);
             this.controls.update();
+
+            // PRE-ALLOCATE GEOMETRIES
+            const side = UNIT_HEX_WIDTH_METERS / Math.sqrt(3);
+            const geos = this.createHexGeometry(side);
+            this.capGeometry = geos.capGeo;
+            this.skirtGeometry = geos.skirtGeo;
+
+            this.flatGeometry = new THREE.PlaneGeometry(TILE_WIDTH_WORLD, TILE_HEIGHT_WORLD);
+            this.flatGeometry.rotateX(-Math.PI / 2);
 
             this.essentialTilesTarget = 1;
             this.updateLOD();
@@ -383,46 +382,66 @@ class PistonViewer {
     }
 
     createInstancedMeshV3(allLayers, lodIndex, material) {
-        // lodIndex: 0=Fine(1x), 1=3x, 2=6x, 3=24x.
-        // allLayers: [24x, 6x, 3x, 1x] (from backend)
-
-        // Map LOD to Layer Index
         const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
         const hexes = allLayers[layerIdx];
+        if (!hexes || hexes.length === 0) return null;
 
         const scaleTable = [24.0, 6.0, 3.0, 1.0];
         const scale = scaleTable[layerIdx];
         const num = hexes.length;
 
-        // Clone geometry and SCALE it
-        const geometry = this.hexGeometry.clone();
-        geometry.scale(scale, 1, scale);
+        const h = UNIT_HEX_WIDTH_METERS;
+        const h_eff = h * scale;
+        const isPointy = (scale > 1.1);
 
-        const mesh = new THREE.InstancedMesh(geometry, material, num);
+        // Tag material with LOD index for radial culling updates
+        if (!material.userData) material.userData = {};
+        material.userData.lodIdx = layerIdx; // 3=Unit, 2=Small, 1=Med, 0=Large
+
+        // Branch Geometry Rotation based on Hex Type
+        const capG = this.capGeometry.clone();
+        const skirtG = this.skirtGeometry.clone();
+
+        if (isPointy) {
+            // Pointy Top: Cap needs 30 deg. Skirt (already 30 in init) needs to be 0 relatively? 
+            // Wait, if skirt is 30 in init, and we want it to be 0 for pointy:
+            skirtG.rotateY(-Math.PI / 6);
+            capG.rotateY(Math.PI / 6);
+        } else {
+            // Flat Top: Cap 0 (init), Skirt 30 (init). Correct.
+        }
+
+        capG.scale(scale, 1, scale);
+        skirtG.scale(scale, 1, scale);
+
+        const capMesh = new THREE.InstancedMesh(capG, material, num);
+        const skirtMesh = new THREE.InstancedMesh(skirtG, material, num);
         const matrix = new THREE.Matrix4();
 
-        // Buffers
-        const nz1 = new Float32Array(num * 4); // h, h, h, h
-        const nz2 = new Float32Array(num * 4); // h, h, h, 0
-        const slopes = new Float32Array(num);  // Single float per instance
-
-        // Neighbors
+        const nz1 = new Float32Array(num * 4);
+        const nz2 = new Float32Array(num * 4);
+        const slopes = new Float32Array(num);
         const nbA = new Uint8Array(num * 4);
         const nbB = new Uint8Array(num * 2);
 
-        const h = UNIT_HEX_WIDTH_METERS;
-        const dx_dq = (Math.sqrt(3) / 2) * (h * scale);
-        const dy_dq = 0.5 * (h * scale);
-        const dy_dr = (h * scale);
-
+        let activeSkirts = 0;
         for (let i = 0; i < num; i++) {
             const d = hexes[i];
-            const lx = d.dq * dx_dq;
-            const ly = d.dr * dy_dr + d.dq * dy_dq;
+            let lx, ly;
 
-            // Backend Y is North. Frontend -Z is North.
+            if (isPointy) {
+                // Pointy Top Grid Math (Matches waffle_iron.py > 1.1)
+                lx = d.dq * h_eff + d.dr * 0.5 * h_eff;
+                ly = d.dr * (Math.sqrt(3) / 2) * h_eff;
+            } else {
+                // Flat Top Grid Math (Matches waffle_iron.py <= 1.1)
+                lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
+                ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
+            }
+
             matrix.makeTranslation(lx, 0, -ly);
-            mesh.setMatrixAt(i, matrix);
+            capMesh.setMatrixAt(i, matrix);
+            skirtMesh.setMatrixAt(i, matrix);
 
             const hh = d.h;
             nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
@@ -431,19 +450,32 @@ class PistonViewer {
 
             nbA[i * 4 + 0] = d.nbs[0]; nbA[i * 4 + 1] = d.nbs[1]; nbA[i * 4 + 2] = d.nbs[2]; nbA[i * 4 + 3] = d.nbs[3];
             nbB[i * 2 + 0] = d.nbs[4]; nbB[i * 2 + 1] = d.nbs[5];
+
+            const hasDrop = d.nbs.some(n => n > 0);
+            if (hasDrop) activeSkirts++;
         }
-        mesh.instanceMatrix.needsUpdate = true;
 
-        mesh.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
-        mesh.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-        mesh.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
+        capMesh.instanceMatrix.needsUpdate = true;
+        skirtMesh.instanceMatrix.needsUpdate = true;
 
-        // Pass Neighbors as Normalized (0-1)
-        mesh.geometry.setAttribute('instanceNbA', new THREE.InstancedBufferAttribute(nbA, 4, true));
-        mesh.geometry.setAttribute('instanceNbB', new THREE.InstancedBufferAttribute(nbB, 2, true));
+        [capMesh, skirtMesh].forEach(m => {
+            m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
+            m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
+            m.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
+            m.geometry.setAttribute('instanceNbA', new THREE.InstancedBufferAttribute(nbA, 4, true));
+            m.geometry.setAttribute('instanceNbB', new THREE.InstancedBufferAttribute(nbB, 2, true));
+        });
 
-        mesh.frustumCulled = true;
-        return mesh;
+        capMesh.frustumCulled = false;
+        skirtMesh.frustumCulled = false;
+
+        const group = new THREE.Group();
+        group.add(capMesh);
+        group.add(skirtMesh);
+        group.userData.activeSkirts = activeSkirts;
+
+        group.frustumCulled = false;
+        return group;
     }
 
     setupMaterialShader(material) {
@@ -454,6 +486,7 @@ class PistonViewer {
             shader.uniforms.uFloorOffset = { value: this.floorState.value };
             shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
+            shader.uniforms.uLodRadii = { value: new THREE.Vector2(0.0, 100000.0) }; // Min, Max
             // T0, T1, T2, Tmax
             shader.uniforms.uDebugRadii = { value: new Float32Array([0, 0, 0, 0]) };
             shader.uniforms.uDebugRingsEnabled = { value: new THREE.Vector4(0, 0, 0, 0) };
@@ -469,18 +502,21 @@ class PistonViewer {
                 #include <common>
                 uniform float uHeightFactor;
                 uniform float uFloorOffset;
+                uniform vec3 uCameraPos;
+                uniform vec2 uLodRadii;
+                
                 attribute vec4 instanceNZ_1;
                 attribute vec4 instanceNZ_2;
                 attribute float instanceSlope;
                 
                 attribute vec4 instanceNbA; 
                 attribute vec2 instanceNbB;
-                attribute float aIsTop; // 1.0 = Top Cap, 0.0 = Side/Skirt
+                // No aIsTop needed! Geometry decides.
                 
                 varying vec3 vLocalPos; // Relative to Tile (for UVs)
                 varying vec3 vWorldPos; // Absolute World (for Rings)
                 varying float vSlope;
-                varying float vIsTop;
+                varying float vIsTop; // 1.0 = Cap, 0.0 = Skirt
                 varying vec3 vMyNormal;
                 
                 float getDelta(int idx) {
@@ -497,32 +533,48 @@ class PistonViewer {
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
                 
-                // Angle increases CCW: S(0) -> E(90) -> N(180).
-                // S(3), SE(2), NE(1), N(0).
-                // Using Normal for robust direction on non-indexed geometry
-                float angle = atan(normal.x, normal.z); 
-                float rawIdx = (angle / 6.28318) * 6.0;
+                // SKIRT LOGIC (Only if position.y < -0.1 basically, since we shifted it)
+                // Cap Geo is at Y=0. Skirt Geo is Y=0 to -1.
+                // We can distinguish by Normal? Or simpler:
+                // We can't easily tell mesh apart in ONE shader unless we use a Uniform?
+                // But InstancedMesh shares material.
+                // WE CAN DETECT GEOMETRY.
+                // Cap Geo: Normal.y = 1.0 (approx)
+                // Skirt Geo: Normal.y = 0.0
                 
-                float fIdx = mod(3.0 - rawIdx, 6.0);
-                if (fIdx < 0.0) fIdx += 6.0;
-                int neighborIdx = int(fIdx + 0.5) % 6;
+                bool isCap = (normal.y > 0.9);
+                vIsTop = isCap ? 1.0 : 0.0;
                 
-                float normD = getDelta(neighborIdx);
-                float deltaM = normD * 255.0;
-                
-                if (position.y > 0.0) {
-                    // It's a Top Vertex (includes Cap and Side-Top)
-                    transformed.y = animH;
+                if (isCap) {
+                    // CAP: Just elevate.
+                    transformed.y = 0.0 + animH; 
                 } else {
-                    // Bottom Vertex (Skirt Bottom)
-                    if (deltaM < 0.1) {
-                        // Tightened Threshold (0.5m -> 0.1m)
-                        // If delta < 10cm, collapse skirt.
-                        transformed.y = animH; 
-                    } else if (deltaM > 254.0) {
-                        transformed.y = 0.0; 
+                    // SKIRT: Top edge (y=0) -> animH. Bottom edge (y=-1) -> Drop.
+                    // We shifted skirtGeo: y is 0.0 to -1.0.
+                    
+                    if (position.y > -0.1) {
+                         // Skirt Top Edge
+                         transformed.y = animH;
                     } else {
-                        transformed.y = animH - (deltaM * uHeightFactor);
+                         // Skirt Bottom Edge
+                         float angle = atan(normal.x, normal.z); 
+                         float rawIdx = (angle / 6.28318) * 6.0;
+                         
+                         // Reverted to original logic (N=0)
+                         float fIdx = mod(3.0 - rawIdx, 6.0);
+                         if (fIdx < 0.0) fIdx += 6.0;
+                         int neighborIdx = int(fIdx + 0.5) % 6;
+                         
+                         float normD = getDelta(neighborIdx);
+                         float deltaM = normD * 255.0;
+                         
+                         if (deltaM < 0.1) {
+                             transformed.y = animH; 
+                         } else if (deltaM > 254.0) {
+                             transformed.y = 0.0; 
+                         } else {
+                             transformed.y = animH - (deltaM * uHeightFactor);
+                         }
                     }
                 }
 
@@ -533,8 +585,15 @@ class PistonViewer {
                     vLocalPos = transformed;
                     vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
                 #endif
+
+                // RADIAL CULLING
+                float dist = distance(vWorldPos, uCameraPos);
+                if (dist < uLodRadii.x || dist > uLodRadii.y) {
+                    transformed = vec3(0.0); // Collapse
+                } else {
+                     // Can add smooth fade here if needed
+                }
                 
-                vIsTop = aIsTop;
                 vSlope = instanceSlope;
                 vMyNormal = normal;
             `);
@@ -546,6 +605,7 @@ class PistonViewer {
                 uniform float uUvOffset;
                 uniform float uGradientMode;
                 uniform vec3 uCameraPos;
+                uniform vec2 uLodRadii;
                 uniform float uDebugRadii[4];
                 uniform vec4 uDebugRingsEnabled;
                 varying vec3 vLocalPos;
@@ -666,10 +726,28 @@ class PistonViewer {
     updateRenderStats(now) {
         if (now - this.statsUpdateState.lastUpdate < 500) return;
         this.statsUpdateState.lastUpdate = now;
-        let count = 0;
-        for (const t of this.tiles.values()) if (t.mesh && t.mesh.visible) count += t.mesh.count;
+
+        let capCount = 0;
+        let skirtCount = 0;
+
+        for (const t of this.tiles.values()) {
+            if (t.mesh && t.mesh.isGroup) {
+                // Caps are always first child, skirts second
+                const capMesh = t.mesh.children[0];
+                const skirtMesh = t.mesh.children[1];
+
+                if (capMesh && capMesh.visible) capCount += capMesh.count;
+                if (skirtMesh && skirtMesh.visible) skirtCount += (t.mesh.userData.activeSkirts || 0);
+            }
+        }
+
         const countEl = document.getElementById('hex-count');
-        if (countEl) countEl.textContent = count.toLocaleString() + " VISIBLE";
+        if (countEl) {
+            countEl.innerHTML = `
+                <span style="color: #00d2ff">${capCount.toLocaleString()} TOPS</span> | 
+                <span style="color: #ff7675">${skirtCount.toLocaleString()} SKIRTS</span>
+            `;
+        }
     }
 
     updateFps() {
@@ -930,15 +1008,32 @@ class PistonViewer {
         tile.isTransitioning = true;
         if (tile.mesh) {
             this.scene.remove(tile.mesh);
-            tile.mesh.geometry.dispose();
+            // Properly dispose of Group members
+            if (tile.mesh.isGroup) {
+                tile.mesh.children.forEach(c => {
+                    if (c.geometry) c.geometry.dispose();
+                });
+            } else if (tile.mesh.geometry) {
+                tile.mesh.geometry.dispose();
+            }
         }
 
+        // Use tile-specific material or global? 
+        // We clone for the dual-mesh approach to avoid shader branch.
         const mesh = this.createInstancedMeshV3(tile.hexDataLayers, newLOD, tile.material);
         mesh.position.set(tile.lx, 0, tile.lz);
 
         // Ensure visibility state matches current animation frame
         const angle = this.controls.getPolarAngle() * 180 / Math.PI;
-        mesh.visible = (angle >= 5.5);
+        const isVis = (angle >= 5.5);
+
+        // Handle Group Visibility by traversing children
+        if (mesh.isGroup) {
+            mesh.children.forEach(c => c.visible = isVis);
+            mesh.visible = true; // Group itself stays active so we can access children
+        } else {
+            mesh.visible = isVis;
+        }
 
         this.scene.add(mesh);
         tile.mesh = mesh;
@@ -952,9 +1047,18 @@ class PistonViewer {
 
         this.scene.remove(tile.mesh);
         this.scene.remove(tile.flatMesh);
-        tile.mesh.geometry.dispose();
-        tile.flatMesh.geometry.dispose();
-        tile.material.map.dispose();
+
+        // Cleanup Group
+        if (tile.mesh.isGroup) {
+            tile.mesh.children.forEach(c => {
+                if (c.geometry) c.geometry.dispose();
+            });
+        } else if (tile.mesh.geometry) {
+            tile.mesh.geometry.dispose();
+        }
+
+        if (tile.flatMesh.geometry) tile.flatMesh.geometry.dispose();
+        if (tile.material.map) tile.material.map.dispose();
         tile.material.dispose();
 
         this.tiles.delete(key);
@@ -1110,6 +1214,39 @@ class PistonViewer {
                     this.debugRings.medium ? 1 : 0,
                     this.debugRings.large ? 1 : 0
                 );
+
+                // Update LOD Radii dynamically (if mesh has LOD index)
+                if (m.userData.lodIdx !== undefined) {
+                    const idx = m.userData.lodIdx;
+                    // Logic:
+                    // LOD0 (3): 0 to T0
+                    // LOD1 (2): T0 to T1
+                    // LOD2 (1): T1 to T2
+                    // LOD3 (0): T2 to Tmax
+
+                    // Note: createInstancedMeshV3 passes newLOD (3=Unit, 2=Small, 1=Med, 0=Large)
+                    // But geoThresholds is [T0, T1, T2]
+
+                    let minD = 0.0, maxD = 100000.0;
+                    const T = this.geoThresholds;
+                    const PAD = 50.0; // Overlap pad
+
+                    if (idx === 3) { // Unit
+                        minD = 0.0;
+                        maxD = T[0] + PAD;
+                    } else if (idx === 2) { // Small
+                        minD = T[0] - PAD;
+                        maxD = T[1] + PAD;
+                    } else if (idx === 1) { // Medium
+                        minD = T[1] - PAD;
+                        maxD = T[2] + PAD;
+                    } else if (idx === 0) { // Large
+                        minD = T[2] - PAD;
+                        maxD = this.renderSettings.renderDistance + PAD;
+                    }
+
+                    m.userData.shader.uniforms.uLodRadii.value.set(minD, maxD);
+                }
             }
         }
 

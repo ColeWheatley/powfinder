@@ -329,21 +329,22 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
     scale_f = 65535.0 / (max_z - min_z + 20) if max_z > min_z else 1.0
     blob = struct.pack("<4siifffii", b"HEX3", int(SX), int(SY), float(min_z-10), float(max_z+10), float(scale_f), cq, cr)
     
-    # REFACTORED LOOP
+    # REFACTORED LOOP: Process each scale and pack 13-byte hex units
     for l_idx, ld in enumerate(layers_data):
         S = scales[l_idx]["s"]
         blob += struct.pack("<I", len(ld))
         buf = bytearray(len(ld) * 13)
-        # Directions for neighbors (North, NE, SE, South, SW, NW) 
-        # based on Axial (Flat Top): 
-        # N: q, r-1
-        # NE: q+1, r-1
-        # SE: q+1, r
-        # S: q, r+1
-        # SW: q-1, r+1
-        # NW: q-1, r
-        nb_offsets = [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0)]
         
+        # Determine neighborhood offsets based on orientation
+        # Scale 1 is Flat-topped (rotated in frontend). 
+        # Large Scales are Pointy-topped (different rotation).
+        if S <= 1.1:
+            # Flat-topped (Axial)
+            nb_offsets = [(1, 0), (0, -1), (-1, -1), (-1, 0), (0, 1), (1, 1)] # Approximate cardinal directions
+        else:
+            # Pointy-topped (Axial)
+            nb_offsets = [(1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1)]
+
         for i, item in enumerate(ld):
             q, r = item['q'], item['r']
             h = item['h']
@@ -354,29 +355,37 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
             hn = max(0, min(65535, int((h - (min_z-10)) * scale_f)))
             s_byte = max(0, min(255, int(s)))
             
-            # Neighborhood Search
+            # Neighborhood Sampling for Skirts
             deltas = []
+            h_eff = coord_util.UNIT_HEX_WIDTH_METERS * S
+            
             for oq, or_ in nb_offsets:
                 nq, nr = q + oq, r + or_
-                # Sample DEM at neighbor centered world pos
-                # we can use the formula directly since coord_util has it
-                # world_x = (q * (math.sqrt(3)/2) * h_eff) ...
-                h_eff = coord_util.UNIT_HEX_WIDTH_METERS * S
-                wx = (nq * (math.sqrt(3)/2) * h_eff)
-                wy = (nr * h_eff + nq * 0.5 * h_eff)
                 
-                # Fast sample (Nearest)
+                # Project back to world-space for DEM sampling
+                # This assumes standard world-to-axial logic
+                if S <= 1.1:
+                    # Flat-top projection
+                    wx = nq * (math.sqrt(3)/2) * h_eff
+                    wy = nr * h_eff + nq * 0.5 * h_eff
+                else:
+                    # Pointy-top projection
+                    wx = nq * h_eff + nr * 0.5 * h_eff
+                    wy = nr * (math.sqrt(3)/2) * h_eff
+                
+                # Nearest height sampling from DEM
                 row, col = rasterio.transform.rowcol(dem_transform, wx, wy)
                 row = max(0, min(dem_data.shape[0]-1, row))
                 col = max(0, min(dem_data.shape[1]-1, col))
                 nb_h = dem_data[row, col]
                 
-                # Delta is positive if WE are higher than NEIGHBOR (skirt drops)
-                # Max drop 255m
+                # Delta is the "drop distance". Positive if center is higher.
+                # 0-255 range (meters).
                 d_val = max(0, min(255, int(round(h - nb_h))))
                 deltas.append(d_val)
                 
             struct.pack_into("<hhHB6B", buf, i*13, dq, dr, hn, s_byte, *deltas)
+            
         blob += buf
     
     with open(os.path.join(output_dir, f"sector_{SX}_{SY}.bin"), "wb") as f: f.write(blob)
