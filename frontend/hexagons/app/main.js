@@ -446,17 +446,23 @@ class PistonViewer {
 
     parseBinaryV3(buffer) {
         const view = new DataView(buffer);
+        // Header: HEX4 check
+        const sig = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+        if (sig !== 'HEX4') {
+            console.error(`Invalid Binary Signature: Expected HEX4, got ${sig}`);
+            return { layers: [[], [], [], []], stats: { min: 0, max: 0, avg: 0, base: 0 }, center: { q: 0, r: 0 } };
+        }
+
         const minZ = view.getFloat32(12, true);
         const maxZ = view.getFloat32(16, true);
         const scale = view.getFloat32(20, true);
-        const sx = view.getInt32(4, true); // Header stores Sector X
-        const sy = view.getInt32(8, true); // Header stores Sector Y
+        const sx = view.getInt32(4, true);
+        const sy = view.getInt32(8, true);
 
         let offset = 32;
-        const layers = []; // [L3(Scale24), L2(Scale6), L1(Scale3), L0(Scale1)]
+        const layers = [];
         const scales = [24.0, 6.0, 3.0, 1.0];
 
-        // Calculate Sector Center in World Meters
         const minX = sx * SECTOR_WIDTH_METERS;
         const minY = sy * SECTOR_WIDTH_METERS;
         const cenX = minX + SECTOR_WIDTH_METERS * 0.5;
@@ -466,35 +472,38 @@ class PistonViewer {
             const count = view.getUint32(offset, true);
             offset += 4;
             const layer = [];
-
-            // Calculate Layer Center (lcq, lcr) for this scale
             const sc = scales[l];
             const rawC = this.worldToAxialScale(cenX, cenY, sc);
             const lcq = Math.round(rawC.q);
             const lcr = Math.round(rawC.r);
 
             for (let i = 0; i < count; i++) {
-                // dq, dr are RELATIVE to lcq, lcr
-                const dq = view.getInt16(offset, true);
-                const dr = view.getInt16(offset + 2, true);
-                const hn = view.getUint16(offset + 4, true);
-                const slope = view.getUint8(offset + 6);
+                // HEX4 16-Byte Layout
+                const dq = view.getInt8(offset);
+                const dr = view.getInt8(offset + 1);
+                const hn = view.getUint16(offset + 2, true);
 
-                // Read 3 signed neighbor deltas (SE, S, SW) - Int16 (2 bytes each)
-                // Offset 7, 9, 11
-                const dSE = view.getInt16(offset + 7, true);
-                const dS = view.getInt16(offset + 9, true);
-                const dSW = view.getInt16(offset + 11, true);
+                const d1 = view.getInt16(offset + 4, true);
+                const d2 = view.getInt16(offset + 6, true);
+                const d3 = view.getInt16(offset + 8, true);
 
-                offset += 13;
+                const s1 = view.getUint8(offset + 10);
+                const s2 = view.getUint8(offset + 11);
+                const s3 = view.getUint8(offset + 12);
 
-                // Store accurate reconstructed global Axial if needed
+                const nx = view.getUint8(offset + 13);
+                const nz = view.getUint8(offset + 14);
+                // offset 15 is pad
+
+                offset += 16;
+
                 layer.push({
                     dq, dr,
                     q: lcq + dq, r: lcr + dr,
                     h: minZ + (hn / scale),
-                    s: slope,
-                    deltas: [dSE, dS, dSW] // 3 Signed Deltas
+                    deltas: [d1, d2, d3],
+                    slopes: [s1, s2, s3], // Array of 3
+                    norm: [nx, nz]
                 });
             }
             layers.push(layer);
@@ -510,26 +519,16 @@ class PistonViewer {
         const scaleTable = [24.0, 6.0, 3.0, 1.0];
         const scale = scaleTable[layerIdx];
         const num = hexes.length;
+        const h_eff = UNIT_HEX_WIDTH_METERS * scale;
 
-        const h = UNIT_HEX_WIDTH_METERS;
-        const h_eff = h * scale;
-        const isPointy = (scale > 1.1);
-
-        // Clone material to ensure unique userData (prevent overwriting lodIdx)
         const instMat = material.clone();
         if (!instMat.userData) instMat.userData = {};
-        instMat.userData.lodIdx = layerIdx; // 3=Unit, 2=Small, 1=Med, 0=Large
-
-        // Also add logic to dispose of this material on unload!
-        instMat.userData.isClone = true; // Mark for cleanup
-
-        // RE-APPLY shader logic to ensure onBeforeCompile targets THIS new instance
+        instMat.userData.lodIdx = layerIdx;
+        instMat.userData.isClone = true;
         this.setupMaterialShader(instMat);
 
         const capG = this.capGeometry.clone();
         const skirtG = this.skirtGeometry.clone();
-
-        // ALL SCALES are Flat Top in waffle_iron.py
         capG.scale(scale, 1, scale);
         skirtG.scale(scale, 1, scale);
 
@@ -539,17 +538,16 @@ class PistonViewer {
 
         const nz1 = new Float32Array(num * 4);
         const nz2 = new Float32Array(num * 4);
-        const slopes = new Float32Array(num);
-        const deltasArr = new Float32Array(num * 3); // SE, S, SW
+
+        const slopesVec = new Float32Array(num * 3); // 3 Slopes (Vec3)
+        const deltasVec = new Float32Array(num * 3); // 3 Deltas (Vec3)
+        const normsVec = new Float32Array(num * 2);  // Nx, Nz (Vec2)
 
         let activeSkirts = 0;
         for (let i = 0; i < num; i++) {
             const d = hexes[i];
-            let lx, ly;
-
-            // ALWAYS Flat Top Grid Math (Matches waffle_iron.py)
-            lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
-            ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
+            const lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
+            const ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
 
             matrix.makeTranslation(lx, 0, -ly);
             capMesh.setMatrixAt(i, matrix);
@@ -558,16 +556,22 @@ class PistonViewer {
             const hh = d.h;
             nz1[i * 4] = hh; nz1[i * 4 + 1] = hh; nz1[i * 4 + 2] = hh; nz1[i * 4 + 3] = hh;
             nz2[i * 4] = hh; nz2[i * 4 + 1] = hh; nz2[i * 4 + 2] = hh; nz2[i * 4 + 3] = 0.0;
-            slopes[i] = d.s;
 
-            // Pass RAW signed deltas to shader. 
-            // Shader will handle the sign logic (Down vs Up).
-            deltasArr[i * 3 + 0] = d.deltas[0];
-            deltasArr[i * 3 + 1] = d.deltas[1];
-            deltasArr[i * 3 + 2] = d.deltas[2];
+            // Slopes
+            slopesVec[i * 3 + 0] = d.slopes[0];
+            slopesVec[i * 3 + 1] = d.slopes[1];
+            slopesVec[i * 3 + 2] = d.slopes[2];
 
-            const hasDrop = d.deltas.some(v => v !== 0);
-            if (hasDrop) activeSkirts++;
+            // Deltas
+            deltasVec[i * 3 + 0] = d.deltas[0];
+            deltasVec[i * 3 + 1] = d.deltas[1];
+            deltasVec[i * 3 + 2] = d.deltas[2];
+
+            // Normals (Packed 0-255 -> Float 0-1 for shader)
+            normsVec[i * 2 + 0] = d.norm[0] / 255.0;
+            normsVec[i * 2 + 1] = d.norm[1] / 255.0;
+
+            if (d.deltas.some(v => v !== 0)) activeSkirts++;
         }
 
         capMesh.instanceMatrix.needsUpdate = true;
@@ -576,15 +580,17 @@ class PistonViewer {
         [capMesh, skirtMesh].forEach(m => {
             m.geometry.setAttribute('instanceNZ_1', new THREE.InstancedBufferAttribute(nz1, 4));
             m.geometry.setAttribute('instanceNZ_2', new THREE.InstancedBufferAttribute(nz2, 4));
-            m.geometry.setAttribute('instanceSlope', new THREE.InstancedBufferAttribute(slopes, 1));
-            m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(deltasArr, 3));
+
+            // NEW ATTRIBUTES
+            m.geometry.setAttribute('instanceSlopes', new THREE.InstancedBufferAttribute(slopesVec, 3));
+            m.geometry.setAttribute('instanceDeltas', new THREE.InstancedBufferAttribute(deltasVec, 3));
+            m.geometry.setAttribute('instanceNormal', new THREE.InstancedBufferAttribute(normsVec, 2));
         });
 
         const group = new THREE.Group();
         group.add(capMesh);
         group.add(skirtMesh);
         group.userData.activeSkirts = activeSkirts;
-
         group.frustumCulled = false;
         return group;
     }
@@ -615,51 +621,62 @@ class PistonViewer {
                 
                 attribute vec4 instanceNZ_1;
                 attribute vec4 instanceNZ_2;
-                attribute float instanceSlope;
                 
-                // NEW: 3 Signed Deltas (SE, S, SW) and Side ID (0,1,2)
+                // NEW: Vec3 for Slopes/Deltas, Vec2 for Normal
+                attribute vec3 instanceSlopes;
                 attribute vec3 instanceDeltas; 
+                attribute vec2 instanceNormal; // (Nx, Nz) in [0,1]
+                
                 attribute float aSideId;
                 
-                varying vec3 vLocalPos; // Relative to Tile (for UVs)
-                varying vec3 vWorldPos; // Absolute World (for Rings)
+                varying vec3 vLocalPos;
+                varying vec3 vWorldPos;
                 varying float vSlope;
-                varying float vIsTop; // 1.0 = Cap, 0.0 = Skirt
+                varying float vIsTop;
                 varying vec3 vMyNormal;
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
                 
-                // Detect Geometry Type based on Normal Y (Cap > 0.9)
                 bool isCap = (normal.y > 0.9);
                 vIsTop = isCap ? 1.0 : 0.0;
                 
                 if (isCap) {
-                    // CAP: Just elevate.
+                    // CAP
                     transformed.y = 0.0 + animH; 
-                } else {
-                    // SKIRT (Partial 3-Sided: SE, S, SW)
-                    // Top Edge (y=0) -> animH.
-                    // Bottom Edge (y=-1) -> Displace by Delta.
+                    vSlope = 0.0; // Caps follow texture color usually, or flat slope
                     
+                    // Decode Normal from [0, 1] -> [-1, 1]
+                    // val * 2.0 - 1.0 = (val*255 - 127.5)/127.5 approx
+                    float nx = instanceNormal.x * 2.0 - 1.0; // Exact range -1 to 1
+                    float nz = instanceNormal.y * 2.0 - 1.0;
+                    float ny_sq = 1.0 - nx*nx - nz*nz;
+                    float ny = sqrt(max(0.0, ny_sq));
+                    
+                    vMyNormal = normalize(vec3(nx, ny, nz));
+                    
+                } else {
+                    // SKIRT
                     if (position.y > -0.1) {
-                         // Skirt Top Edge
                          transformed.y = animH;
                     } else {
-                         // Skirt Bottom Edge
                          // Select Delta based on Side ID (0=SE, 1=S, 2=SW)
-                         float dVal = 0.0;
-                         if (aSideId < 0.5) dVal = instanceDeltas.x;      // SE
-                         else if (aSideId < 1.5) dVal = instanceDeltas.y; // S
-                         else dVal = instanceDeltas.z;                    // SW
+                         float dVal = (aSideId < 0.5) ? instanceDeltas.x : 
+                                      (aSideId < 1.5) ? instanceDeltas.y : instanceDeltas.z;
                          
-                         // Apply Delta (Signed)
-                         // Positive dVal (I am Higher) -> Wall goes DOWN (-dVal)
-                         // Negative dVal (I am Lower)  -> Wall goes UP (-(-dVal) = +dVal)
-                         // Result is always: animH - (dVal * Factor)
+                         // Fix: Convert Decimeters (Int16) to Meters (Float)
+                         dVal *= 0.1;
+
                          transformed.y = animH - (dVal * uHeightFactor);
                     }
+                    
+                    // Pick Slope for Gradient
+                    float sVal = (aSideId < 0.5) ? instanceSlopes.x : 
+                                 (aSideId < 1.5) ? instanceSlopes.y : instanceSlopes.z;
+                    vSlope = sVal;
+                    
+                    vMyNormal = normal; // Skirt flat normal
                 }
 
                 #ifdef USE_INSTANCING
@@ -670,16 +687,10 @@ class PistonViewer {
                     vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
                 #endif
 
-                // RADIAL CULLING
                 float dist = distance(vWorldPos, uCameraPos);
                 if (dist < uLodRadii.x || dist > uLodRadii.y) {
-                    transformed = vec3(0.0); // Collapse
-                } else {
-                     // Can add smooth fade here if needed
+                    transformed = vec3(0.0);
                 }
-                
-                vSlope = instanceSlope;
-                vMyNormal = normal;
             `);
 
             shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
@@ -1044,7 +1055,7 @@ class PistonViewer {
             this.setupMaterialShader(material);
 
             // 2. Binary Data
-            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin`;
+            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin?v=5`; // CACHE BUST v5
             const buffer = await (await fetch(binUrl)).arrayBuffer();
             const parsed = this.parseBinaryV3(buffer);
 

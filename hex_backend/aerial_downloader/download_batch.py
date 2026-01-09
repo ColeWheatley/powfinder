@@ -28,12 +28,12 @@ def get_on_disk_gids():
     return found
 
 def download_tif(grid_id):
-    filename = f"dop_{{grid_id}}_{YEAR}.tif"
+    filename = f"dop_{grid_id}_{YEAR}.tif"
     url = f"https://gis.tirol.gv.at/geo/dop/m28/{filename}"
     target_path = os.path.join(TARGET_DIR, filename)
     
     # Worldfile MUST exist or the TIF is useless
-    wf_name = f"dop_{{grid_id}}_{YEAR}.tfw"
+    wf_name = f"dop_{grid_id}_{YEAR}.tfw"
     if not os.path.exists(os.path.join(WF_DIR, wf_name)):
         return grid_id, "skipped_no_worldfile"
 
@@ -45,9 +45,9 @@ def download_tif(grid_id):
                     f.write(chunk)
             return grid_id, "done"
         else:
-            return grid_id, f"error_{{response.status_code}}"
+            return grid_id, f"error_{response.status_code}"
     except Exception as e:
-        return grid_id, f"failed_{{str(e)}}"
+        return grid_id, f"failed_{str(e)}"
 
 def main():
     if not os.path.exists(TARGET_DIR):

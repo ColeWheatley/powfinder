@@ -1,8 +1,9 @@
-# 🧇 Waffle Iron v3.3 - Performance & Quality Update
-# - Optimized with High-Res Slope Caching (BIGTIFF support)
-# - Upsampling: 2x (5m -> 2.5m) using Lanczos Resampling
-# - Performance: Cache generation ~185s, Sector Baking ~15s (25 sectors)
-# - Logic: Uses vector magnitude (sqrt(dx^2 + dy^2)) for true fall-line gradients.
+# 🧇 Waffle Iron v4.0 - Uber-Skirt Edition
+# - 16-Byte "Uber-Hex" Layout (Power-of-Two aligned)
+# - Gapless "Partial Skirt" Topology (SE, S, SW ownership)
+# - "Diamond" Area Sampling for faithful edge slopes
+# - Baked-in Center Normals (Nx, Nz) for smooth Cap lighting
+# - Int16 Vertical Deltas (Decimeter precision)
 
 import os
 import glob
@@ -11,6 +12,7 @@ import time
 import numpy as np
 import rasterio
 import rasterio.enums
+import rasterio.windows
 import gc
 import re
 from shapely.geometry import Polygon, box
@@ -31,49 +33,46 @@ def latlon_to_world_meters(lat, lon):
 # CONSTANTS & CONFIGURATION
 # =============================================================================
 TEXTURE_PADDING_PX = 64  
-WEB_P_QUALITY = 10 # User Requested
+WEB_P_QUALITY = 10
 DEBUG_MODE = False
-RESAMPLE_DEM = False
 TARGET_LAT = 46.98705560886202
 TARGET_LON = 11.115050838788871
 
 DEM_PATH = "hex_backend/DGM_Tirol_5m_epsg31254_2006_2020.tif"
-SLOPE_PATH = "hex_backend/DGM_Tirol_slope_cached.tif"
+GRADIENT_PATH = "hex_backend/DGM_Tirol_gradient_cached.tif" # New Graph Cache
 AERIAL_DIR = "hex_backend/aerial_tifs"
 
 # =============================================================================
 # BAKING FUNCTIONS
 # =============================================================================
 
-def get_or_create_slope_map(dem_path, output_path, upsample_factor=1):
+def get_or_create_gradient_map(dem_path, output_path, upsample_factor=1):
     """
-    Checks for a cached slope TIF. If missing, generates it from the DEM.
-    Calculates gradient vector magnitude (steepness) using windowed processing
-    to avoid OOM errors on large datasets.
+    Generates a 2-Band Float32 TIF containing terrain gradients (dx, dy).
+    Band 1: dx (Slope in X direction)
+    Band 2: dy (Slope in Y direction)
+    Used to derive Slope, Aspect, and Normals on the fly.
     """
     if os.path.exists(output_path):
-        print(f"✅ Found cached slope map: {output_path}")
+        print(f"✅ Found cached gradient map: {output_path}")
         return rasterio.open(output_path)
 
-    print(f"⚠️  Slope map not found. Generating from {dem_path}...")
+    print(f"⚠️  Gradient map not found. Generating from {dem_path}...")
     start_time = time.time()
 
     with rasterio.open(dem_path) as src:
-        # Calculate new dimensions
         new_width = src.width * upsample_factor
         new_height = src.height * upsample_factor
         
-        # New transform
         new_transform = src.transform * src.transform.scale(
             (src.width / new_width),
             (src.height / new_height)
         )
 
-        # Output Profile
         profile = src.profile.copy()
         profile.update(
             dtype=rasterio.float32, 
-            count=1, 
+            count=2, # Two bands: dx, dy
             driver='GTiff',
             width=new_width,
             height=new_height,
@@ -86,39 +85,21 @@ def get_or_create_slope_map(dem_path, output_path, upsample_factor=1):
             BIGTIFF='YES'
         )
         
-        # Grid resolutions
         res_x = abs(new_transform[0])
         res_y = abs(new_transform[4])
 
-        print(f"   -> Processing in windows (Total: {new_width}x{new_height}, Res: {res_x:.2f}m)...")
+        print(f"   -> Processing Gradients (Total: {new_width}x{new_height}, Res: {res_x:.2f}m)...")
         
         with rasterio.open(output_path, 'w', **profile) as dst:
-            # We process the output in blocks
-            # To calculate gradient at edges, we need a 1-pixel padding from the DEM
-            # But since we are upsampling, we need to be careful.
-            
-            # Simpler approach: Process based on destination blocks
             for jt, window in dst.block_windows(1):
-                # 'window' is in destination coordinates
-                # We need to read slightly more from the source DEM to avoid edge artifacts
-                # 2 pixels padding in source is plenty for np.gradient
                 pad = 2
-                
-                # Back-project window to source coordinates
-                # Since it's a simple scale, we can just divide
                 src_window = rasterio.windows.Window(
                     window.col_off / upsample_factor - pad,
                     window.row_off / upsample_factor - pad,
                     window.width / upsample_factor + 2*pad,
                     window.height / upsample_factor + 2*pad
-                )
+                ).intersection(rasterio.windows.Window(0, 0, src.width, src.height))
                 
-                # Clamp to src bounds
-                src_window = src_window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
-                
-                # Read and Resample this small chunk
-                # Calculate the exact shape we expect for this window
-                # Note: window.width/height are the sizes in the DESTINATION file
                 chunk_dem = src.read(
                     1, 
                     window=src_window, 
@@ -128,40 +109,51 @@ def get_or_create_slope_map(dem_path, output_path, upsample_factor=1):
                 
                 if chunk_dem.size == 0: continue
 
-                # Calculate local gradient
+                # Calculate Gradients
+                # np.gradient returns (gradient_axis_0, gradient_axis_1) -> (dy, dx)
                 dy, dx = np.gradient(chunk_dem, res_y, res_x)
-                slope_rad = np.arctan(np.sqrt(dx**2 + dy**2))
-                slope_deg = np.degrees(slope_rad).astype(np.float32)
                 
-                # We need to crop out the padding we added (if any)
-                # The src_window might have been shifted by 'pad'
-                # Find where the actual destination 'window' starts inside this resampled chunk
+                # Careful with signage: raster rows increase DOWN (-Y), but index increases UP?
+                # Usually DEMs are top-left origin. +Row = -Y.
+                # So gradient in row index is -dy/dPixel.
+                # We want standard world space (dx, dy).
+                # If TIF transform is standard (dy negative), we need to account for it.
+                # simpler: keep them as raster-space gradients and handle "World Z" later?
+                # Let's store pure geometric gradients: dZ/dWorldX, dZ/dWorldY.
+                # If dy is negative in transform (N->S), then pixel_y+1 is South.
+                # np.gradient gives change per index step.
+                # if row i -> i+1 is moving South (lower Y), and logic is (z[i+1]-z[i]).
+                # That is dZ / d(-Y). So dZ/dY = -(z[i+1]-z[i]) / step.
+                # We passed positive step sizes (res_y, res_x) to np.gradient.
+                # So `dy` output from np.gradient is dZ per Meter-Down-Screen.
+                # That equals -dZ/dY.
+                # So stored band 2 should be -dy.
                 
-                # Calculate the offset within the resampled chunk_dem
-                # src_window.col_off is the starting column in the original TIF
-                # (src_window.col_off * upsample_factor) is the starting column in 'infinite upsampled space'
-                # window.col_off is the starting column in the actual destination TIF
+                real_dy = -dy 
+                real_dx = dx # X usually increases right, same as col index.
                 
+                # Crop encoding logic
                 off_x = int(round(window.col_off - (src_window.col_off * upsample_factor)))
                 off_y = int(round(window.row_off - (src_window.row_off * upsample_factor)))
                 
-                # Slice out only the part that belongs in the destination window
-                final_chunk = slope_deg[off_y:off_y+int(window.height), off_x:off_x+int(window.width)]
+                h, w = window.height, window.width
                 
-                dst.write(final_chunk, 1, window=window)
+                final_dx = real_dx[off_y:off_y+int(h), off_x:off_x+int(w)]
+                final_dy = real_dy[off_y:off_y+int(h), off_x:off_x+int(w)]
+                
+                dst.write(final_dx, 1, window=window)
+                dst.write(final_dy, 2, window=window)
                 
                 if jt[0] % 20 == 0 and jt[1] == 0:
-                    total_blocks = (dst.height // 512 + 1) * (dst.width // 512 + 1)
                     current_block = jt[0] * (dst.width // 512 + 1) + jt[1]
-                    print(f"   -> Progress: {100 * current_block / total_blocks:.1f}%")
+                    # print(f"   -> Progress...") 
 
-    print(f"✅ Generated Slope Map in {time.time() - start_time:.2f}s")
+    print(f"✅ Generated Gradient Map in {time.time() - start_time:.2f}s")
     return rasterio.open(output_path)
 
 def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/aerial_tiles"):
     import PIL.Image as Image
     from rasterio.windows import from_bounds
-
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
     min_x, min_y, max_x, max_y = coord_util.sector_id_to_bounds_meters(SX, SY)
@@ -200,24 +192,47 @@ def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/a
 
     f_name = f"sector_{SX}_{SY}.webp"
     canvas.save(os.path.join(res_dirs["full"], f_name), "WEBP", quality=WEB_P_QUALITY)
-
-    # High: 4096 -> 1024 (DISABLED - using only full and low res)
-    # c_high = canvas.resize((total_size_px // 4, total_size_px // 4), Image.LANCZOS)
-    # c_high.save(os.path.join(res_dirs["high"], f_name), "WEBP", quality=WEB_P_QUALITY)
-
-    # Low: 4096 -> 256
     c_low = canvas.resize((total_size_px // 16, total_size_px // 16), Image.LANCZOS)
     c_low.save(os.path.join(res_dirs["low"], f_name), "WEBP", quality=WEB_P_QUALITY)
 
-def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transform, output_dir="frontend/hexagons/app/tiles_bin"):
+def get_diamond_stats(grad_ds, p1, p2):
+    """
+    Samples the gradient map in the bounding box of the edge (p1 to p2).
+    Returns averaged slope (deg).
+    p1, p2 are tuples (wx, wy).
+    """
+    min_x, max_x = min(p1[0], p2[0]), max(p1[0], p2[0])
+    min_y, max_y = min(p1[1], p2[1]), max(p1[1], p2[1])
+    
+    # Add minimal buffer to ensure we catch a pixel
+    min_x -= 1.0; max_x += 1.0
+    min_y -= 1.0; max_y += 1.0
+    
+    window = rasterio.windows.from_bounds(min_x, min_y, max_x, max_y, grad_ds.transform)
+    
+    # Read Band 1 (dx) and Band 2 (dy)
+    # Clip window to image
+    window = window.intersection(rasterio.windows.Window(0, 0, grad_ds.width, grad_ds.height))
+    
+    if window.width < 1 or window.height < 1: return 0
+    
+    dx_vals = grad_ds.read(1, window=window)
+    dy_vals = grad_ds.read(2, window=window)
+    
+    if dx_vals.size == 0: return 0
+    
+    # Average Gradient Vector
+    avg_dx = np.mean(dx_vals)
+    avg_dy = np.mean(dy_vals)
+    
+    # Convert to Slope
+    slope_rad = math.atan(math.sqrt(avg_dx*avg_dx + avg_dy*avg_dy))
+    slope_deg = math.degrees(slope_rad)
+    return slope_deg
+
+def bake_sector_binary(SX, SY, dem_data, dem_transform, grad_ds, output_dir="frontend/hexagons/app/tiles_bin"):
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     min_x, min_y, max_x, max_y = coord_util.sector_id_to_bounds_meters(SX, SY)
-
-    # NOTE: Gradient calculation removed from here. Using pre-baked 'slope_data'.
-
-    # Function sample_data removed as it is superseded by inline vectorized sampling.
-        
-
 
     scales = [{"id": 3, "s": 24.0}, {"id": 2, "s": 6.0}, {"id": 1, "s": 3.0}, {"id": 0, "s": 1.0}]
     layers_data, min_z, max_z = [], 9999, -9999
@@ -225,196 +240,239 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, slope_data, slope_transf
     center_wx, center_wy = coord_util.get_sector_center(SX, SY)
     cq, cr = [int(round(v)) for v in coord_util.world_meters_to_axial_approx(center_wx, center_wy)]
 
+    # We need to manually cache gradient data for the sector to avoid 1000s of disk reads
+    # Read entire sector gradient + padding
+    padding = 100.0
+    g_window = rasterio.windows.from_bounds(min_x-padding, min_y-padding, max_x+padding, max_y+padding, grad_ds.transform)
+    g_window = g_window.intersection(rasterio.windows.Window(0,0,grad_ds.width, grad_ds.height))
+    
+    # We will read this into memory: (2, H, W)
+    sector_grads = grad_ds.read(window=g_window)
+    sector_grad_transform = grad_ds.window_transform(g_window)
+    
+    # Pre-calculate center slopes/normals for the block?
+    # Actually, let's keep the diamond stats lightweight by indexing into this array
+    
+    def fast_diamond_slope(wx1, wy1, wx2, wy2):
+        # Map to array indices
+        r1, c1 = rasterio.transform.rowcol(sector_grad_transform, wx1, wy1)
+        r2, c2 = rasterio.transform.rowcol(sector_grad_transform, wx2, wy2)
+        
+        r_min, r_max = min(r1, r2), max(r1, r2)
+        c_min, c_max = min(c1, c2), max(c1, c2)
+        
+        # Ensure slice is valid
+        r_min = max(0, r_min); r_max = min(sector_grads.shape[1], r_max + 1)
+        c_min = max(0, c_min); c_max = min(sector_grads.shape[2], c_max + 1)
+        
+        if r_max <= r_min or c_max <= c_min: return 0
+        
+        sub_dx = sector_grads[0, r_min:r_max, c_min:c_max]
+        sub_dy = sector_grads[1, r_min:r_max, c_min:c_max]
+        
+        mdx = np.mean(sub_dx)
+        mdy = np.mean(sub_dy)
+        return math.degrees(math.atan(math.sqrt(mdx*mdx + mdy*mdy)))
+
+    def get_center_normal_packed(wx, wy):
+        r, c = rasterio.transform.rowcol(sector_grad_transform, wx, wy)
+        r = max(0, min(sector_grads.shape[1]-1, r))
+        c = max(0, min(sector_grads.shape[2]-1, c))
+        dx = sector_grads[0, r, c]
+        dy = sector_grads[1, r, c]
+        
+        # Normal = (-dx, -dy, 1) normalized
+        length = math.sqrt(dx*dx + dy*dy + 1)
+        nx = -dx / length
+        nz = -dy / length
+        # ny = 1 / length (implicit)
+        
+        # Pack to 0-255 (range -1 to 1)
+        # 128 is 0. 
+        px = int((nx * 127.0) + 128.0)
+        pz = int((nz * 127.0) + 128.0)
+        return max(0, min(255, px)), max(0, min(255, pz))
+
+
     for l in scales:
         S = l["s"]
-        # Calculate Center in Scale (Layer Center Q/R)
         lcq, lcr = [int(round(v)) for v in coord_util.world_meters_to_axial_scale(center_wx, center_wy, S)]
-        
         hx = coord_util.get_lod_grid_hexes_in_bbox(min_x, max_x, min_y, max_y, S)
+        
         if hx:
-            # Vectorized Sampling for Center + 6 Neighbors
-            # Neighbor Order: N, NE, SE, S, SW, NW (Aligned with Axial +y=North)
-            n_offsets = [(0, 1), (1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1)]
-            
-            # Precompute World Delta per Axial Step for this Scale
-            # Note: This reproduces the axial_to_world logic inline
+            # 1. Gather Heights (Vectorized)
             w_h = coord_util.UNIT_HEX_WIDTH_METERS * S
             dx_dq = (math.sqrt(3)/2) * w_h
             dy_dq = 0.5 * w_h
             dy_dr = w_h 
             
-            # Arrays of Center WX, WY
             c_wx = np.array([h[2] for h in hx])
             c_wy = np.array([h[3] for h in hx])
             
-            # Create list of arrays to sample: [Center, N, NE, SE, S, SW, NW]
-            sample_wxs = [c_wx]
-            sample_wys = [c_wy]
+            # Neighbors for Delta Calculation
+            # 2=SE, 3=S, 4=SW (Axial Deltas: SE(1, -1), S(0, -1), SW(-1, 0))
+            # Also for Skirts we need to know WHERE the neighbor center is.
+            offsets = [
+                (1, -1), # SE
+                (0, -1), # S
+                (-1, 0)  # SW
+            ]
             
-            for (ndq, ndr) in n_offsets:
-                 # Calculate relative world offset for neighbor
-                 odx = ndq * dx_dq
-                 ody = ndr * dy_dr + ndq * dy_dq
-                 sample_wxs.append(c_wx + odx)
-                 sample_wys.append(c_wy + ody)
-                 
-            # Flatten to sample
-            flat_wxs = np.concatenate(sample_wxs)
-            flat_wys = np.concatenate(sample_wys)
-            
-            # Sample Heights
-            rows, cols = rasterio.transform.rowcol(dem_transform, flat_wxs, flat_wys)
+            # Sample Center Heights
+            rows, cols = rasterio.transform.rowcol(dem_transform, c_wx, c_wy)
             rows = np.clip(rows, 0, dem_data.shape[0]-1)
             cols = np.clip(cols, 0, dem_data.shape[1]-1)
-            all_h = dem_data[rows, cols]
+            c_h = dem_data[rows, cols]
             
-            # Reshape: (7, N)
-            stacked_h = all_h.reshape(7, len(hx))
-            
-            # Sample Slope (Center only)
-            s_rows, s_cols = rasterio.transform.rowcol(slope_transform, c_wx, c_wy)
-            s_rows = np.clip(s_rows, 0, slope_data.shape[0]-1)
-            s_cols = np.clip(s_cols, 0, slope_data.shape[1]-1)
-            s_vals = slope_data[s_rows, s_cols]
-
-            # Update Min/Max Z from Center vals
-            min_z, max_z = min(min_z, stacked_h[0].min()), max(max_z, stacked_h[0].max())
-            
-            # Process Layers
-            use_slope = (S <= 3.0)
+            min_z, max_z = min(min_z, c_h.min()), max(max_z, c_h.max())
             
             layer = []
-            num_hexes = len(hx)
             
-            # Vectorized calc for deltas? 
-            # D = Center - Neighbor.
-            # But we need math.ceil logic.
-            # Can use numpy:
-            # center (1, N) broadcast against neighbors (6, N)
-            
-            c_h_b = stacked_h[0] # (N,)
-            n_h_b = stacked_h[1:] # (6, N)
-            
-            # diffs = c_h - n_h
-            diffs = c_h_b - n_h_b # (6, N)
-            
-            # Logic: if diff <= 0 -> 0. else ceil(diff). Clamp 0-255.
-            # ceil: np.ceil
-            d_ceil = np.ceil(diffs)
-            d_clamped = np.clip(d_ceil, 0, 255).astype(np.uint8)
-            
-            # Handle special floor case? 
-            # If d_ceil >= 254 -> 255. (Infinite/Floor)
-            # Actually user said "bake in neighbor Z".
-            # If the gap is huge (cliff), we probably want to extend to the neighbor.
-            # So 255 is just a max limit.
-            
-            # Transpose to iterate by hex
-            d_final = d_clamped.T # (N, 6)
-            
-            for i in range(num_hexes):
+            for i in range(len(hx)):
                 q, r = hx[i][0], hx[i][1]
-                slope = s_vals[i] if use_slope else 0
+                wx, wy = c_wx[i], c_wy[i]
+                h_val = c_h[i]
+                
+                # Sample Normal (Center)
+                nx_p, nz_p = get_center_normal_packed(wx, wy)
+                
+                # --- PROCESS OWNED EDGES ---
+                deltas = []
+                slopes = []
+                
+                for (dq_o, dr_o) in offsets:
+                    # Neighbor Coord
+                    nq, nr = q + dq_o, r + dr_o
+                    
+                    # Neighbor World Pos
+                    nwx = wx + (dq_o * dx_dq) # Rough approx for grid, accurate for relative
+                    # Recalculate exact world pos to be safe
+                    # Actually, c_wx + (offset) is cleaner.
+                    # SE offset: dq=1, dr=-1.
+                    odx = dq_o * dx_dq
+                    ody = dr_o * dy_dr + dq_o * dy_dq
+                    nwx = wx + odx
+                    nwy = wy + ody
+                    
+                    # Sample Neighbor Height
+                    nr_r, nc_c = rasterio.transform.rowcol(dem_transform, nwx, nwy)
+                    nr_r = max(0, min(dem_data.shape[0]-1, nr_r))
+                    nc_c = max(0, min(dem_data.shape[1]-1, nc_c))
+                    nh_val = dem_data[nr_r, nc_c]
+                    
+                    # Delta (Decimeters)
+                    d_m = h_val - nh_val
+                    
+                    # SANITY CHECK: If neighbor is >400m away vertically, it's likely NODATA/Edge of Map.
+                    # Clamp to 0 (Flat Skirt) to avoid visual spikes.
+                    if abs(d_m) > 400.0: d_m = 0.0
+                    
+                    deltas.append(int(round(d_m * 10.0)))
+                    
+                    # Diamond Slope (Between wx,wy and nwx,nwy)
+                    # Use fast lookup in memory
+                    s_edge = fast_diamond_slope(wx, wy, nwx, nwy)
+                    slopes.append(int(round(s_edge)))
+                
                 layer.append({
-                    'q': q, 'r': r, 
-                    'l': hx[i], # raw tuple
+                    'q': q, 'r': r,
+                    'deltas': deltas, # [SE, S, SW] in Decimeters
+                    'slopes': slopes, # [SE, S, SW] in Degrees
+                    'h': h_val,
                     'lcq': lcq, 'lcr': lcr,
-                    'h': stacked_h[0, i],
-                    's': slope,
-                    'deltas': d_final[i] # array of 6 uint8
+                    'pnx': nx_p, 'pnz': nz_p
                 })
+            
             layers_data.append(layer)
         else: layers_data.append([])
 
     scale_f = 65535.0 / (max_z - min_z + 20) if max_z > min_z else 1.0
-    blob = struct.pack("<4siifffii", b"HEX3", int(SX), int(SY), float(min_z-10), float(max_z+10), float(scale_f), cq, cr)
+    # Signature HEX4 denotes new 16-byte layout
+    blob = struct.pack("<4siifffii", b"HEX4", int(SX), int(SY), float(min_z-10), float(max_z+10), float(scale_f), cq, cr)
     
-    # REFACTORED LOOP: Process each scale and pack 13-byte hex units
-    # Neighbor Source of Truth (Vectorized): N, NE, SE, S, SW, NW
     for l_idx, ld in enumerate(layers_data):
-        S = scales[l_idx]["s"]
         blob += struct.pack("<I", len(ld))
-        buf = bytearray(len(ld) * 13)
+        buf = bytearray(len(ld) * 16) # 16 BYTES!
         
-        # Determine neighborhood offsets based on orientation
-        # Source of Truth: N=0, Clockwise. We want indices 2(SE), 3(S), 4(SW).
-        if S <= 1.1:
-            # Flat-topped (Axial) - indices 2,3,4
-            # 2=SE(1,-1), 3=S(0,-1), 4=SW(-1,0)
-            target_indices = [2, 3, 4]
-            full_offsets = [(0, 1), (1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1)] # N, NE, SE, S, SW, NW
-        else:
-            # Pointy-topped (Axial) - indices 2,3,4 relative to rotation
-            # The indices 2,3,4 in the "list of 6" map to the visual "Bottom-Right, Bottom, Bottom-Left"
-            target_indices = [2, 3, 4]
-            full_offsets = [(1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1)]
-
-        selected_offsets = [full_offsets[i] for i in target_indices]
-
         for i, item in enumerate(ld):
-            q, r = item['q'], item['r']
-            h = item['h']
-            s = item['s']
-            lcq, lcr = item['lcq'], item['lcr']
+            dq = max(-127, min(127, int(item['q'] - item['lcq'])))
+            dr = max(-127, min(127, int(item['r'] - item['lcr'])))
+            h_scaled = max(0, min(65535, int((item['h'] - (min_z-10)) * scale_f)))
+            
+            d1, d2, d3 = item['deltas']
+            d1 = max(-32767, min(32767, d1))
+            d2 = max(-32767, min(32767, d2))
+            d3 = max(-32767, min(32767, d3))
+            
+            s1, s2, s3 = item['slopes']
+            s1 = max(0, min(255, s1))
+            s2 = max(0, min(255, s2))
+            s3 = max(0, min(255, s3))
+            
+            pnx = item['pnx']
+            pnz = item['pnz']
+            
+            # STRUCT:
+            # 0: dq (b)
+            # 1: dr (b)
+            # 2: h (H)
+            # 4: d1 (h)
+            # 6: d2 (h)
+            # 8: d3 (h)
+            # 10: s1 (B)
+            # 11: s2 (B)
+            # 12: s3 (B)
+            # 13: pnx (B)
+            # 14: pnz (B)
+            # 15: pad (x)
+            
+            struct.pack_into("<bbHhhhBBBBBx", buf, i*16, 
+                             dq, dr, h_scaled, 
+                             d1, d2, d3, 
+                             s1, s2, s3, 
+                             pnx, pnz)
+            
+            # Note: format string `<bbHhhhBBBxB` 
+            # b=1, b=1, H=2 (4), h=2 (6), h=2 (8), h=2 (10), B=1 (11), B=1 (12), B=1 (13), x=1 (14), B=1 (15)? 
+            # Wait. 
+            # offset 0: b
+            # offset 1: b
+            # offset 2: H -> Ends at 4.
+            # offset 4: h -> Ends at 6.
+            # offset 6: h -> Ends at 8.
+            # offset 8: h -> Ends at 10.
+            # offset 10: B -> 11
+            # offset 11: B -> 12
+            # offset 12: B -> 13
+            # offset 13: B (nx) -> 14
+            # offset 14: B (nz) -> 15
+            # offset 15: pad
+            
+            # Format: 'bbHhhhBBBBBx' ?
+            # Python struct: x is pad byte.
+            # Let's be explicit with B.
+            struct.pack_into("<bbHhhhBBBBBx", buf, i*16,
+                             dq, dr, h_scaled,
+                             d1, d2, d3,
+                             s1, s2, s3,
+                             pnx, pnz) # Last byte is 'x' (pad), no arg needed.
 
-            dq, dr = max(-32767, min(32767, int(q - lcq))), max(-32767, min(32767, int(r - lcr)))
-            hn = max(0, min(65535, int((h - (min_z-10)) * scale_f)))
-            s_byte = max(0, min(255, int(s)))
-            
-            # Neighborhood Sampling for Skirts (Only SE, S, SW)
-            # Stored as Signed Int16 Deltas (My Height - Neighbor Height)
-            # Fits in same 6 bytes as previous 6xUint8
-            deltas = []
-            h_eff = coord_util.UNIT_HEX_WIDTH_METERS * S
-            
-            for oq, or_ in selected_offsets:
-                nq, nr = q + oq, r + or_
-                
-                # Project back to world-space for DEM sampling
-                if S <= 1.1:
-                    # Flat-top projection
-                    wx = nq * (math.sqrt(3)/2) * h_eff
-                    wy = nr * h_eff + nq * 0.5 * h_eff
-                else:
-                    # Pointy-top projection
-                    wx = nq * h_eff + nr * 0.5 * h_eff
-                    wy = nr * (math.sqrt(3)/2) * h_eff
-                
-                # Nearest height sampling from DEM
-                row, col = rasterio.transform.rowcol(dem_transform, wx, wy)
-                row = max(0, min(dem_data.shape[0]-1, row))
-                col = max(0, min(dem_data.shape[1]-1, col))
-                nb_h = dem_data[row, col]
-                
-                # Delta: Positive = I am Higher (Wall goes down). Negative = I am Lower (Wall goes up).
-                d_val = int(round(h - nb_h))
-                # Clamp to int16 range just in case
-                d_val = max(-32767, min(32767, d_val))
-                deltas.append(d_val)
-                
-            # Pack 3 signed shorts (3h) instead of 6 bytes (6B)
-            struct.pack_into("<hhHB3h", buf, i*13, dq, dr, hn, s_byte, *deltas)
-            
         blob += buf
     
     with open(os.path.join(output_dir, f"sector_{SX}_{SY}.bin"), "wb") as f: f.write(blob)
 
 def main():
-    print("🧇 Waffle Iron v3.3: Gradient Flow Edition")
+    print("🧇 Waffle Iron v4.0: Uber-Skirt + Normals")
     
-    # 1. Load DEM (Keep in memory for speed, it's ~1GB max usually)
     print("Loading DEM...")
     with rasterio.open(DEM_PATH) as dem:
         dem_data = dem.read(1)
-        dem_transform = dem.transform
+        dem_transform = dem.transform 
         dem_poly = box(*dem.bounds)
 
-    # 2. Get/Create Gradient Slope Map
-    # Upsample by factor of 2 (5m -> 2.5m) for smoother gradients
     upsample = 2 if not DEBUG_MODE else 1
-    slope_ds = get_or_create_slope_map(DEM_PATH, SLOPE_PATH, upsample_factor=upsample)
-    slope_data = slope_ds.read(1)
-    slope_transform = slope_ds.transform
+    # Cache now stores Gradient (dx, dy)
+    grad_ds = get_or_create_gradient_map(DEM_PATH, GRADIENT_PATH, upsample_factor=upsample)
 
     valid_tifs = []
     for f in glob.glob(os.path.join(AERIAL_DIR, "*.tif")):
@@ -432,7 +490,7 @@ def main():
             if dem_poly.intersects(box(*coord_util.sector_id_to_bounds_meters(sx, sy))):
                 print(f"Cooking Sector {sx}, {sy}...")
                 bake_sector_textures(sx, sy, valid_tifs)
-                bake_sector_binary(sx, sy, dem_data, dem_transform, slope_data, slope_transform)
+                bake_sector_binary(sx, sy, dem_data, dem_transform, grad_ds)
 
     generate_manifest.generate_manifest()
     print("Done.")
