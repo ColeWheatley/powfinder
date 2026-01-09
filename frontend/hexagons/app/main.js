@@ -59,6 +59,11 @@ class PistonViewer {
         this.controls.minDistance = 100;
         this.controls.maxDistance = 50000;
         this.controls.maxPolarAngle = Math.PI / 2.1;
+        this.controls.addEventListener('change', () => { this.needsRender = true; });
+
+        this.needsRender = true;
+        this.needsLODUpdate = true;
+        this.lastLODCamPos = new THREE.Vector3().copy(this.camera.position);
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -67,16 +72,16 @@ class PistonViewer {
 
         // Granular LOD Ranges for Stacked Rendering
         this.lodRanges = {
-            unitEnd: 700,
-            smallStart: 600,
-            smallEnd: 2100,
-            mediumStart: 1900,
-            mediumEnd: 5100,
-            largeStart: 4900
+            unitEnd: 1200,
+            smallStart: 1000,
+            smallEnd: 3500,
+            mediumStart: 3000,
+            mediumEnd: 8500,
+            largeStart: 8000
         };
 
-        // Legacy support/Placeholder (used by updateLOD sort logic but result ignored)
-        this.geoThresholds = [700, 2100, 5100, 20000];
+        // Legacy/Sorting Support
+        this.geoThresholds = [1200, 3500, 8500, 25000];
 
         // Texture High-Res Load Distance
         this.texThreshold = 2000;
@@ -177,6 +182,7 @@ class PistonViewer {
             unitEnd.addEventListener('input', () => {
                 this.lodRanges.unitEnd = parseInt(unitEnd.value);
                 document.getElementById('lod-unit-end-val').textContent = unitEnd.value;
+                this.needsRender = true;
             });
         }
 
@@ -187,10 +193,12 @@ class PistonViewer {
             smallStart.addEventListener('input', () => {
                 this.lodRanges.smallStart = parseInt(smallStart.value);
                 document.getElementById('lod-small-start-val').textContent = smallStart.value + 'm';
+                this.needsRender = true;
             });
             smallEnd.addEventListener('input', () => {
                 this.lodRanges.smallEnd = parseInt(smallEnd.value);
                 document.getElementById('lod-small-end-val').textContent = smallEnd.value + 'm';
+                this.needsRender = true;
             });
         }
 
@@ -201,10 +209,12 @@ class PistonViewer {
             medStart.addEventListener('input', () => {
                 this.lodRanges.mediumStart = parseInt(medStart.value);
                 document.getElementById('lod-medium-start-val').textContent = medStart.value + 'm';
+                this.needsRender = true;
             });
             medEnd.addEventListener('input', () => {
                 this.lodRanges.mediumEnd = parseInt(medEnd.value);
                 document.getElementById('lod-medium-end-val').textContent = medEnd.value + 'm';
+                this.needsRender = true;
             });
         }
 
@@ -214,18 +224,7 @@ class PistonViewer {
             largeStart.addEventListener('input', () => {
                 this.lodRanges.largeStart = parseInt(largeStart.value);
                 document.getElementById('lod-large-start-val').textContent = largeStart.value + 'm';
-            });
-        }
-
-        // Tex LOD (Legacy)
-        const tSlider = document.getElementById('tex-lod0-slider');
-        const tVal = document.getElementById('tex-lod0-val');
-        if (tSlider) {
-            tSlider.value = this.texThreshold;
-            if (tVal) tVal.textContent = tSlider.value + "m";
-            tSlider.addEventListener('input', () => {
-                this.texThreshold = parseInt(tSlider.value);
-                if (tVal) tVal.textContent = tSlider.value + "m";
+                this.needsRender = true;
             });
         }
 
@@ -286,16 +285,17 @@ class PistonViewer {
 
     createHexGeometry(radius) {
         // 1. CAP GEOMETRY (Top Face Only)
-        // Just a circle (hexagon), 1 segment.
+        // CircleGeometry(radius, 6) starts with vertex at (R,0), which after rotateX(-90) 
+        // results in a FLAT TOP hex (sides are North/South/etc).
         const capGeo = new THREE.CircleGeometry(radius, 6);
         capGeo.rotateX(-Math.PI / 2); // Lay flat
 
         // 2. SKIRT GEOMETRY (Sides Only, Open Ended)
+        // CylinderGeometry(radius, radius, 1, 6, 1, true) starts with vertex at (R,0).
         const skirtGeo = new THREE.CylinderGeometry(radius, radius, 1, 6, 1, true);
-        skirtGeo.rotateY(Math.PI / 6); // Rotated to align points with cap flats
+        // No rotation needed for Flat Top alignment if using CircleGeometry defaults.
 
         // Shift Skirt so top ring is at Y=0, bottom ring is at Y=-1
-        // Cylinder is centered. Height 1. Top at 0.5.
         skirtGeo.translate(0, -0.5, 0);
 
         return { capGeo, skirtGeo };
@@ -444,19 +444,10 @@ class PistonViewer {
         // RE-APPLY shader logic to ensure onBeforeCompile targets THIS new instance
         this.setupMaterialShader(instMat);
 
-        // Branch Geometry Rotation based on Hex Type
         const capG = this.capGeometry.clone();
         const skirtG = this.skirtGeometry.clone();
 
-        if (isPointy) {
-            // Pointy Top: Cap needs 30 deg. Skirt (already 30 in init) needs to be 0 relatively? 
-            // Wait, if skirt is 30 in init, and we want it to be 0 for pointy:
-            skirtG.rotateY(-Math.PI / 6);
-            capG.rotateY(Math.PI / 6);
-        } else {
-            // Flat Top: Cap 0 (init), Skirt 30 (init). Correct.
-        }
-
+        // ALL SCALES are Flat Top in waffle_iron.py
         capG.scale(scale, 1, scale);
         skirtG.scale(scale, 1, scale);
 
@@ -475,15 +466,9 @@ class PistonViewer {
             const d = hexes[i];
             let lx, ly;
 
-            if (isPointy) {
-                // Pointy Top Grid Math (Matches waffle_iron.py > 1.1)
-                lx = d.dq * h_eff + d.dr * 0.5 * h_eff;
-                ly = d.dr * (Math.sqrt(3) / 2) * h_eff;
-            } else {
-                // Flat Top Grid Math (Matches waffle_iron.py <= 1.1)
-                lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
-                ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
-            }
+            // ALWAYS Flat Top Grid Math (Matches waffle_iron.py)
+            lx = d.dq * ((Math.sqrt(3) / 2) * h_eff);
+            ly = d.dr * h_eff + d.dq * 0.5 * h_eff;
 
             matrix.makeTranslation(lx, 0, -ly);
             capMesh.setMatrixAt(i, matrix);
@@ -603,8 +588,9 @@ class PistonViewer {
                          float angle = atan(normal.x, normal.z); 
                          float rawIdx = (angle / 6.28318) * 6.0;
                          
-                         // Reverted to original logic (N=0)
-                         float fIdx = mod(3.0 - rawIdx, 6.0);
+                         // Correct Flat Top Index Mapping
+                         // North=0, NE=1, SE=2, S=3, SW=4, NW=5
+                         float fIdx = mod(1.5 - rawIdx, 6.0);
                          if (fIdx < 0.0) fIdx += 6.0;
                          int neighborIdx = int(fIdx + 0.5) % 6;
                          
@@ -955,22 +941,21 @@ class PistonViewer {
             }
 
             // Handle New Loads
-            if (!tile) {
+            if (!tile && !this.loadingTiles.has(key)) {
                 if (updates < maxUpdates) {
-                    // When loading a new tile, we always start with low-res texture
-                    // and then upgrade if needed.
-                    this.loadNewTile(t, targetLOD, false);
+                    this.loadingTiles.add(key);
+                    this.loadNewTile(t, targetLOD, !isBehind);
                     updates++;
                 }
-            } else {
+            } else if (tile) {
                 // Geo Visibility Update
                 if (!tile.isTransitioning) {
                     this.swapGeometry(tile, targetLOD);
                 }
 
                 // Texture Upgrade Logic
-                // Only upgrade if FRONT and CLOSE
-                const desiredTexFull = (!isBehind && t.d < this.texThreshold);
+                // Only upgrade if FRONT
+                const desiredTexFull = !isBehind;
 
                 if (desiredTexFull && !tile.isFullTex && !tile.loadingTex) {
                     this.upgradeTexture(tile);
@@ -1026,25 +1011,29 @@ class PistonViewer {
             texture.flipY = true;
 
             const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-            this.setupMaterialShader(material);
+            const angle = this.controls.getPolarAngle() * 180 / Math.PI;
+            const isVis = (angle >= 5.5);
 
-            // Note: We do NOT add the base material to materialsToUpdate anymore, 
-            // because we clone it 4 times! We add the clones instead.
-
-            // 2. Binary Data
-            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin`;
-            const buffer = await (await fetch(binUrl)).arrayBuffer();
-            const parsed = this.parseBinaryV3(buffer);
-
-            // 3. Create Stacked Geometry (All 4 Layers)
             const flatMesh = new THREE.Mesh(this.flatGeometry, material);
             flatMesh.position.set(t.lx, 0, t.lz);
+            flatMesh.visible = !isVis; // Hide flat if tilted
             this.scene.add(flatMesh);
 
             const containerGroup = new THREE.Group();
             containerGroup.position.set(t.lx, 0, t.lz);
 
             const activeMaterials = [];
+            // Register base material too so flatMesh rises
+            this.materialsToUpdate.push(material);
+
+            this.setupMaterialShader(material);
+
+            // 2. Binary Data
+            const binUrl = `tiles_bin/sector_${t.q}_${t.r}.bin`;
+            const buffer = await (await fetch(binUrl)).arrayBuffer();
+            const parsed = this.parseBinaryV3(buffer);
+
+
 
             // Load ALL 4 Scales (3=Unit, 2=Small, 1=Med, 0=Large)
             [0, 1, 2, 3].forEach(level => {
@@ -1060,12 +1049,11 @@ class PistonViewer {
                 }
             });
 
-            // Initial Visibility Check
-            const angle = this.controls.getPolarAngle() * 180 / Math.PI;
-            const isVis = (angle >= 5.5);
+
             containerGroup.visible = isVis; // Parent controls all
 
             this.scene.add(containerGroup);
+            this.needsRender = true; // Visual change
 
             const half = TILE_WIDTH_WORLD / 2;
             const bounds = new THREE.Box3(
@@ -1091,7 +1079,10 @@ class PistonViewer {
 
             if (loadFullTexNow) this.upgradeTexture(tileObj);
 
-        } catch (e) { console.error("Tile Load Error", key, e); }
+        } catch (e) {
+            console.error("Tile Load Error", key, e);
+            this.loadingTiles.delete(key); // Allow retry
+        }
     }
 
     async upgradeTexture(tile) {
@@ -1105,6 +1096,16 @@ class PistonViewer {
 
             tile.material.map = fullTex;
             tile.material.needsUpdate = true;
+            this.needsRender = true; // Visual change
+
+            // CRITICAL: Also update all cloned materials!
+            if (tile.clonedMaterials) {
+                tile.clonedMaterials.forEach(m => {
+                    m.map = fullTex;
+                    m.needsUpdate = true;
+                });
+            }
+
             tile.isFullTex = true;
         } catch (e) { }
         tile.loadingTex = false;
@@ -1267,7 +1268,12 @@ class PistonViewer {
 
     animate() {
         requestAnimationFrame(() => this.animate());
-        this.controls.update();
+        const moved = this.controls.update();
+
+        // 1. Check if render is actually needed
+        // If damping is active (moved=true) or logic set a flag, proceed.
+        if (!moved && !this.needsRender) return;
+
         const now = performance.now();
         this.updateRenderStats(now);
         this.updateFps();
@@ -1282,27 +1288,41 @@ class PistonViewer {
         this.maintainCameraAltitudeDuringAnimation(h);
 
         for (const t of this.tiles.values()) {
-            if (t.flatMesh) t.flatMesh.visible = flat; // Show flat if in flat mode
-            if (t.mesh) {
-                t.mesh.visible = !flat; // Show 3D if not flat
-                // If 3D is ON, force Flat OFF to avoid double render/z-fighting
-                if (!flat) t.flatMesh.visible = false;
+            if (flat) {
+                if (t.flatMesh) t.flatMesh.visible = true;
+                if (t.mesh) t.mesh.visible = false;
+            } else {
+                if (t.flatMesh) t.flatMesh.visible = false;
+                if (t.mesh) t.mesh.visible = true;
             }
         }
 
         for (const m of this.materialsToUpdate) {
             if (m.userData.shader) {
-                // ... (Existing uniforms)
                 m.userData.shader.uniforms.uHeightFactor.value = h;
                 m.userData.shader.uniforms.uGradientMode.value = this.gradientMode;
-                m.userData.shader.uniforms.uCameraPos.value.copy(this.camera.position);
+                if (!m.userData.shader.uniforms.uCameraPos) {
+                    m.userData.shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
+                }
+                const uCam = m.userData.shader.uniforms.uCameraPos;
+                if (!uCam.value || !uCam.value.copy) {
+                    uCam.value = new THREE.Vector3();
+                }
+                uCam.value.copy(this.camera.position);
 
+                if (!m.userData.shader.uniforms.uDebugRadii || !m.userData.shader.uniforms.uDebugRadii.value || !m.userData.shader.uniforms.uDebugRadii.value.set) {
+                    m.userData.shader.uniforms.uDebugRadii = { value: new Float32Array(4) };
+                }
                 m.userData.shader.uniforms.uDebugRadii.value.set([
                     this.geoThresholds[0],
                     this.geoThresholds[1],
                     this.geoThresholds[2],
                     this.renderSettings.renderDistance
                 ]);
+
+                if (!m.userData.shader.uniforms.uDebugRingsEnabled || !m.userData.shader.uniforms.uDebugRingsEnabled.value || !m.userData.shader.uniforms.uDebugRingsEnabled.value.set) {
+                    m.userData.shader.uniforms.uDebugRingsEnabled = { value: new THREE.Vector4() };
+                }
                 m.userData.shader.uniforms.uDebugRingsEnabled.value.set(
                     this.debugRings.unit ? 1 : 0,
                     this.debugRings.small ? 1 : 0,
@@ -1329,13 +1349,25 @@ class PistonViewer {
                         maxD = this.renderSettings.renderDistance + 500.0;
                     }
 
+                    if (!m.userData.shader.uniforms.uLodRadii || !m.userData.shader.uniforms.uLodRadii.value || !m.userData.shader.uniforms.uLodRadii.value.set) {
+                        m.userData.shader.uniforms.uLodRadii = { value: new THREE.Vector2(0, 100000.0) };
+                    }
                     m.userData.shader.uniforms.uLodRadii.value.set(minD, maxD);
                 }
             }
         }
 
-        this.updateLOD();
+        // 2. Decide if we should update LOD (only if camera moved > 50m)
+        // FORCE update if loader is visible (to ensure initial check runs)
+        const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
+        if (camDist > 50 || this.needsLODUpdate || !this.loaderHidden) {
+            this.updateLOD();
+            if (camDist > 50) this.lastLODCamPos.copy(this.camera.position); // Only update ref pos if moved
+            this.needsLODUpdate = false;
+        }
+
         this.renderer.render(this.scene, this.camera);
+        this.needsRender = false;
         this.floorState.lastFactor = h;
     }
 }

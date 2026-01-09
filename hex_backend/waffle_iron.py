@@ -194,17 +194,17 @@ def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/a
                 canvas.paste(patch, (px, py))
             except: pass
 
-    res_dirs = { k: os.path.join(output_dir, k) for k in ["full", "high", "low"] }
+    res_dirs = { k: os.path.join(output_dir, k) for k in ["full", "low"] }
     for d in res_dirs.values():
         if not os.path.exists(d): os.makedirs(d)
 
     f_name = f"sector_{SX}_{SY}.webp"
     canvas.save(os.path.join(res_dirs["full"], f_name), "WEBP", quality=WEB_P_QUALITY)
-    
-    # High: 4096 -> 1024
-    c_high = canvas.resize((total_size_px // 4, total_size_px // 4), Image.LANCZOS)
-    c_high.save(os.path.join(res_dirs["high"], f_name), "WEBP", quality=WEB_P_QUALITY)
-    
+
+    # High: 4096 -> 1024 (DISABLED - using only full and low res)
+    # c_high = canvas.resize((total_size_px // 4, total_size_px // 4), Image.LANCZOS)
+    # c_high.save(os.path.join(res_dirs["high"], f_name), "WEBP", quality=WEB_P_QUALITY)
+
     # Low: 4096 -> 256
     c_low = canvas.resize((total_size_px // 16, total_size_px // 16), Image.LANCZOS)
     c_low.save(os.path.join(res_dirs["low"], f_name), "WEBP", quality=WEB_P_QUALITY)
