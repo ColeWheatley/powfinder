@@ -67,11 +67,11 @@ class PistonViewer {
         // Granular LOD Ranges for Stacked Rendering
         this.lodRanges = {
             unitEnd: 400,
-            smallStart: 400,
+            smallStart: 380,
             smallEnd: 2000,
-            mediumStart: 2000,
+            mediumStart: 1980,
             mediumEnd: 3500,
-            largeStart: 3500
+            largeStart: 3480
         };
 
         // Legacy/Sorting Support
@@ -460,10 +460,10 @@ class PistonViewer {
             this.controls.target.set(centerX, 0, centerZ);
             */
             // DEBUG: Circular Building Fault Line
-            const debugX = 59817 - this.worldOrigin.x;
-            const debugZ = -(206664 - this.worldOrigin.y);
-            this.camera.position.set(debugX, 208, debugZ + 100); // Offset Z slightly to look at it?
-            this.controls.target.set(debugX, 12, debugZ);
+            const debugX = 60000 - this.worldOrigin.x;
+            const debugZ = -(206300 - this.worldOrigin.y);
+            this.camera.position.set(debugX, 1200, debugZ); // Bird's eye view at 1200m
+            this.controls.target.set(debugX, 0, debugZ);
             this.controls.update();
 
             // PRE-ALLOCATE GEOMETRIES
