@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
+import { HexSearch } from './search.js';
 
 // --- HEX COORDINATE SYSTEM (Rectangular Sectors) ---
 const UNIT_HEX_PX = 32.0;
@@ -19,7 +20,7 @@ const TILE_HEIGHT_WORLD = SECTOR_WIDTH_METERS;
 const SCALE_Z = 1.0;
 // --- DEBUG OVERRIDE ---
 // Default render distance: 20km (configurable via UI slider)
-const DEFAULT_RENDER_DISTANCE = 20000;
+const DEFAULT_RENDER_DISTANCE = 4000;
 const FLOOR_MODE = 'view-min';
 const LOCK_FLOOR_ON_RISE = true;
 const FLOOR_LOCK_THRESHOLD = 0.02;
@@ -42,7 +43,7 @@ class PistonViewer {
         console.log("Initializing PistonViewer (Priority Radial + LOD)...");
         this.container = document.getElementById('canvas-container');
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0xFF00FF); // Debug Pink
+        this.scene.background = new THREE.Color(0x0a0a0a); // Dark Grey
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 50000);
         this.camera.position.set(0, 800, 0);
@@ -180,6 +181,7 @@ class PistonViewer {
 
         this.initWorld();
         this.animate();
+        window.pistonViewer = this;
     }
 
     initWorkers() {
@@ -308,30 +310,47 @@ class PistonViewer {
         const rdSlider = document.getElementById('render-distance-slider');
         const rdVal = document.getElementById('render-distance-val');
         if (rdSlider) {
-            rdSlider.value = this.renderSettings.renderDistance / 1000; // Convert to km
+            rdSlider.value = this.renderSettings.renderDistance / 1000;
             if (rdVal) rdVal.textContent = (this.renderSettings.renderDistance / 1000) + "km";
             rdSlider.addEventListener('input', () => {
-                this.renderSettings.renderDistance = parseInt(rdSlider.value) * 1000; // Convert back to meters
+                this.renderSettings.renderDistance = parseInt(rdSlider.value) * 1000;
                 if (rdVal) rdVal.textContent = rdSlider.value + "km";
                 this.updateFogAndClip();
+            });
+        }
+
+        // Texture Upgrade
+        const texSlider = document.getElementById('tex-upgrade-slider');
+        const texVal = document.getElementById('tex-upgrade-val');
+        if (texSlider) {
+            texSlider.value = this.texThreshold;
+            if (texVal) texVal.textContent = this.texThreshold + "m";
+            texSlider.addEventListener('input', () => {
+                this.texThreshold = parseInt(texSlider.value);
+                if (texVal) texVal.textContent = this.texThreshold + "m";
+                this.needsLODUpdate = true;
             });
         }
 
         // Gradient Toggle
         const terrainBtn = document.getElementById('gradient-terrain');
         const gradientBtn = document.getElementById('gradient-slope');
-
         if (terrainBtn && gradientBtn) {
             terrainBtn.addEventListener('click', () => {
                 this.gradientMode = 0.0;
+                terrainBtn.classList.add('active');
+                gradientBtn.classList.remove('active');
+                // Standard color updates handled by CSS class now preferably, 
+                // but let's maintain consistency with existing code
                 terrainBtn.style.background = '#74b9ff';
                 terrainBtn.style.color = '#fff';
                 gradientBtn.style.background = 'transparent';
                 gradientBtn.style.color = '#ccc';
             });
-
             gradientBtn.addEventListener('click', () => {
                 this.gradientMode = 1.0;
+                gradientBtn.classList.add('active');
+                terrainBtn.classList.remove('active');
                 gradientBtn.style.background = '#74b9ff';
                 gradientBtn.style.color = '#fff';
                 terrainBtn.style.background = 'transparent';
@@ -348,7 +367,24 @@ class PistonViewer {
             });
         }
 
+        this.syncLODUI();
+    }
 
+    syncLODUI() {
+        const r = this.lodRanges;
+        const set = (id, val) => {
+            const el = document.getElementById(id);
+            const valEl = document.getElementById(id + '-val');
+            if (el) el.value = val;
+            if (valEl) valEl.textContent = Math.round(val) + (id.includes('start') || id.includes('end') ? 'm' : '');
+        };
+
+        set('lod-unit-end', r.unitEnd);
+        set('lod-small-start', r.smallStart);
+        set('lod-small-end', r.smallEnd);
+        set('lod-medium-start', r.mediumStart);
+        set('lod-medium-end', r.mediumEnd);
+        set('lod-large-start', r.largeStart);
     }
 
     createHexGeometry(radius) {
@@ -472,7 +508,7 @@ class PistonViewer {
         const dist = this.renderSettings.renderDistance;
         const fogEnd = dist;
         const fogStart = dist * 0.6;
-        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0xFF00FF, fogStart, fogEnd); // Match Bg
+        if (!this.scene.fog) this.scene.fog = new THREE.Fog(0x0a0a0a, fogStart, fogEnd); // Match Bg
         this.scene.fog.near = fogStart;
         this.scene.fog.far = fogEnd;
         this.camera.far = dist + 2000;
@@ -492,11 +528,20 @@ class PistonViewer {
             this.camera.position.set(centerX, 800, centerZ);
             this.controls.target.set(centerX, 0, centerZ);
             */
-            // DEBUG: Circular Building Fault Line
+
+            // Kappl Startup: 47.06689, 10.35909 (EPSG:31254 -> ~1979.4, 214214.5)
+            // Manual world pos for the Austrian GK West projection
+            const startX = 1979.4 - this.worldOrigin.x;
+            const startZ = -(214214.5 - this.worldOrigin.y);
+
+            /*
+            // OLD DEBUG: Circular Building Fault Line (Stubai area)
             const debugX = 60000 - this.worldOrigin.x;
             const debugZ = -(206300 - this.worldOrigin.y);
-            this.camera.position.set(debugX, 1200, debugZ); // Bird's eye view at 1200m
-            this.controls.target.set(debugX, 0, debugZ);
+            */
+
+            this.camera.position.set(startX, 1200, startZ);
+            this.controls.target.set(startX, 0, startZ);
             this.controls.update();
 
             // PRE-ALLOCATE GEOMETRIES
@@ -719,8 +764,8 @@ class PistonViewer {
                 v = clamp(v, 0.0, 1.0);
                 vec4 texColor = texture2D(map, vec2(u, v));
                 
-                // Fallback for huge hexes exceeding padding (Debug Pink)
-                if (outOfBounds) texColor = vec4(1.0, 0.0, 1.0, 1.0);
+                // Fallback for huge hexes exceeding padding (Dark Grey)
+                if (outOfBounds) texColor = vec4(0.04, 0.04, 0.04, 1.0);
 
                 // --- LIGHTING (Fake AO + Side Jitter) ---
                 float ao = 1.0 - (vSkirtY * 0.4); 
@@ -925,8 +970,9 @@ class PistonViewer {
 
             // 2. TEXTURE Frustum Culling (Generous + Buffer)
             // Widened cone: +/- 100 degrees (cos(100) ~= -0.2)
-            // Plus: 1000m Proximity Buffer (approx 1 tile width)
-            const isEffectivelyFrontTex = (dot > -0.2) || (t.d < 1000);
+            // Plus: Proximity Buffer (configurable)
+            // AND Hard Limit: 5000m
+            const isEffectivelyFrontTex = ((dot > -0.2) || (t.d < this.texThreshold)) && (t.d < 5000);
 
             if (t.d > distLimit) { // Use actual distance for culling
                 if (tile) this.unloadTile(key); // Out of range
@@ -945,10 +991,12 @@ class PistonViewer {
                 targetLOD = 0;
             }
 
-            // Handle New Loads
+            // Handle New Loads (Hard Limit 5000m for BINS too)
             if (!tile && !this.loadingTiles.has(key)) {
-                this.loadingTiles.add(key);
-                this.loadQueue.push({ t, targetLOD, loadFullTexNow: isEffectivelyFrontTex });
+                if (t.d < 5000) {
+                    this.loadingTiles.add(key);
+                    this.loadQueue.push({ t, targetLOD, loadFullTexNow: isEffectivelyFrontTex });
+                }
             } else if (tile) {
                 // Geo Visibility Update
                 if (!tile.isTransitioning) {
@@ -1254,6 +1302,9 @@ class PistonViewer {
             loader.classList.add('hide');
             // Clean up DOM after fade
             setTimeout(() => { loader.style.display = 'none'; }, 600);
+
+            // Init Search Bar now that we are live
+            this.searchBar = new HexSearch();
         }
     }
 
@@ -1369,6 +1420,7 @@ class PistonViewer {
             this.lodRanges = { ...preset };
             this.isRefining = false;
             this.needsRender = true;
+            this.syncLODUI();
         }
     }
 
@@ -1444,6 +1496,7 @@ class PistonViewer {
             this.isRefining = true;
             this.needsRender = true; // Force a frame
             this.needsLODUpdate = true; // FORCE LOD check to recognize new ranges
+            this.syncLODUI();
         } else if (isDone && this.isRefining) {
             this.log("Antisintering Complete: Maximum Resolution Reached.", "success");
             this.isRefining = false;

@@ -256,8 +256,11 @@
 
         .comparison-container img {
             width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
             border-radius: 12px;
             border: 1px solid var(--border);
+            display: block;
         }
 
         .comparison-caption {
@@ -310,6 +313,157 @@
                 font-size: 2rem;
             }
         }
+
+        /* Diamond Demo */
+        .diamond-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            margin: 40px 0;
+            flex-wrap: wrap;
+        }
+
+        #diamond-canvas {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .diamond-legend {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .legend-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 3px solid transparent;
+        }
+
+        .legend-row strong {
+            display: block;
+            color: white;
+            font-size: 1.1rem;
+        }
+
+        .pulse-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #555;
+            box-shadow: 0 0 10px currentColor;
+        }
+
+
+        /* Image Comparison Slider (Clip-Path Method) */
+        .comparison-slider {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 3 / 2;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 2px solid var(--border);
+            user-select: none;
+            cursor: ew-resize;
+            margin: 40px 0;
+            background: #000;
+        }
+
+        .slider-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* The Background Layer (Strava) */
+        .slider-after {
+            z-index: 1;
+        }
+
+        /* The Overlay Layer (PowFinder) */
+        .slider-before {
+            z-index: 2;
+            width: 100% !important;
+            /* Always full width */
+            height: 100%;
+            top: 0;
+            left: 0;
+            position: absolute;
+            clip-path: inset(0 25% 0 0);
+            /* Reveals left 75%, showing 25% Strava on the right */
+        }
+
+        /* The Vertical Handle */
+        .slider-handle {
+            position: absolute;
+            top: 0;
+            left: 75%;
+            width: 3px;
+            height: 100%;
+            background: var(--blue);
+            z-index: 3;
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+
+        .slider-circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44px;
+            height: 44px;
+            background: var(--blue);
+            border: 3px solid var(--bg);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(116, 185, 255, 0.4);
+            pointer-events: auto;
+        }
+
+        .slider-circle svg {
+            color: var(--bg);
+            width: 20px;
+            height: 20px;
+        }
+
+        .slider-label {
+            position: absolute;
+            top: 20px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            z-index: 4;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-transform: uppercase;
+        }
+
+        .label-before {
+            left: 20px;
+            color: var(--blue);
+        }
+
+        .label-after {
+            right: 20px;
+            color: #ff6b6b;
+        }
     </style>
 </head>
 
@@ -331,6 +485,22 @@
         <section id="sampling">
             <h2>01. The <b>Dither</b> Effect</h2>
             <div class="glass-panel">
+                <div class="comparison-container" style="justify-content: center; gap: 40px; margin-bottom: 40px;">
+                    <div style="text-align: center;">
+                        <img src="devito.jpg"
+                            style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 2px solid var(--pink); margin-bottom: 10px;">
+                        <span
+                            style="display: block; font-size: 0.7rem; color: var(--pink); letter-spacing: 1px; font-weight: 800;">D.
+                            DEVITO</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <img src="homer.png"
+                            style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 2px solid var(--blue); margin-bottom: 10px;">
+                        <span
+                            style="display: block; font-size: 0.7rem; color: var(--blue); letter-spacing: 1px; font-weight: 800;">H.
+                            SIMPSON</span>
+                    </div>
+                </div>
                 <p>
                     Standard square grids suffer from <strong>linear aliasing</strong>. They create rigid horizontal and
                     vertical "staircases" that the human eye is exceptionally good at spotting. Hexagons, by contrast,
@@ -345,7 +515,6 @@
                 <div class="controls">
                     <button class="btn active" id="btn-devito">DOWNSAMPLE: DEVITO</button>
                     <button class="btn" id="btn-homer">UPSAMPLE: HOMER</button>
-                    <button class="btn" id="btn-mountains">TERRAIN: TYROL</button>
                 </div>
 
                 <div class="prover-grid">
@@ -436,19 +605,20 @@
 
                 <p>
                     Every byte has a purpose. We store <strong>Vertical Deltas</strong> in decimeter precision to handle
-                    the "Uber-Skirt" terrain seams, and <strong>Baked Normals</strong> for smooth, cinematic lighting
+                    the dynamic mesh seams, and <strong>Baked Normals</strong> for smooth, cinematic lighting
                     without the per-frame overhead of normal calculation.
                 </p>
             </div>
         </section>
 
-        <section id="uber-skirt">
-            <h2>03. The <b>Uber-Skirt</b></h2>
+        <section id="dynamic-assembly">
+            <h2>03. Seamless <b>Dynamic Assembly</b></h2>
             <div class="glass-panel">
                 <p>
-                    Unlike a traditional grid where every cell is independent, PowFinder uses an "Ownership Model" to
-                    handle terrain gaps. To achieve a seamless 3D mesh with <strong>zero overlapping geometry</strong>,
-                    each hex "owns" exactly three neighbors.
+                    PowFinder uses a <strong>Dynamic Ownership Model</strong> to handle real-time terrain stitching.
+                    By assigning each hex exactly three "owned" neighbors, the engine can calculate edge alignment
+                    on-the-fly. This prevents <strong>overlapping geometry</strong> and ensures a seamless transition
+                    between varying detail levels.
                 </p>
 
                 <div class="comparison-container">
@@ -471,30 +641,224 @@
         </section>
 
         <section id="shading">
-            <h2>04. <b>3-Axis</b> Gradients</h2>
+            <h2>04. <b>3-Axis</b> Diamond Sampling</h2>
             <div class="glass-panel">
                 <p>
-                    In a square grid, a pixel has only 4 neighbors. A Hex has <strong>6 neighbors</strong>. This isn't
-                    just a geometry flex—it's a visualization superpower.
+                    In a square grid, a pixel centered on a cliff is just an "average" height. This leads to
+                    <strong>cliff aliasing</strong>, where sharp drops look like soft rolling hills.
                 </p>
                 <p>
-                    By coloring the three visible sides of each hex piston differently based on their local
-                    neighbor-slopes, we provide <strong>three axes of gradient visualization</strong>. This helps skiers
-                    spot 40° terrain traps and 30° powder stashes with sub-hex precision.
+                    PowFinder solves this by treating every edge as a unique data channel. By sampling the "Diamond"
+                    (the quad formed between two hex centers), we can render a 90° cliff on the <strong>South
+                        Face</strong> while keeping the <strong>South-East Face</strong> perfectly flat.
                 </p>
-                <img src="../hillshade series.png" style="width:100%; border-radius: 12px; margin-top: 20px;"
-                    alt="Hillshade Analysis">
+
+                <div class="diamond-wrapper">
+                    <svg id="diamond-svg" width="500" height="340" viewBox="0 0 500 340"
+                        style="background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid var(--border);">
+                        <defs>
+                            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                            </filter>
+                        </defs>
+
+                        <!-- 
+                            PISTON LOGIC:
+                            All hexes extrude down to a common "Floor" (Base Y).
+                            Height is determined by the "Cap Y".
+
+                            Grid offsets:
+                            Center: (0,0)
+                            SW (Left): (-67, 45) -> Moved 'closer' (down) slightly
+                            SE (Right): (+67, 45)
+                        -->
+
+                        <g transform="translate(250, 60) scale(1.0)">
+
+                            <!-- ================= CENTER HEX (BACKGROUND) ================= -->
+                            <!-- High Piston -->
+                            <!-- Pos: 0, 0 -->
+                            <!-- Cap Y: 0 -->
+                            <g transform="translate(0, 0)">
+                                <title>Center Piston</title>
+
+                                <!-- LEFT SIDE (SW Face) - Pulses GREEN -->
+                                <path d="M-45 0 L-22.5 39 L-22.5 179 L-45 140 Z" fill="#1e293b">
+                                    <animate attributeName="fill" values="#1e293b; #10b981; #1e293b" dur="4s"
+                                        repeatCount="indefinite" calcMode="spline"
+                                        keySplines="0.4 0 0.2 1; 0.4 0 0.2 1" />
+                                </path>
+
+                                <!-- CENTER SIDE (S Face) - Static Dark -->
+                                <path d="M-22.5 39 L22.5 39 L22.5 179 L-22.5 179 Z" fill="#0f172a" />
+
+                                <!-- RIGHT SIDE (SE Face) - Pulses YELLOW -->
+                                <path d="M22.5 39 L45 0 L45 140 L22.5 179 Z" fill="#020617">
+                                    <animate attributeName="fill" values="#020617; #eab308; #020617" dur="4s"
+                                        repeatCount="indefinite" calcMode="spline"
+                                        keySplines="0.4 0 0.2 1; 0.4 0 0.2 1" />
+                                </path>
+
+                                <!-- Cap Base (Dark Grey) -->
+                                <path d="M45 0 L22.5 39 L-22.5 39 L-45 0 L-22.5 -39 L22.5 -39 Z" fill="#334155"
+                                    stroke="white" stroke-width="2" />
+
+                                <!-- GREEN TRIANGLE (SW Sector, Matches Left's NE) -->
+                                <path d="M0 0 L-45 0 L-22.5 39 Z" fill="#10b981" fill-opacity="0.9" />
+
+                                <!-- YELLOW TRIANGLE (SE Sector, Matches Right's NW) -->
+                                <path d="M0 0 L22.5 39 L45 0 Z" fill="#eab308" fill-opacity="0.9" />
+                            </g>
+
+                            <!-- ================= LEFT HEX (FOREGROUND LEFT) ================= -->
+                            <!-- Med Piston -->
+                            <!-- Grid Pos: -67, 95 (Moved down/closer) -->
+                            <g transform="translate(-67, 95)">
+                                <title>Left Piston</title>
+                                <!-- Cap Y: 15 (Medium High) -->
+                                <path d="M-45 15 L-22.5 54 L-22.5 134 L-45 95 Z" fill="#1e293b" /> <!-- Left Side -->
+                                <path d="M-22.5 54 L22.5 54 L22.5 134 L-22.5 134 Z" fill="#0f172a" />
+                                <!-- Front Side -->
+                                <path d="M22.5 54 L45 15 L45 95 L22.5 134 Z" fill="#020617" /> <!-- Right Side -->
+
+                                <!-- Cap Base -->
+                                <path d="M45 15 L22.5 54 L-22.5 54 L-45 15 L-22.5 -24 L22.5 -24 Z" fill="#1e293b"
+                                    stroke="#475569" stroke-width="1" />
+
+                                <!-- GREEN TRIANGLE (NE Sector, Matches Center's SW) -->
+                                <path d="M0 15 L22.5 -24 L45 15 Z" fill="#10b981" fill-opacity="0.9" />
+                            </g>
+
+                            <!-- ================= RIGHT HEX (FOREGROUND RIGHT) ================= -->
+                            <!-- Low Piston -->
+                            <!-- Grid Pos: 67, 95 (Moved down/closer) -->
+                            <g transform="translate(67, 95)">
+                                <title>Right Piston</title>
+                                <!-- Cap Y: 35 (Lowest) -->
+                                <path d="M-45 35 L-22.5 74 L-22.5 134 L-45 95 Z" fill="#1e293b" />
+                                <path d="M-22.5 74 L22.5 74 L22.5 134 L-22.5 134 Z" fill="#0f172a" />
+                                <path d="M22.5 74 L45 35 L45 95 L22.5 134 Z" fill="#020617" />
+
+                                <!-- Cap Base -->
+                                <path d="M45 35 L22.5 74 L-22.5 74 L-45 35 L-22.5 -4 L22.5 -4 Z" fill="#1e293b"
+                                    stroke="#475569" stroke-width="1" />
+
+                                <!-- YELLOW TRIANGLE (NW Sector, Matches Center's SE) -->
+                                <path d="M0 35 L-45 35 L-22.5 -4 Z" fill="#eab308" fill-opacity="0.9" />
+                            </g>
+
+                        </g>
+
+                    </svg>
+
+                    <div class="diamond-legend">
+                        <div class="legend-row" style="border-color: #10b981;">
+                            <div class="pulse-dot" style="background: #10b981;"></div>
+                            <div>
+                                <strong style="color: #10b981;">Green Channel</strong>
+                                <span style="font-size: 0.8rem; opacity: 0.7; color: #ccc;">South-West Diamond
+                                    Pair</span>
+                            </div>
+                        </div>
+                        <div class="legend-row" style="border-color: #eab308;">
+                            <div class="pulse-dot" style="background: #eab308;"></div>
+                            <div>
+                                <strong style="color: #eab308;">Yellow Channel</strong>
+                                <span style="font-size: 0.8rem; opacity: 0.7; color: #ccc;">South-East Diamond
+                                    Pair</span>
+                            </div>
+                        </div>
+                        <p style="font-size: 0.9rem; margin-top: 20px; line-height: 1.5; color: #94a3b8;">
+                            Instead of averaging heights, PowFinder creates a unique <strong>"Slope Diamond"</strong>
+                            for every edge pair. This allows the Green interface to have a steep cliff while the Yellow
+                            interface stays gentle, despite sharing the same central vertex.
+                        </p>
+                    </div>
+                </div>
+
+                <p style="text-align: center; font-style: italic; font-size: 0.9rem; opacity: 0.6;">
+                    Live visualization of decoupled edge attributes.
+                </p>
             </div>
         </section>
 
+        <section id="real-world">
+            <h2>05. <b>Real-World</b> Reconstruction</h2>
+            <div class="glass-panel">
+                <p>
+                    Traditional maps prioritize routes and flat imagery. PowFinder prioritizes <strong>terrain
+                        geometry</strong> using our proprietary <strong>Antisintering</strong> LOD strategy.
+                </p>
+                <p>
+                    When you stop navigating, the engine triggers a <strong>High-Resolution Snap</strong>,
+                    progressively filling in the foreground with unit-scale hexes (6m resolution). Use the sliders below
+                    to compare our cinematic hexagonal reconstruction against the flat legacy satellite maps.
+                </p>
+
+                <!-- SLIDER 1: ROTADL -->
+                <div class="comparison-slider" data-slider>
+                    <img src="strava_rotadl.jpg" class="slider-image slider-after">
+                    <div class="slider-before">
+                        <img src="rotadl.png" class="slider-image">
+                        <span class="slider-label label-before">POWFINDER 3D: ROTADL</span>
+                    </div>
+                    <span class="slider-label label-after">STRAVA TRIANGLE DUMPSTER WATER</span>
+                    <div class="slider-handle">
+                        <div class="slider-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                <path d="M18 8L22 12L18 16M6 8L2 12L6 16" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SLIDER 2: EISGRAT -->
+                <div class="comparison-slider" data-slider>
+                    <img src="strava_eisgrat.jpg" class="slider-image slider-after">
+                    <div class="slider-before">
+                        <img src="eisgrat.png" class="slider-image">
+                        <span class="slider-label label-before">POWFINDER 3D: EISGRAT</span>
+                    </div>
+                    <span class="slider-label label-after">STRAVA TRIANGLE DUMPSTER WATER</span>
+                    <div class="slider-handle">
+                        <div class="slider-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                <path d="M18 8L22 12L18 16M6 8L2 12L6 16" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SLIDER 3: GLACIER -->
+                <div class="comparison-slider" data-slider>
+                    <img src="strava_glacier.jpg" class="slider-image slider-after">
+                    <div class="slider-before">
+                        <img src="glacier.png" class="slider-image">
+                        <span class="slider-label label-before">POWFINDER 3D: GLACIER</span>
+                    </div>
+                    <span class="slider-label label-after">STRAVA TRIANGLE DUMPSTER WATER</span>
+                    <div class="slider-handle">
+                        <div class="slider-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                <path d="M18 8L22 12L18 16M6 8L2 12L6 16" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <p style="text-align: center; font-style: italic;">
+                    Notice how the hex grid brings shadow, occlusion, and slope variance to terrain that looks "flat"
+                    on standard maps.
+                </p>
+            </div>
+        </section>
     </main>
 
     <footer>
-        <h2 style="justify-content: center; margin-bottom: 50px;">Ready to find some <b>Powder?</b></h2>
-        <a href="../app/" class="launch-btn">LAUNCH VIEWER →</a>
-        <p style="margin-top: 50px; font-size: 0.9rem; opacity: 0.5;">
-            Developed by PowFinder Team. All Rights Reserved.
-        </p>
+        <h2 style="justify-content: center; margin-bottom: 50px;">Ready to find some <b>Steeps?</b></h2>
+        <a href="https://wheatley.cloud/powfinder/hexagons/app" class="launch-btn">LAUNCH VIEWER →</a>
+
     </footer>
 
     <script>
@@ -506,9 +870,9 @@
         let mode = 'devito';
 
         const assets = {
-            devito: { src: 'devito.jpg', crop: 600, xOff: 150 },
-            homer: { src: 'homer.png', crop: 190, xOff: 0 },
-            mountains: { src: 'square_kappl.png', crop: 800, xOff: 0 }
+            devito: { src: 'devito.jpg', crop: 600, xOff: 150, yOff: 0 },
+            homer: { src: 'homer.png', crop: 190, xOff: 0, yOff: 0 },
+            mountains: { src: 'square_kappl.png', crop: 800, xOff: 0, yOff: 0 }
         };
 
         async function runProver() {
@@ -524,7 +888,7 @@
             const off = document.createElement('canvas');
             off.width = off.height = config.crop;
             const octx = off.getContext('2d');
-            octx.drawImage(img, config.xOff, 0, config.crop, config.crop, 0, 0, config.crop, config.crop);
+            octx.drawImage(img, config.xOff, config.yOff || 0, config.crop, config.crop, 0, 0, config.crop, config.crop);
             const rawData = octx.getImageData(0, 0, config.crop, config.crop).data;
 
             const S1_RES = mode === 'devito' ? 64 : (mode === 'homer' ? 32 : 128);
@@ -651,9 +1015,7 @@
         document.getElementById('btn-homer').onclick = () => {
             mode = 'homer'; updateBtns(); runProver();
         };
-        document.getElementById('btn-mountains').onclick = () => {
-            mode = 'mountains'; updateBtns(); runProver();
-        };
+
 
         function updateBtns() {
             document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
@@ -661,6 +1023,39 @@
         }
 
         runProver();
+
+        // --- SLIDER LOGIC ---
+        document.querySelectorAll('[data-slider]').forEach(slider => {
+            const before = slider.querySelector('.slider-before');
+            const handle = slider.querySelector('.slider-handle');
+
+            const moveSlider = (e) => {
+                const rect = slider.getBoundingClientRect();
+                const x = (e.pageX || (e.touches && e.touches[0].pageX)) - rect.left;
+                let percent = (x / rect.width) * 100;
+
+                if (percent < 0) percent = 0;
+                if (percent > 100) percent = 100;
+
+                before.style.clipPath = `inset(0 ${100 - percent}% 0 0)`;
+                handle.style.left = `${percent}%`;
+            };
+
+            const onMouseMove = (e) => {
+                if (e.buttons === 1) moveSlider(e);
+            };
+
+            slider.addEventListener('mousemove', onMouseMove);
+            slider.addEventListener('mousedown', moveSlider);
+            slider.addEventListener('touchstart', (e) => {
+                // Prevent scrolling when interacting with slider on touch
+                // e.preventDefault(); 
+                moveSlider(e);
+            }, { passive: true });
+            slider.addEventListener('touchmove', (e) => {
+                moveSlider(e);
+            }, { passive: true });
+        });
     </script>
 </body>
 

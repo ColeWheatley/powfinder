@@ -19,6 +19,7 @@ from shapely.geometry import Polygon, box
 from multiprocessing import Pool, cpu_count
 import sys
 import struct
+import subprocess
 from pyproj import Transformer
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,13 @@ def latlon_to_world_meters(lat, lon):
     return transformer.transform(lon, lat)
 
 # =============================================================================
+# S3 CONFIGURATION
+# =============================================================================
+S3_ENABLED = True
+S3_BUCKET = "wheatley.cloud"
+S3_PREFIX = "powfinder/hexagons/app"
+
+# =============================================================================
 # CONSTANTS & CONFIGURATION
 # =============================================================================
 TEXTURE_PADDING_PX = 64  
@@ -38,9 +46,51 @@ DEBUG_MODE = False
 TARGET_LAT = 46.98705560886202
 TARGET_LON = 11.115050838788871
 
+# Kappl: 47.06689, 10.35909
+TARGET_LAT = 47.06689
+TARGET_LON = 10.35909
+
+# Stubai (Commented Out)
+# TARGET_LAT = 46.98705560886202
+# TARGET_LON = 11.115050838788871
+
 DEM_PATH = "hex_backend/DGM_Tirol_5m_epsg31254_2006_2020.tif"
 GRADIENT_PATH = "hex_backend/DGM_Tirol_gradient_cached.tif" # New Graph Cache
 AERIAL_DIR = "hex_backend/aerial_tifs"
+
+def upload_to_s3(local_path):
+    """
+    Uploads a file to S3 immediately.
+    Maps local 'frontend/hexagons/app/...' to S3 'powfinder/hexagons/app/...'
+    """
+    if not S3_ENABLED: return
+    
+    # Standardize path
+    local_path = os.path.normpath(local_path)
+    
+    # Find relative path from the app root
+    # local_path is like /Users/.../frontend/hexagons/app/tiles_bin/sector_1_2.bin
+    # We want the part after 'hexagons/app/'
+    parts = local_path.split(os.sep)
+    try:
+        idx = parts.index("app")
+        rel_path = "/".join(parts[idx+1:])
+    except ValueError:
+        rel_path = os.path.basename(local_path)
+
+    s3_url = f"s3://{S3_BUCKET}/{S3_PREFIX}/{rel_path}"
+    
+    cmd = ["aws", "s3", "cp", local_path, s3_url, "--quiet"]
+    
+    # Set Cache-Control for immutable assets
+    if local_path.endswith(('.webp', '.bin')):
+        cmd += ["--cache-control", "max-age=31536000"]
+        
+    try:
+        # Launch in background, do not wait
+        subprocess.Popen(cmd)
+    except Exception as e:
+        print(f"⚠️  S3 Upload failed for {local_path}: {e}")
 
 # =============================================================================
 # BAKING FUNCTIONS
@@ -191,9 +241,15 @@ def bake_sector_textures(SX, SY, valid_tifs, output_dir="frontend/hexagons/app/a
         if not os.path.exists(d): os.makedirs(d)
 
     f_name = f"sector_{SX}_{SY}.webp"
-    canvas.save(os.path.join(res_dirs["full"], f_name), "WEBP", quality=WEB_P_QUALITY)
+    full_path = os.path.join(res_dirs["full"], f_name)
+    low_path = os.path.join(res_dirs["low"], f_name)
+
+    canvas.save(full_path, "WEBP", quality=WEB_P_QUALITY)
+    upload_to_s3(full_path)
+
     c_low = canvas.resize((total_size_px // 16, total_size_px // 16), Image.LANCZOS)
-    c_low.save(os.path.join(res_dirs["low"], f_name), "WEBP", quality=WEB_P_QUALITY)
+    c_low.save(low_path, "WEBP", quality=WEB_P_QUALITY)
+    upload_to_s3(low_path)
 
 def get_diamond_stats(grad_ds, p1, p2):
     """
@@ -459,7 +515,10 @@ def bake_sector_binary(SX, SY, dem_data, dem_transform, grad_ds, output_dir="fro
 
         blob += buf
     
-    with open(os.path.join(output_dir, f"sector_{SX}_{SY}.bin"), "wb") as f: f.write(blob)
+    bin_path = os.path.join(output_dir, f"sector_{SX}_{SY}.bin")
+    with open(bin_path, "wb") as f: 
+        f.write(blob)
+    upload_to_s3(bin_path)
 
 def main():
     print("🧇 Waffle Iron v4.0: Uber-Skirt + Normals")
@@ -480,19 +539,40 @@ def main():
             with rasterio.open(f) as src: valid_tifs.append({"path": f, "poly": box(*src.bounds)})
         except: pass
 
-    tx, ty = latlon_to_world_meters(TARGET_LAT, TARGET_LON)
-    r = 2
-    min_sx, min_sy = coord_util.world_to_sector_id(tx - r*819, ty - r*819)
-    max_sx, max_sy = coord_util.world_to_sector_id(tx + r*819, ty + r*819)
+    # Calculate Bounds from TIFs
+    print(f"Scanning TIF bounds for {len(valid_tifs)} files...")
+    all_min_x, all_min_y = 1e12, 1e12
+    all_max_x, all_max_y = -1e12, -1e12
+
+    for t in valid_tifs:
+        b = t["poly"].bounds # (minx, miny, maxx, maxy)
+        all_min_x = min(all_min_x, b[0])
+        all_min_y = min(all_min_y, b[1])
+        all_max_x = max(all_max_x, b[2])
+        all_max_y = max(all_max_y, b[3])
+
+    min_sx, min_sy = coord_util.world_to_sector_id(all_min_x, all_min_y)
+    max_sx, max_sy = coord_util.world_to_sector_id(all_max_x, all_max_y)
+
+    print(f"Global Sector Range: SX[{min_sx} to {max_sx}], SY[{min_sy} to {max_sy}]")
 
     for sx in range(min_sx, max_sx + 1):
         for sy in range(min_sy, max_sy + 1):
-            if dem_poly.intersects(box(*coord_util.sector_id_to_bounds_meters(sx, sy))):
-                print(f"Cooking Sector {sx}, {sy}...")
-                bake_sector_textures(sx, sy, valid_tifs)
-                bake_sector_binary(sx, sy, dem_data, dem_transform, grad_ds)
+            sector_box = box(*coord_util.sector_id_to_bounds_meters(sx, sy))
+            if dem_poly.intersects(sector_box):
+                # Only cook if it actually overlaps with one of our imagery TIFs
+                # (Prevents cooking empty green/black space if DEM is larger than imagery)
+                has_imagery = any(t["poly"].intersects(sector_box) for t in valid_tifs)
+                if has_imagery:
+                    print(f"Cooking Sector {sx}, {sy}...")
+                    bake_sector_textures(sx, sy, valid_tifs)
+                    bake_sector_binary(sx, sy, dem_data, dem_transform, grad_ds)
+                    gc.collect()
 
     generate_manifest.generate_manifest()
+    # Upload manifest last
+    manifest_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/hexagons/app/tile_manifest.json"))
+    upload_to_s3(manifest_path)
     print("Done.")
 
 if __name__ == "__main__": main()
