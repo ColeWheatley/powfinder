@@ -89,7 +89,7 @@ class PistonViewer {
         // LOD Configurations
         this.LOD_CONFIG = {
             DESKTOP: {
-                MOVING: { unitEnd: 0, smallStart: 0, smallEnd: 2000, mediumStart: 1980, mediumEnd: 3500, largeStart: 3480 },
+                MOVING: { unitEnd: 0, smallStart: 0, smallEnd: 0, mediumStart: 0, mediumEnd: 0, largeStart: 0 },
                 TARGET: { unitEnd: 2000, smallStart: 1980, smallEnd: 5000, mediumStart: 4980, mediumEnd: 10000, largeStart: 9980 }
             },
             MOBILE: {
@@ -519,26 +519,24 @@ class PistonViewer {
         try {
             const res = await fetch('tile_manifest.json');
             this.manifest = await res.json();
-            const { min_x, min_y, max_x, max_y } = this.manifest.bounds;
+            const { min_x, min_y } = this.manifest.bounds;
             this.worldOrigin = { x: min_x, y: min_y };
 
-            /*
-            const centerX = (min_x + max_x) / 2 - min_x;
-            const centerZ = -((min_y + max_y) / 2 - min_y);
-            this.camera.position.set(centerX, 800, centerZ);
-            this.controls.target.set(centerX, 0, centerZ);
-            */
+            // --- NEW: Spatial Grid Index (The "Phonebook") ---
+            this.manifestGrid = new Map();
+            for (const t of this.manifest.tiles) {
+                // Post-calc world positions (Match worker's centering logic)
+                t.lx = t.x - this.worldOrigin.x;
+                t.lz = -(t.y - this.worldOrigin.y);
 
-            // Kappl Startup: 47.06689, 10.35909 (EPSG:31254 -> ~1979.4, 214214.5)
+                // Store by "Q_R" for instant lookup
+                this.manifestGrid.set(`${t.q}_${t.r}`, t);
+            }
+            // -----------------------------------------------
+
             // Manual world pos for the Austrian GK West projection
             const startX = 1979.4 - this.worldOrigin.x;
             const startZ = -(214214.5 - this.worldOrigin.y);
-
-            /*
-            // OLD DEBUG: Circular Building Fault Line (Stubai area)
-            const debugX = 60000 - this.worldOrigin.x;
-            const debugZ = -(206300 - this.worldOrigin.y);
-            */
 
             this.camera.position.set(startX, 1200, startZ);
             this.controls.target.set(startX, 0, startZ);
@@ -638,17 +636,17 @@ class PistonViewer {
                 uniform float uFloorOffset;
                 uniform vec3 uCameraPos;
                 uniform vec2 uLodRadii;
-                
+
                 attribute vec4 instanceNZ_1;
                 attribute vec4 instanceNZ_2;
-                
+
                 // NEW: Vec3 for Slopes/Deltas, Vec2 for Normal
                 attribute vec3 instanceSlopes;
-                attribute vec3 instanceDeltas; 
+                attribute vec3 instanceDeltas;
                 attribute vec2 instanceNormal; // (Nx, Nz)
-                
+
                 attribute float aSideId;
-                
+
                 varying vec3 vLocalPos;
                 varying vec3 vWorldPos;
                 varying float vSlope;
@@ -658,27 +656,42 @@ class PistonViewer {
                 varying vec3 vMyNormal;
             `).replace('#include <begin_vertex>', `
                 #include <begin_vertex>
+
+                // INSTANCE-LEVEL CULLING (Check distance from instance center, not vertex)
+                // Extract instance position from instanceMatrix (column 3)
+                #ifdef USE_INSTANCING
+                    vec3 instancePos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+                    vec3 worldInstancePos = (modelMatrix * vec4(instancePos, 1.0)).xyz;
+                    float instDist = distance(worldInstancePos, uCameraPos);
+
+                    // Cull entire instance if outside LOD range
+                    if (instDist < uLodRadii.x || instDist > uLodRadii.y) {
+                        gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+                        return;
+                    }
+                #endif
+
                 float myH = instanceNZ_2.z - uFloorOffset;
                 float animH = myH * uHeightFactor;
-                
+
                 bool isCap = (normal.y > 0.9);
                 vIsTop = isCap ? 1.0 : 0.0;
-                
+
                 if (isCap) {
                     // CAP
-                    transformed.y = 0.0 + animH; 
+                    transformed.y = 0.0 + animH;
                     vSlope = 0.0; // Caps follow texture color usually, or flat slope
                     vSkirtY = 0.0;
                     vSideId = -1.0;
-                    
+
                     // Decode Normal from [0, 1] -> [-1, 1]
-                    float nx = instanceNormal.x * 2.0 - 1.0; 
+                    float nx = instanceNormal.x * 2.0 - 1.0;
                     float nz = instanceNormal.y * 2.0 - 1.0;
                     float ny_sq = 1.0 - nx*nx - nz*nz;
                     float ny = sqrt(max(0.0, ny_sq));
-                    
+
                     vMyNormal = normalize(vec3(nx, ny, nz));
-                    
+
                 } else {
                     // SKIRT
                     vSkirtY = -position.y; // 0 at top, 1 at bottom
@@ -688,20 +701,20 @@ class PistonViewer {
                          transformed.y = animH;
                     } else {
                          // Select Delta based on Side ID (0=SE, 1=S, 2=SW)
-                         float dVal = (aSideId < 0.5) ? instanceDeltas.x : 
+                         float dVal = (aSideId < 0.5) ? instanceDeltas.x :
                                       (aSideId < 1.5) ? instanceDeltas.y : instanceDeltas.z;
-                         
+
                          // Fix: Convert Decimeters (Int16) to Meters (Float)
                          dVal *= 0.1;
- 
+
                          transformed.y = animH - (dVal * uHeightFactor);
                     }
-                    
+
                     // Pick Slope for Gradient
-                    float sVal = (aSideId < 0.5) ? instanceSlopes.x : 
+                    float sVal = (aSideId < 0.5) ? instanceSlopes.x :
                                  (aSideId < 1.5) ? instanceSlopes.y : instanceSlopes.z;
                     vSlope = sVal;
-                    
+
                     vMyNormal = normal; // Skirt flat normal
                 }
 
@@ -712,11 +725,6 @@ class PistonViewer {
                     vLocalPos = transformed;
                     vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
                 #endif
-
-                float dist = distance(vWorldPos, uCameraPos);
-                if (dist < uLodRadii.x || dist > uLodRadii.y) {
-                    transformed = vec3(0.0);
-                }
             `);
 
             shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
@@ -901,109 +909,80 @@ class PistonViewer {
     // --- CORE LOOP ---
 
     updateLOD() {
-        if (!this.manifest || this.lodPaused) return;
+        if (!this.manifestGrid || this.lodPaused) return;
 
         const camPos = this.camera.position;
-        const distLimit = this.renderSettings.renderDistance;
+        const distLimit = this.renderSettings.renderDistance; // e.g. 4000m
+        const secW = SECTOR_WIDTH_METERS;
 
-        // 1. Sort Manifest by Distance to Camera (Surface Distance)
-        const sortedManifest = this.manifest.tiles.map(t => {
-            const minX = t.x - this.worldOrigin.x;
-            const maxX = minX + SECTOR_WIDTH_METERS;
-            // Manifest Y is North (World -Z). 
-            // In ThreeJS: Z goes -inf to +inf. 
-            // t.y is typically huge positive (UTM).
-            // Our World Origin shift: lz = -(t.y - origin.y).
-            // So MinZ = -(t.y - origin.y + SECTOR) -> Further negative? 
-            // Wait, t.y increases North. So more North = More Negative Z.
-            // min_z (Three) = -((t.y + SECTOR) - origin.y)
-            // max_z (Three) = -(t.y - origin.y)
+        // 1. Where is the camera in UTM space?
+        const utmX = camPos.x + this.worldOrigin.x;
+        const utmY = -camPos.z + this.worldOrigin.y;
 
-            const lzVal = -(t.y - this.worldOrigin.y);
+        const centerQ = Math.floor(utmX / secW);
+        const centerR = Math.floor(utmY / secW);
 
-            const box = new THREE.Box3(
-                new THREE.Vector3(minX, TILE_BOUNDS_MIN_Y, lzVal - SECTOR_WIDTH_METERS),
-                new THREE.Vector3(maxX, TILE_BOUNDS_MAX_Y, lzVal)
-            );
+        // 2. How many tiles out do we need to check?
+        const radius = Math.ceil((distLimit + 1000) / secW);
 
-            // Center coordinates for the container
-            t.lx = minX + SECTOR_WIDTH_METERS * 0.5;
-            t.lz = -(t.y - this.worldOrigin.y);
-            t.d = box.distanceToPoint(camPos);
+        // 3. Collect ONLY nearby candidates
+        const candidates = [];
 
-            return t;
-        }).sort((a, b) => a.d - b.d);
+        for (let q = centerQ - radius; q <= centerQ + radius; q++) {
+            for (let r = centerR - radius; r <= centerR + radius; r++) {
+                const t = this.manifestGrid.get(`${q}_${r}`);
+                if (!t) continue;
 
-        // Limit updates per frame
-        const maxUpdates = 1;
-        let updates = 0;
+                // Fast Distance Check (Squared)
+                const dx = t.lx - camPos.x;
+                const dz = t.lz - camPos.z;
+                const dSq = dx * dx + dz * dz;
 
-        // Camera Direction for Frustum Weighting
+                // Hard Limit Check (Render Distance + Buffer)
+                if (dSq > (distLimit + 2000) ** 2) continue;
+
+                t.d = Math.sqrt(dSq);
+                candidates.push(t);
+            }
+        }
+
+        // 4. Sort ONLY the nearby candidates
+        candidates.sort((a, b) => a.d - b.d);
+
         const camDir = new THREE.Vector3();
         this.camera.getWorldDirection(camDir);
-        camDir.y = 0; // Horizontal bias
-        camDir.normalize();
+        camDir.y = 0; camDir.normalize();
 
-        // 2. Identify Tasks with Directional Bias
-        for (const t of sortedManifest) {
+        const processedKeys = new Set();
+
+        for (const t of candidates) {
             const key = `${t.q}_${t.r}`;
+            processedKeys.add(key);
+
             const tile = this.tiles.get(key);
 
-            // Calculate Box Center for Direction Check
-            const boxCenter = new THREE.Vector3(
-                t.x - this.worldOrigin.x + SECTOR_WIDTH_METERS * 0.5,
-                0,
-                -(t.y - this.worldOrigin.y) - SECTOR_WIDTH_METERS * 0.5
-            );
-
-            // Direction to Tile
-            const toTile = new THREE.Vector3().subVectors(boxCenter, camPos);
-            toTile.y = 0;
-            toTile.normalize();
-
-            // Dot Product: 1.0 = Front, -1.0 = Back
+            // Direction Check
+            const toTile = new THREE.Vector3(t.lx - camPos.x, 0, t.lz - camPos.z).normalize();
             const dot = camDir.dot(toTile);
 
-            // 1. GEO Frustum Culling (Aggressive)
-            // +/- 70 degrees (cos(70) ~= 0.34)
             const isBehindGeo = (dot < 0.34);
-
-            // 2. TEXTURE Frustum Culling (Generous + Buffer)
-            // Widened cone: +/- 100 degrees (cos(100) ~= -0.2)
-            // Plus: Proximity Buffer (configurable)
-            // AND Hard Limit: 5000m
             const isEffectivelyFrontTex = ((dot > -0.2) || (t.d < this.texThreshold)) && (t.d < 5000);
 
-            if (t.d > distLimit) { // Use actual distance for culling
-                if (tile) this.unloadTile(key); // Out of range
-                continue;
-            }
-
-            // Determine Nominal LOD based on Distance
             let nominalLOD = 0;
             if (t.d < this.geoThresholds[0]) nominalLOD = 3;
             else if (t.d < this.geoThresholds[1]) nominalLOD = 2;
             else if (t.d < this.geoThresholds[2]) nominalLOD = 1;
 
-            // Frustum Override: Force Large (0) if behind (Geo only)
             let targetLOD = nominalLOD;
-            if (isBehindGeo) {
-                targetLOD = 0;
-            }
+            if (isBehindGeo) targetLOD = 0;
 
-            // Handle New Loads (Hard Limit 5000m for BINS too)
             if (!tile && !this.loadingTiles.has(key)) {
                 if (t.d < 5000) {
                     this.loadingTiles.add(key);
                     this.loadQueue.push({ t, targetLOD, loadFullTexNow: isEffectivelyFrontTex });
                 }
             } else if (tile) {
-                // Geo Visibility Update
-                if (!tile.isTransitioning) {
-                    this.swapGeometry(tile, targetLOD);
-                }
-
-                // Texture Upgrade Logic
+                if (!tile.isTransitioning) this.swapGeometry(tile, targetLOD);
                 if (isEffectivelyFrontTex && !tile.isFullTex && !tile.loadingTex && !tile.queuedForUpgrade) {
                     tile.queuedForUpgrade = true;
                     this.upgradeQueue.push(tile);
@@ -1011,11 +990,15 @@ class PistonViewer {
             }
         }
 
-        this.processQueues();
+        // 5. Cleanup: Unload tiles that are NO LONGER in our candidate list
+        for (const key of this.tiles.keys()) {
+            if (!processedKeys.has(key)) {
+                this.unloadTile(key);
+            }
+        }
 
-        // Queue processing handled by async loaders mostly now, 
-        // but we still have an initial load checker.
-        this.checkInitialLoad(sortedManifest);
+        this.processQueues();
+        this.checkInitialLoad(candidates);
     }
 
     checkInitialLoad(sorted) {
