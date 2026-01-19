@@ -153,7 +153,10 @@ function parseBinaryV3(buffer) {
 }
 
 function generateMeshBuffers(allLayers, lodIndex, sx, sy) {
-    const layerIdx = 3 - Math.min(3, Math.max(0, lodIndex));
+    // IMPORTANT: LOD ordering must match baker layer order in hex_backend/waffle_iron.py.
+    // Baker writes layers as [24, 6, 3, 1] (large -> unit). We keep that order here.
+    // If you ever change baker order, update this mapping and main.js LOD ranges together.
+    const layerIdx = Math.min(3, Math.max(0, lodIndex));
     const hexes = allLayers[layerIdx];
     if (!hexes || hexes.length === 0) return null;
 

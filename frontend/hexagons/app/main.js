@@ -2,6 +2,26 @@ import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { HexSearch } from './search.js';
 
+// --- PERFORMANCE MONITORING (Watchdog) ---
+const PERF_CONFIG = {
+    ENABLED: true,
+    THRESHOLD_MS: 4.0, // Report anything over 4ms (1/4 of a frame)
+    VERBOSE: false     // Log every execution if true
+};
+
+function track(name, fn) {
+    if (!PERF_CONFIG.ENABLED) return fn();
+    const start = performance.now();
+    const result = fn();
+    const duration = performance.now() - start;
+    if (duration > PERF_CONFIG.THRESHOLD_MS || PERF_CONFIG.VERBOSE) {
+        const color = duration > 16.6 ? '#ff4757' : (duration > 8.0 ? '#ffa502' : '#74b9ff');
+        // Use console.log with styling to avoid the "stack trace" expansion of console.warn
+        console.log(`%c●%c [PERF] ${name.padEnd(25)} %c${duration.toFixed(2).padStart(7)}ms`, `color: ${color}; font-size: 14px;`, 'color: #eee;', `color: ${color}; font-family: monospace;`);
+    }
+    return result;
+}
+
 // --- HEX COORDINATE SYSTEM (Rectangular Sectors) ---
 const UNIT_HEX_PX = 32.0;
 const METERS_PER_PIXEL = 0.2;
@@ -134,7 +154,7 @@ class PistonViewer {
 
         this.loaderHidden = false;
         this.appStartTime = performance.now();
-        this.materialsToUpdate = [];
+        this.materialsToUpdate = new Set(); // Changed to Set
 
         this.gradientMode = 1.0;
         this.heightFactor = 0.0;
@@ -409,17 +429,6 @@ class PistonViewer {
         // Vert 4: (-0.5, 0, -0.866) -> NorthWest
         // Vert 5: (0.5, 0, -0.866) -> NorthEast
 
-        // Seg 0 (Verts 0-1): East Face (E -> SE). This is SE Face? No, average is ESE.
-        // Wait, Map: N=0, NE=1, SE=2, S=3, SW=4, NW=5.
-        // N is -Z. S is +Z. E is +X.
-        // CircleGeo 0 is +X.
-        // So Vert 0 is "East".
-        // Vert 5 is "NorthEast".
-        // Vert 4 is "NorthWest".
-        // Vert 3 is "West".
-        // Vert 2 is "SouthWest".
-        // Vert 1 is "SouthEast".
-
         // Segments (Counter-Clockwise in Theta, but indices might be different):
         // Face 0: 0 -> 1 (East -> SE). This is SE Face? No, average is ESE.
         // Let's look at the edges required for SE, S, SW neighbors.
@@ -564,18 +573,24 @@ class PistonViewer {
         return { q, r };
     }
 
-
+    createTileMaterial(lodIdx, hasTexture, texture) {
+        let material;
+        if (hasTexture) {
+            material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+        } else {
+            material = new THREE.MeshBasicMaterial({ color: 0xff00ff, side: THREE.DoubleSide });
+        }
+        if (!material.userData) material.userData = {};
+        material.userData.isClone = true; // Mark as a clone for cleanup
+        material.userData.lodIdx = lodIdx; // Store LOD index for shader logic if needed
+        this.setupMaterialShader(material);
+        return material;
+    }
 
     createMeshFromWorkerData(lodData, material, includeSkirts = true) {
         if (!lodData || lodData.matrix.length === 0) return null;
 
         const num = lodData.matrix.length / 16;
-
-        // Clone material...
-        const instMat = material.clone();
-        if (!instMat.userData) instMat.userData = {};
-        instMat.userData.isClone = true;
-        this.setupMaterialShader(instMat);
 
         // Geometries
         const capG = this.capGeometry.clone();
@@ -585,8 +600,8 @@ class PistonViewer {
             capG.scale(scale, 1, scale);
             if (skirtG) skirtG.scale(scale, 1, scale);
 
-            const capMesh = new THREE.InstancedMesh(capG, instMat, num);
-            const skirtMesh = skirtG ? new THREE.InstancedMesh(skirtG, instMat, num) : null;
+            const capMesh = new THREE.InstancedMesh(capG, material, num);
+            const skirtMesh = skirtG ? new THREE.InstancedMesh(skirtG, material, num) : null;
 
             // Assign Attributes from Worker
             capMesh.instanceMatrix = new THREE.InstancedBufferAttribute(lodData.matrix, 16);
@@ -614,11 +629,16 @@ class PistonViewer {
     }
 
     setupMaterialShader(material) {
-        material.onBeforeCompile = (shader) => {
-            material.userData.shader = shader; // Correctly targets 'material' (which is 'instMat' when called on clone)
+        // Force Three.js to treat this as a distinct program variant so we don't accidentally
+        // reuse a cached MeshBasicMaterial program that didn't get our onBeforeCompile edits.
+        // If you change shader code, bump this string.
+        material.customProgramCacheKey = () => 'piston_hex_patch_v2';
+
+        material.onBeforeCompile = function (shader) {
+            this.userData.shader = shader;
             shader.uniforms.uHeightFactor = { value: 0.0 };
             shader.uniforms.uGradientMode = { value: 1.0 };
-            shader.uniforms.uFloorOffset = { value: this.floorState.value };
+            shader.uniforms.uFloorOffset = { value: 0.0 }; // Initial fallback
             shader.uniforms.uTileSize = { value: SECTOR_WIDTH_METERS };
             shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
             shader.uniforms.uLodRadii = { value: new THREE.Vector2(0.0, 100000.0) }; // Min, Max
@@ -633,7 +653,11 @@ class PistonViewer {
             shader.vertexShader = shader.vertexShader.replace('#include <common>', `
                 #include <common>
                 uniform float uHeightFactor;
+                uniform float uGradientMode; // Added for vertex shader access
                 uniform float uFloorOffset;
+                uniform float uTileSize;
+                uniform float uUvScale;
+                uniform float uUvOffset;
                 uniform vec3 uCameraPos;
                 uniform vec2 uLodRadii;
 
@@ -725,6 +749,17 @@ class PistonViewer {
                     vLocalPos = transformed;
                     vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
                 #endif
+            `).replace('#include <project_vertex>', `
+                #ifdef USE_MAP
+                    // Brute Force Planar Mapping at END of vertex shader to ensure vMapUv is set
+                    vec3 tempPosUv = vec3(position);
+                    #ifdef USE_INSTANCING
+                        tempPosUv = (instanceMatrix * vec4(tempPosUv, 1.0)).xyz;
+                    #endif
+                    vec2 rawUv = (tempPosUv.xz / uTileSize) + 0.5;
+                    vMapUv = rawUv * uUvScale + uUvOffset;
+                #endif
+                #include <project_vertex>
             `);
 
             shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
@@ -757,49 +792,37 @@ class PistonViewer {
                     return vec3(0.6, 0.2, 0.8); // Violet
                 }
             `).replace('#include <map_fragment>', `
-                float u = (vLocalPos.x / uTileSize) + 0.5;
-                float v = (-vLocalPos.z / uTileSize) + 0.5;
-                
-                // Apply Padding Scale/Offset first
-                u = u * uUvScale + uUvOffset;
-                v = v * uUvScale + uUvOffset;
-                
-                // NOW check bounds. This allows us to use the padding area safeely.
-                bool outOfBounds = (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0);
-                
-                // Clamp to prevent texture wrapping artifacts at the very edge
-                u = clamp(u, 0.0, 1.0);
-                v = clamp(v, 0.0, 1.0);
-                vec4 texColor = texture2D(map, vec2(u, v));
-                
-                // Fallback for huge hexes exceeding padding (Dark Grey)
-                if (outOfBounds) texColor = vec4(0.04, 0.04, 0.04, 1.0);
+                #ifdef USE_MAP
+                    // Recalculate planar UVs in Fragment to be 100% sure we bypass standard UVs
+                    float u = (vLocalPos.x / uTileSize) + 0.5;
+                    float v = (-vLocalPos.z / uTileSize) + 0.5; // Flip Z for North/South alignment 
+                    vec2 planarUv = vec2(u, v) * uUvScale + uUvOffset;
+                    
+                    vec4 texColor = texture2D(map, planarUv);
+                    
+                    // LIGHTING
+                    float ao = 1.0 - (vSkirtY * 0.4); 
+                    float jitter = 1.0;
+                    if (vIsTop < 0.5) jitter = 0.92 + (vSideId * 0.04); 
+                    float lighting = ao * jitter;
 
-                // --- LIGHTING (Fake AO + Side Jitter) ---
-                float ao = 1.0 - (vSkirtY * 0.4); 
-                float jitter = 1.0;
-                if (vIsTop < 0.5) {
-                    // Apply subtle difference per face (SE, S, SW)
-                    jitter = 0.92 + (vSideId * 0.04); 
-                }
-                float lighting = ao * jitter;
-
-                if (vIsTop < 0.5) {
-                    // SIDE / SKIRT
-                    vec3 baseColor;
-                    if (uGradientMode > 0.5 && vSlope >= 30.0) {
-                        baseColor = gradientColor(vSlope);
-                    } else {
-                        // Low Slope / Distant LOD: Use texture but darken it significantly
-                        baseColor = texColor.rgb * 0.6; 
+                    // COLOR
+                    vec3 baseColor = texColor.rgb;
+                    if (vIsTop < 0.5) { // SKIRT
+                         if (uGradientMode > 0.5 && vSlope >= 30.0) {
+                             baseColor = gradientColor(vSlope);
+                         } else {
+                             baseColor *= 0.6; // Darken skirt
+                         }
                     }
+                    
                     diffuseColor = vec4(baseColor * lighting, 1.0);
-                } else {
-                   // TOP (Texture)
-                   diffuseColor = vec4(texColor.rgb * lighting, 1.0);
-                }
+                #endif
             `);
         };
+
+        // Ensure recompilation picks up onBeforeCompile + customProgramCacheKey.
+        material.needsUpdate = true;
     }
 
     updateGlobalStats(stats) {
@@ -821,11 +844,15 @@ class PistonViewer {
         for (const t of this.tiles.values()) {
             if (t.mesh && t.mesh.isGroup) {
                 // Caps are always first child, skirts second
-                const capMesh = t.mesh.children[0];
-                const skirtMesh = t.mesh.children[1]; // Might be undefined now
-
-                if (capMesh && capMesh.visible) capCount += capMesh.count;
-                if (skirtMesh && skirtMesh.visible) skirtCount += (t.mesh.userData.activeSkirts || 0);
+                // Iterate through all children, as each LOD is a group of cap/skirt
+                t.mesh.children.forEach(lodGroup => {
+                    if (lodGroup.isGroup) {
+                        const capMesh = lodGroup.children[0];
+                        const skirtMesh = lodGroup.children[1];
+                        if (capMesh && capMesh.visible) capCount += capMesh.count;
+                        if (skirtMesh && skirtMesh.visible) skirtCount += (lodGroup.userData.activeSkirts || 0);
+                    }
+                });
             }
         }
 
@@ -1082,8 +1109,14 @@ class PistonViewer {
         // Or 2 if we are feeling brave. Start with 1.
         if (this.instantiateQueue.length === 0) return;
 
-        const job = this.instantiateQueue.shift();
-        this.instantiateTile(job.task, job.workerData);
+        // TIME SLICING: Do as many as fit in 2ms
+        const start = performance.now();
+        while (this.instantiateQueue.length > 0) {
+            const job = this.instantiateQueue.shift();
+            track('instantiateTile', () => this.instantiateTile(job.task, job.workerData));
+
+            if (performance.now() - start > 2.0) break;
+        }
     }
 
     // Moved Mesh Creation Logic Here
@@ -1095,66 +1128,95 @@ class PistonViewer {
         if (this.tiles.has(key)) return;
 
         try {
-            // ... (Mesh Creation Code mostly identical to previous loadNewTile) ...
-            // 1. Texture
-            let material;
-            if (workerData.texture) {
-                const tex = new THREE.CanvasTexture(workerData.texture);
-                tex.colorSpace = THREE.SRGBColorSpace;
-                tex.flipY = false;
-                material = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-            } else {
-                material = new THREE.MeshBasicMaterial({ color: 0xff00ff, side: THREE.DoubleSide });
+            // 1. Texture Strategy (One texture per tile)
+            const tex = (loadFullTexNow && t.fullTex) ? t.fullTex : workerData.texture;
+
+            // 2. Create ONE material for this entire tile (shared across LODs)
+            // This cuts shader compilation overhead by 75%
+            let initialTex = null;
+            if (tex) {
+                initialTex = new THREE.CanvasTexture(tex);
+                initialTex.colorSpace = THREE.SRGBColorSpace; // Fix "Ghostly Hue"
+                initialTex.flipY = false;
             }
+            const sharedMaterial = this.createTileMaterial(0, !!tex, initialTex);
+            this.materialsToUpdate.add(sharedMaterial);
 
             const angle = this.controls.getPolarAngle() * 180 / Math.PI;
             const isVis = (angle >= 5.5);
 
-            // Flat Mesh
-            const flatMesh = new THREE.Mesh(this.flatGeometry, material);
-            flatMesh.position.set(t.lx, 0, t.lz);
-            flatMesh.visible = !isVis;
-            this.scene.add(flatMesh);
+            const meshGroup = new THREE.Group();
 
-            const containerGroup = new THREE.Group();
-            containerGroup.position.set(t.lx, 0, t.lz);
+            for (let lodIdx = 0; lodIdx < 4; lodIdx++) {
+                const lodData = workerData.lods[lodIdx];
+                if (!lodData) continue;
 
-            const activeMaterials = [];
-            this.materialsToUpdate.push(material);
+                // Use the SHARED material, but stamp userData so logic still knows which layer is which
+                // Note: We clone lightly only if we need unique per-LOD uniforms, but currently we don't.
+                // The vertex shader handles the layer logic mostly via attributes.
+                // Only "uLodRadii" is per material... ah wait.
+                // If uLodRadii is per material, we DO need clones or unique materials if we want CPU culling per layer?
+                // Actually, our loop updates uLodRadii per material based on userData.lodIdx.
+                // So we DO need separate material instances if we want independent uniforms.
+                // UNLESS we use "instanced uniforms" or simply clone() which is cheap (shares program).
 
-            this.setupMaterialShader(material); // Apply UV padding correction
+                const layerMaterial = sharedMaterial.clone();
+                // Ensure unique userData for each clone so uniform updates don't conflict
+                layerMaterial.userData = { ...sharedMaterial.userData };
+                layerMaterial.userData.lodIdx = lodIdx;
+                layerMaterial.userData.shader = null;
+                // NOTE: Material.clone() does not reliably carry over onBeforeCompile/customProgramCacheKey
+                // across Three.js versions/builds. We must re-attach our shader patch on every clone,
+                // otherwise height + UV mapping + GPU LOD culling silently fall back to default shaders.
+                this.setupMaterialShader(layerMaterial);
+                this.materialsToUpdate.add(layerMaterial);
 
-            // 2. Meshes
-            const scaleTable = [24.0, 6.0, 3.0, 1.0];
-            [0, 1, 2, 3].forEach(level => {
-                const lodData = workerData.lods[level];
-                if (lodData) {
-                    const layerIdx = 3 - level;
-                    const meshScale = scaleTable[layerIdx];
+                // Setup Geometry
+                // IMPORTANT: LOD ordering must match baker layer order in hex_backend/waffle_iron.py.
+                // lodIdx 0..3 map to scales [24, 6, 3, 1] (large -> unit).
+                // If you change baker order, update tile_worker.js and all LOD ranges here.
+                const includeSkirts = (lodIdx !== 0);
+                const meshScale = [24.0, 6.0, 3.0, 1.0][lodIdx];
 
-                    // scaleTable[0] is Large (24.0). DISABLE skirts for Large.
-                    // scaleTable[3] is Unit (1.0). ENABLE skirts for Unit.
-                    const includeSkirts = (layerIdx !== 0);
-
-                    const makeMesh = this.createMeshFromWorkerData(lodData, material, includeSkirts);
-                    const meshGroup = makeMesh(meshScale);
-
-                    if (meshGroup && meshGroup.children.length > 0) {
-                        const m = meshGroup.children[0].material;
-                        m.userData.lodIdx = layerIdx;
-                        this.materialsToUpdate.push(m);
-                        activeMaterials.push(m);
-                        containerGroup.add(meshGroup);
+                const makeMesh = this.createMeshFromWorkerData(lodData, layerMaterial, includeSkirts);
+                if (makeMesh) {
+                    const finalMesh = makeMesh(meshScale);
+                    if (finalMesh) {
+                        // store activeSkirts for debug
+                        finalMesh.userData.activeSkirts = lodData.activeSkirts;
+                        meshGroup.add(finalMesh);
                     }
                 }
-            });
+            }
 
-            containerGroup.visible = true; // Force visible for compilation
+            meshGroup.position.set(t.lx, 0, t.lz);
+
+            // Container for both Flat and 3D
+            const containerGroup = new THREE.Group();
+
+            // Flat Mesh - Needs its own material clone to avoid sharing LOD culling uniforms
+            const flatMaterial = sharedMaterial.clone();
+            flatMaterial.userData.lodIdx = -1; // -1 means "Always Render" (within frustum)
+            this.setupMaterialShader(flatMaterial);
+            this.materialsToUpdate.add(flatMaterial);
+
+            const flatMesh = new THREE.Mesh(this.flatGeometry, flatMaterial);
+            flatMesh.position.set(t.lx, 0, t.lz);
+            // flatMesh.rotation.x = -Math.PI / 2; // REMOVED: Geometry is likely already XZ or oriented correctly
+            flatMesh.visible = !isVis;
+            t.flatMesh = flatMesh;
+            containerGroup.add(flatMesh); // Add flat mesh to scene container
+
+            meshGroup.visible = isVis;
+            t.mesh = meshGroup;
+            containerGroup.add(meshGroup);
+
+            this.scene.add(containerGroup);
             // Force GPU Upload/Compile of geometry and shaders
             // This prevents the "Stutter on 3D Switch" by paying the cost now, 1 tile per frame.
             this.renderer.compile(containerGroup, this.camera);
 
-            containerGroup.visible = isVis;
+            containerGroup.visible = true;
             this.scene.add(containerGroup);
             this.needsRender = true;
 
@@ -1164,10 +1226,17 @@ class PistonViewer {
                 new THREE.Vector3(t.lx + half, TILE_BOUNDS_MAX_Y, t.lz + half)
             );
 
+            // GATHER MATERIALS for cleanup/tracking
+            const gatheredMaterials = [];
+            containerGroup.traverse((child) => {
+                if (child.isMesh && child.material) gatheredMaterials.push(child.material);
+            });
+
             const tileObj = {
                 q: t.q, r: t.r, lx: t.lx, lz: t.lz,
-                mesh: containerGroup,
-                flatMesh, material, bounds,
+                mesh: meshGroup,           // 3D LOD content
+                container: containerGroup, // Scene root for this tile
+                flatMesh, material: sharedMaterial, bounds,
                 hexDataLayers: workerData.layers,
                 stats: workerData.stats,
                 center: workerData.center,
@@ -1175,8 +1244,9 @@ class PistonViewer {
                 isFullTex: false,
                 loadingTex: false,
                 queuedForUpgrade: false,
+                queuedForUpgrade: false,
                 isTransitioning: false,
-                clonedMaterials: activeMaterials
+                clonedMaterials: gatheredMaterials
             };
             this.tiles.set(key, tileObj);
             this.updateGlobalStats(workerData.stats);
@@ -1237,15 +1307,14 @@ class PistonViewer {
         const tile = this.tiles.get(key);
         if (!tile) return;
 
-        this.scene.remove(tile.mesh);
-        this.scene.remove(tile.flatMesh);
+        // Remove from scene using the container (parent of both flat and 3D)
+        if (tile.container) this.scene.remove(tile.container);
 
         if (tile.mesh.isGroup) {
             // Remove from update loop
             if (tile.clonedMaterials) {
                 tile.clonedMaterials.forEach(m => {
-                    const idx = this.materialsToUpdate.indexOf(m);
-                    if (idx > -1) this.materialsToUpdate.splice(idx, 1);
+                    this.materialsToUpdate.delete(m);
                     m.dispose();
                 });
             }
@@ -1492,8 +1561,8 @@ class PistonViewer {
         requestAnimationFrame(() => this.animate());
 
         // --- BACKGROUND MAINTENANCE ---
-        this.processInstantiationQueue();
-        this.processQueues();
+        track('processInstantiationQueue', () => this.processInstantiationQueue());
+        track('processQueues', () => this.processQueues());
 
         const now = performance.now();
         const timeSinceInteraction = now - this.lastInteractionTime;
@@ -1505,7 +1574,7 @@ class PistonViewer {
                 this.log("Antisintering: Sharpening world...", "info");
                 this.isRefining = true;
             }
-            const stillRefining = this.refineLODs();
+            const stillRefining = track('refineLODs', () => this.refineLODs());
             if (!stillRefining) this.isRefinementDone = true;
         } else {
             // If user is interacting or just stopped, ensure we are reset
@@ -1518,7 +1587,7 @@ class PistonViewer {
         // FORCE update if loader is visible (to ensure initial check runs)
         const camDist = this.camera.position.distanceTo(this.lastLODCamPos);
         if (camDist > 50 || this.isRefining || this.needsLODUpdate || !this.loaderHidden) {
-            this.updateLOD();
+            track('updateLOD', () => this.updateLOD());
             if (camDist > 50) this.lastLODCamPos.copy(this.camera.position);
             this.needsLODUpdate = false;
         }
@@ -1587,7 +1656,10 @@ class PistonViewer {
                     let minD = 0.0, maxD = 100000.0;
 
                     // Use granular ranges
-                    if (idx === 3) { // Unit
+                    if (idx === -1) { // Flat Mesh - Always allowed distance-wise
+                        minD = 0.0;
+                        maxD = 100000.0;
+                    } else if (idx === 3) { // Unit
                         minD = 0.0;
                         maxD = this.lodRanges.unitEnd;
                     } else if (idx === 2) { // Small
@@ -1609,7 +1681,7 @@ class PistonViewer {
             }
         }
 
-        this.renderer.render(this.scene, this.camera);
+        track('renderer.render', () => this.renderer.render(this.scene, this.camera));
         this.needsRender = false;
         this.floorState.lastFactor = h;
     }
