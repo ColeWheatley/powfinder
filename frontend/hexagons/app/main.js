@@ -85,11 +85,14 @@ class PistonViewer {
         this.isUserInteracting = false;
         this.controls.addEventListener('start', () => {
             this.isUserInteracting = true;
+            // Ensure tiles instantiated during movement are LOD0-only.
+            this.isMoving3D = true;
             this.resetLODs(); // Immediate downgrade on touch
             this.log("Interaction Start", "info");
         });
         this.controls.addEventListener('end', () => {
             this.isUserInteracting = false;
+            this.isMoving3D = false;
             this.lastInteractionTime = performance.now();
             this.log("Interaction End", "info");
         });
@@ -174,6 +177,13 @@ class PistonViewer {
         this.tileHeightEl = document.getElementById('tile-height');
         this.cameraHeightEl = document.getElementById('camera-height');
         this.statsUpdateState = { lastUpdate: 0, interval: 500 };
+
+        // 3D movement vs sintered state
+        // - 3D moving: only build/render LOD0 (large, skirtless) for responsiveness.
+        // - 3D sintered: allow building finer LODs once camera is settled.
+        this.isMoving3D = false;
+        this.wasMoving3D = false;
+        this.sinterQueue = [];
 
         // Frametime Graph
         this.frametimeCanvas = document.getElementById('frametime-graph');
@@ -1150,6 +1160,7 @@ class PistonViewer {
             for (let lodIdx = 0; lodIdx < 4; lodIdx++) {
                 const lodData = workerData.lods[lodIdx];
                 if (!lodData) continue;
+                if (this.isMoving3D && lodIdx !== 0) continue;
 
                 // Use the SHARED material, but stamp userData so logic still knows which layer is which
                 // Note: We clone lightly only if we need unique per-LOD uniforms, but currently we don't.
@@ -1238,6 +1249,9 @@ class PistonViewer {
                 container: containerGroup, // Scene root for this tile
                 flatMesh, material: sharedMaterial, bounds,
                 hexDataLayers: workerData.layers,
+                lods: workerData.lods,
+                lodBuilt: [true, !this.isMoving3D, !this.isMoving3D, !this.isMoving3D],
+                needsSinteredBuild: this.isMoving3D,
                 stats: workerData.stats,
                 center: workerData.center,
                 currentGeoLOD: -1,
@@ -1262,6 +1276,39 @@ class PistonViewer {
             console.error("Instantiation Error", key, e);
             this.loadingTiles.delete(key);
         }
+    }
+
+    buildSinteredLods(tile) {
+        if (!tile?.mesh || !tile.lods) return;
+        if (!tile.needsSinteredBuild) return;
+
+        for (let lodIdx = 1; lodIdx < 4; lodIdx++) {
+            if (tile.lodBuilt?.[lodIdx]) continue;
+            const lodData = tile.lods[lodIdx];
+            if (!lodData) continue;
+
+            const layerMaterial = tile.material.clone();
+            layerMaterial.userData = { ...tile.material.userData };
+            layerMaterial.userData.lodIdx = lodIdx;
+            layerMaterial.userData.shader = null;
+            this.setupMaterialShader(layerMaterial);
+            this.materialsToUpdate.add(layerMaterial);
+
+            const includeSkirts = (lodIdx !== 0);
+            const meshScale = [24.0, 6.0, 3.0, 1.0][lodIdx];
+            const makeMesh = this.createMeshFromWorkerData(lodData, layerMaterial, includeSkirts);
+            if (makeMesh) {
+                const finalMesh = makeMesh(meshScale);
+                if (finalMesh) {
+                    finalMesh.userData.activeSkirts = lodData.activeSkirts;
+                    tile.mesh.add(finalMesh);
+                }
+            }
+            if (tile.lodBuilt) tile.lodBuilt[lodIdx] = true;
+        }
+
+        tile.needsSinteredBuild = false;
+        this.needsRender = true;
     }
 
     async upgradeTexture(tile) {
@@ -1592,6 +1639,8 @@ class PistonViewer {
             this.needsLODUpdate = false;
         }
 
+        // Disable damping when not actively interacting to prevent momentum in sintered mode.
+        this.controls.enableDamping = this.isUserInteracting;
         const moved = this.controls.update();
 
         // --- RENDER CHECK ---
@@ -1607,6 +1656,22 @@ class PistonViewer {
         const linear = Math.min(1, Math.max(0, (angle - 5.5) / (25.0 - 5.5)));
         const h = linear;
         const flat = angle < 5.5;
+
+        // Ensure 3D moving stays LOD0-only by resetting to the MOVING preset.
+        this.isMoving3D = !flat && (moved || this.isUserInteracting);
+        if (this.isMoving3D) {
+            this.lastInteractionTime = now;
+            this.isRefining = false;
+            this.resetLODs();
+            this.needsLODUpdate = true;
+        } else if (this.wasMoving3D && !flat) {
+            // Just transitioned from moving -> sintered: immediately switch to target ranges so LOD0
+            // doesn't remain visible at close range once finer LODs come online.
+            const target = this.isMobile ? this.LOD_CONFIG.MOBILE.TARGET : this.LOD_CONFIG.DESKTOP.TARGET;
+            this.lodRanges = { ...target };
+            this.needsLODUpdate = true;
+            this.syncLODUI();
+        }
 
         this.updateFloorState(h);
         this.maintainCameraAltitudeDuringAnimation(h);
@@ -1637,6 +1702,21 @@ class PistonViewer {
                 }
             }
         }
+
+        // If settled in 3D, promote tiles to full LODs gradually.
+        if (!flat && !this.isMoving3D) {
+            const inView = this.getTilesInView();
+            for (const t of inView) {
+                if (t.needsSinteredBuild && !this.sinterQueue.includes(t)) {
+                    this.sinterQueue.push(t);
+                }
+            }
+            if (this.sinterQueue.length > 0) {
+                const tile = this.sinterQueue.shift();
+                this.buildSinteredLods(tile);
+            }
+        }
+        this.wasMoving3D = this.isMoving3D;
 
         for (const m of this.materialsToUpdate) {
             if (m.userData.shader) {
