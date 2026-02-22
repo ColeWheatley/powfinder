@@ -25,11 +25,9 @@ echo -e "$GREEN Password accepted. Syncing PowFinder to s3://$BUCKET_NAME/$PROJE
 # Sync the frontend folder
 # Braincells engaged: We only sync the ./frontend dir.
 # If a file exists on S3/powfinder/ but NOT in ./frontend/, it WILL BE DELETED.
-# EXCEPT: hexagons/ is preserved (managed separately)
 aws s3 sync ./frontend "s3://$BUCKET_NAME/$PROJECT_PATH/" \
     --delete \
     --exclude "*/.DS_Store" \
-    --exclude ".DS_Store" \
-    --exclude "hexagons/*"
+    --exclude ".DS_Store"
 
 echo -e "$GREEN Sync complete! $NC"
